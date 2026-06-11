@@ -16,6 +16,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "core/framework/sampling/sampling_params.h"
@@ -85,6 +86,24 @@ TEST(GraphWarmupTest, AllowsAllBucketsSkipped) {
       graph_decode_buckets(/*max_seqs_per_batch=*/2, /*dp_size=*/4);
 
   EXPECT_TRUE(buckets.empty());
+}
+
+TEST(GraphWarmupTest, FormatsWarmupProgress) {
+  const std::string progress = graph_warmup_progress(
+      /*completed=*/3, /*total=*/8, /*bucket=*/8, /*latency_ms=*/12.5);
+
+  EXPECT_EQ(progress,
+            "Graph warmup progress: [########------------] 3/8 37.5%, "
+            "bucket=8, latency=12.50 ms");
+}
+
+TEST(GraphWarmupTest, FormatsCompletedWarmupProgress) {
+  const std::string progress = graph_warmup_progress(
+      /*completed=*/8, /*total=*/8, /*bucket=*/64, /*latency_ms=*/100.0);
+
+  EXPECT_EQ(progress,
+            "Graph warmup progress: [####################] 8/8 100.0%, "
+            "bucket=64, latency=100.00 ms");
 }
 
 TEST(GraphWarmupTest, PresetDpRankControlsBlockAllocation) {

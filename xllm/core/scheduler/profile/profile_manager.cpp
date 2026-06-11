@@ -931,15 +931,28 @@ void ProfileManager::warmup_for_graph() {
 
   std::vector<int32_t> decode_batch_sizes =
       graph_decode_buckets(max_seqs_per_batch, options_.dp_size());
+  const int32_t decode_bucket_count =
+      static_cast<int32_t>(decode_batch_sizes.size());
+
+  LOG(INFO) << "Graph warmup started: bucket_count=" << decode_bucket_count
+            << ", decode_seq_len=" << decode_seq_len;
 
   double decode_total_latency = 0.0;
-  for (int32_t batch_size : decode_batch_sizes) {
+  for (int32_t bucket_index = 0; bucket_index < decode_bucket_count;
+       ++bucket_index) {
+    const int32_t batch_size =
+        decode_batch_sizes[static_cast<size_t>(bucket_index)];
     std::vector<int32_t> total_length_vec(batch_size, decode_seq_len);
-    decode_total_latency += run_graph_decode_request(total_length_vec);
+    const double decode_latency = run_graph_decode_request(total_length_vec);
+    decode_total_latency += decode_latency;
+    LOG(INFO) << graph_warmup_progress(/*completed=*/bucket_index + 1,
+                                       /*total=*/decode_bucket_count,
+                                       /*bucket=*/batch_size,
+                                       /*latency_ms=*/decode_latency);
   }
 
-  LOG(INFO) << "Decode warmup completed: bucket_count="
-            << decode_batch_sizes.size() << ", decode_max_batch_size="
+  LOG(INFO) << "Decode warmup completed: bucket_count=" << decode_bucket_count
+            << ", decode_max_batch_size="
             << (decode_batch_sizes.empty() ? 0 : decode_batch_sizes.back())
             << ", decode_seq_len=" << decode_seq_len
             << ", decode_total_latency=" << decode_total_latency << " ms";

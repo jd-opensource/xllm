@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace xllm {
@@ -26,5 +27,10 @@ bool skip_graph_bucket(int32_t bucket, int32_t dp_size);
 
 std::vector<int32_t> graph_decode_buckets(int32_t max_seqs_per_batch,
                                           int32_t dp_size);
+
+std::string graph_warmup_progress(int32_t completed,
+                                  int32_t total,
+                                  int32_t bucket,
+                                  double latency_ms);
 
 }  // namespace xllm
