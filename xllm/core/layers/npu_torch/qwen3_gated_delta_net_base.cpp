@@ -420,25 +420,24 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   auto [processed_q, processed_k, processed_v] = process_mixed_qkv(mixed_qkv);
   // Apply chunked or recurrent gated-delta attention and update caches.
   if (attn_metadata.is_prefill) {
-    xllm::kernel::ChunkGatedDeltaRuleParams chunk_gated_delta_params;
-    chunk_gated_delta_params.q = processed_q;
-    chunk_gated_delta_params.k = processed_k;
-    chunk_gated_delta_params.v = processed_v;
-    chunk_gated_delta_params.g = g;
-    chunk_gated_delta_params.beta = beta;
+    xllm::kernel::MegaChunkGdnParams mega_chunk_gdn_params;
+    mega_chunk_gdn_params.q = processed_q;
+    mega_chunk_gdn_params.k = processed_k;
+    mega_chunk_gdn_params.v = processed_v;
+    mega_chunk_gdn_params.g = g;
+    mega_chunk_gdn_params.beta = beta;
     // Get initial state from ssm_cache for sequences with previous state
     // Shape: [batch_size, num_heads, head_k_dim, head_v_dim]
     torch::Tensor initial_state_tensor =
         torch::index_select(ssm_cache, 0, linear_state_indices);
     // Todo: chunked-prefill/prefix-cache use initial_state
     initial_state_tensor.fill_(0.0);
-    chunk_gated_delta_params.initial_state = initial_state_tensor;
-    chunk_gated_delta_params.output_final_state = true;
-    chunk_gated_delta_params.cu_seqlens = attn_metadata.q_cu_seq_lens;
-    chunk_gated_delta_params.head_first = false;
-    chunk_gated_delta_params.use_qk_l2norm_in_kernel = true;
+    mega_chunk_gdn_params.initial_state = initial_state_tensor;
+    mega_chunk_gdn_params.output_final_state = true;
+    mega_chunk_gdn_params.cu_seqlens = attn_metadata.q_cu_seq_lens;
+    mega_chunk_gdn_params.use_qk_l2norm_in_kernel = true;
     std::tie(core_attn_out, last_recurrent_state) =
-        xllm::kernel::chunk_gated_delta_rule(chunk_gated_delta_params);
+        xllm::kernel::mega_chunk_gdn(mega_chunk_gdn_params);
     ssm_cache.index_put_(
         {linear_state_indices},
         last_recurrent_state.transpose(-1, -2).to(ssm_cache.dtype()));
