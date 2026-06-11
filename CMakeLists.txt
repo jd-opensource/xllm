@@ -29,7 +29,7 @@ if(USE_NPU)
   )
 
   if(DEFINED ENV{ASCEND_OPP_PATH} AND NOT "$ENV{ASCEND_OPP_PATH}" STREQUAL "")
-    set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_OPP_PATH}/vendors/custom_xllm_math/.xllm_ops_git_head")
+    set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_OPP_PATH}/vendors/xllm/.xllm_ops_git_head")
   else()
     message(FATAL_ERROR "ASCEND_OPP_PATH is not initialized for NPU build.")
   endif()
