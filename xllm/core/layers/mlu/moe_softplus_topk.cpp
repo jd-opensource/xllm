@@ -15,8 +15,6 @@ limitations under the License.
 
 #include "layers/mlu/moe_softplus_topk.h"
 
-#include <glog/logging.h>
-
 #include <tuple>
 
 #include "kernels/mlu/mlu_ops_api.h"

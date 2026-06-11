@@ -15,8 +15,6 @@ limitations under the License.
 
 #include "layers/mlu/deepseek_v4/hyper_connection.h"
 
-#include <glog/logging.h>
-
 #include <tuple>
 #include <vector>
 
@@ -45,27 +43,6 @@ torch::Tensor flat_hidden(const torch::Tensor& x, int64_t dim) {
 
 torch::Tensor flat_matrix(const torch::Tensor& x, int64_t rows, int64_t cols) {
   return x.reshape({-1, rows, cols}).contiguous();
-}
-
-torch::Tensor fused_norm(const torch::Tensor& x, double norm_eps) {
-  torch::Tensor output = torch::empty_like(x);
-  const std::string mode = "rmsnorm";
-  xllm::kernel::mlu::fused_layernorm(x,
-                                     output,
-                                     std::nullopt,
-                                     std::nullopt,
-                                     std::nullopt,
-                                     std::nullopt,
-                                     std::nullopt,
-                                     std::nullopt,
-                                     std::nullopt,
-                                     std::nullopt,
-                                     mode,
-                                     norm_eps,
-                                     false,
-                                     false,
-                                     false);
-  return output;
 }
 
 }  // namespace

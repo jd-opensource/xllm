@@ -96,6 +96,7 @@ HCPreRefOut hc_pre_ref(const torch::Tensor& x,
                        const torch::Tensor& hc_base,
                        const HCConfig& config) {
   std::vector<int64_t> leading;
+  leading.reserve(x.dim() - 2);
   for (int64_t dim_idx = 0; dim_idx < x.dim() - 2; ++dim_idx) {
     leading.emplace_back(x.size(dim_idx));
   }
@@ -157,6 +158,7 @@ torch::Tensor hc_head_ref(const torch::Tensor& x,
                           const torch::Tensor& hc_base,
                           const HCConfig& config) {
   std::vector<int64_t> leading;
+  leading.reserve(x.dim() - 2);
   for (int64_t dim_idx = 0; dim_idx < x.dim() - 2; ++dim_idx) {
     leading.emplace_back(x.size(dim_idx));
   }

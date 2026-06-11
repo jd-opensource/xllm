@@ -33,7 +33,7 @@ struct DeepseekV4HCPreOutput {
   torch::Tensor comb;
 };
 
-class DeepseekV4HCPreImpl : public torch::nn::Module {
+class DeepseekV4HCPreImpl final : public torch::nn::Module {
  public:
   DeepseekV4HCPreImpl() = default;
 
@@ -64,7 +64,7 @@ class DeepseekV4HCPreImpl : public torch::nn::Module {
   DEFINE_WEIGHT(hc_scale);
 };
 
-class DeepseekV4HCPostImpl : public torch::nn::Module {
+class DeepseekV4HCPostImpl final : public torch::nn::Module {
  public:
   DeepseekV4HCPostImpl() = default;
 
@@ -81,7 +81,7 @@ class DeepseekV4HCPostImpl : public torch::nn::Module {
   double norm_eps_ = 1e-6;
 };
 
-class DeepseekV4HCHeadImpl : public torch::nn::Module {
+class DeepseekV4HCHeadImpl final : public torch::nn::Module {
  public:
   DeepseekV4HCHeadImpl() = default;
 
