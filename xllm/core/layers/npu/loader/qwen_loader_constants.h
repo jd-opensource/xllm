@@ -310,6 +310,44 @@ static std::map<int, int> WEIGHT_SHARD_W8A8 = {{IN_Q_WEIGHT, 0},
                                                {IN_MLP_W1_DEQSCALE, 0},
                                                {IN_MLP_CPROJ_WEIGHT, 1}};
 
+static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8_DYNAMIC = {
+    {IN_NORM_WEIGHT, "input_layernorm.weight"},
+    {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
+    {IN_Q_OFFSET, "self_attn.q_proj.weight_offset"},
+    {IN_Q_SCALE, "self_attn.q_proj.weight_scale"},
+    {IN_K_WEIGHT, "self_attn.k_proj.weight"},
+    {IN_K_OFFSET, "self_attn.k_proj.weight_offset"},
+    {IN_K_SCALE, "self_attn.k_proj.weight_scale"},
+    {IN_V_WEIGHT, "self_attn.v_proj.weight"},
+    {IN_V_OFFSET, "self_attn.v_proj.weight_offset"},
+    {IN_V_SCALE, "self_attn.v_proj.weight_scale"},
+    {IN_ATTENTION_OUT_WEIGHT, "self_attn.o_proj.weight"},
+    {IN_ATTENTION_OUT_OFFSET, "self_attn.o_proj.weight_offset"},
+    {IN_ATTENTION_OUT_SCALE, "self_attn.o_proj.weight_scale"},
+    {IN_SELFOUT_NORM_WEIGHT, "post_attention_layernorm.weight"},
+    {IN_MLP_W2_WEIGHT, "mlp.gate_proj.weight"},
+    {IN_MLP_W2_OFFSET, "mlp.gate_proj.weight_offset"},
+    {IN_MLP_W2_SCALE, "mlp.gate_proj.weight_scale"},
+    {IN_MLP_W1_WEIGHT, "mlp.up_proj.weight"},
+    {IN_MLP_W1_OFFSET, "mlp.up_proj.weight_offset"},
+    {IN_MLP_W1_SCALE, "mlp.up_proj.weight_scale"},
+    {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"},
+    {IN_MLP_CPROJ_OFFSET, "mlp.down_proj.weight_offset"},
+    {IN_MLP_CPROJ_SCALE, "mlp.down_proj.weight_scale"},
+    {Q_NORM_WEIGHT, "self_attn.q_norm.weight"},
+    {K_NORM_WEIGHT, "self_attn.k_norm.weight"}};
+
+static std::map<int, int> WEIGHT_SHARD_W8A8_DYNAMIC = {
+    {IN_Q_WEIGHT, 0},    {IN_Q_OFFSET, 0},    {IN_Q_SCALE, 0},
+    {IN_K_WEIGHT, 0},    {IN_K_OFFSET, 0},    {IN_K_SCALE, 0},
+    {IN_V_WEIGHT, 0},    {IN_V_OFFSET, 0},    {IN_V_SCALE, 0},
+    {IN_ATTENTION_OUT_WEIGHT, 1},
+    {IN_ATTENTION_OUT_OFFSET, 1},
+    {IN_ATTENTION_OUT_SCALE, 1},
+    {IN_MLP_W2_WEIGHT, 0},    {IN_MLP_W2_OFFSET, 0},    {IN_MLP_W2_SCALE, 0},
+    {IN_MLP_W1_WEIGHT, 0},    {IN_MLP_W1_OFFSET, 0},    {IN_MLP_W1_SCALE, 0},
+    {IN_MLP_CPROJ_WEIGHT, 1}, {IN_MLP_CPROJ_OFFSET, 1}, {IN_MLP_CPROJ_SCALE, 1}};
+
 }  // namespace qwen3_decoder_constants
 
 namespace qwen3_moe_decoder_constants {

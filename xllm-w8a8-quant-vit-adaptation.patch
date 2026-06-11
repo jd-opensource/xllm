@@ -1,0 +1,243 @@
+diff --git a/xllm/core/layers/npu/loader/qwen3_decoder_loader.cpp b/xllm/core/layers/npu/loader/qwen3_decoder_loader.cpp
+index 440742d3..91ddc88b 100644
+--- a/xllm/core/layers/npu/loader/qwen3_decoder_loader.cpp
++++ b/xllm/core/layers/npu/loader/qwen3_decoder_loader.cpp
+@@ -57,6 +57,23 @@ void Qwen3DecoderLoader::load_state_dict(const StateDict& state_dict) {
+     return;
+   }
+ 
++  if (quantize_type_.compare("w8a8_dynamic") == 0) {
++    for (const auto& [index, name] : WEIGHT_MAPPING_W8A8_DYNAMIC) {
++      if (WEIGHT_SHARD_W8A8_DYNAMIC.find(index) !=
++          WEIGHT_SHARD_W8A8_DYNAMIC.end()) {
++        set_weight(state_dict, name, index,
++                   WEIGHT_SHARD_W8A8_DYNAMIC[index], to_host);
++      } else {
++        set_weight(state_dict, name, index, to_host);
++      }
++    }
++    t[IN_NORM_BIAS] =
++        torch::zeros(t[IN_NORM_WEIGHT].sizes(), t[IN_NORM_WEIGHT].options());
++    t[IN_SELFOUT_NORM_BIAS] = torch::zeros(t[IN_SELFOUT_NORM_WEIGHT].sizes(),
++                                           t[IN_SELFOUT_NORM_WEIGHT].options());
++    return;
++  }
++
+   for (const auto& [index, name] : WEIGHT_MAPPING) {
+     if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
+       set_weight(state_dict, name, index, WEIGHT_SHARD[index], to_host);
+@@ -125,6 +142,41 @@ void Qwen3DecoderLoader::merge_host_at_weights() {
+     }
+   }
+ 
++  if (quantize_type_.compare("w8a8_dynamic") == 0) {
++    t[IN_Q_OFFSET] = torch::cat({t[IN_Q_OFFSET], t[IN_K_OFFSET],
++                                  t[IN_V_OFFSET]},
++                                 0)
++                          .to(torch::kFloat32);
++    t[IN_Q_SCALE] = torch::cat({t[IN_Q_SCALE], t[IN_K_SCALE],
++                                  t[IN_V_SCALE]},
++                                 0)
++                         .to(torch::kFloat32);
++
++    for (auto idx : {IN_K_OFFSET, IN_V_OFFSET, IN_K_SCALE, IN_V_SCALE}) {
++      t[idx] = at_placeholder_;
++    }
++
++    t[IN_MLP_W2_OFFSET] =
++        torch::cat({t[IN_MLP_W2_OFFSET], t[IN_MLP_W1_OFFSET]}, 0)
++            .to(torch::kFloat32);
++    t[IN_MLP_W2_SCALE] =
++        torch::cat({t[IN_MLP_W2_SCALE], t[IN_MLP_W1_SCALE]}, 0)
++            .to(torch::kFloat32);
++
++    for (auto idx : {IN_MLP_W1_OFFSET, IN_MLP_W1_SCALE}) {
++      t[idx] = at_placeholder_;
++    }
++
++    t[IN_ATTENTION_OUT_OFFSET] =
++        t[IN_ATTENTION_OUT_OFFSET].to(torch::kFloat32);
++    t[IN_ATTENTION_OUT_SCALE] =
++        t[IN_ATTENTION_OUT_SCALE].to(torch::kFloat32);
++    t[IN_MLP_CPROJ_OFFSET] =
++        t[IN_MLP_CPROJ_OFFSET].to(torch::kFloat32);
++    t[IN_MLP_CPROJ_SCALE] =
++        t[IN_MLP_CPROJ_SCALE].to(torch::kFloat32);
++  }
++
+   t[IN_Q_WEIGHT] =
+       cast_nz(torch::cat({t[IN_Q_WEIGHT], t[IN_K_WEIGHT], t[IN_V_WEIGHT]}, 0)
+                   .transpose(0, 1),
+@@ -146,7 +198,8 @@ void Qwen3DecoderLoader::merge_host_at_weights() {
+   }
+ 
+   if (enableAddNorm_) {
+-    if (quantize_type_.compare("w8a8") == 0) {
++    if (quantize_type_.compare("w8a8") == 0 ||
++        quantize_type_.compare("w8a8_dynamic") == 0) {
+       torch::ScalarType weight_fill_dtype = torch::kBFloat16;
+       int64_t weight_attn_shape = t[IN_Q_WEIGHT].size(-1);
+       int64_t weight_mlp_shape = t[IN_MLP_W2_WEIGHT].size(-1);
+diff --git a/xllm/core/layers/npu/loader/qwen3_vision_encoder_loader.cpp b/xllm/core/layers/npu/loader/qwen3_vision_encoder_loader.cpp
+index 474137d1..3dbd9ee5 100644
+--- a/xllm/core/layers/npu/loader/qwen3_vision_encoder_loader.cpp
++++ b/xllm/core/layers/npu/loader/qwen3_vision_encoder_loader.cpp
+@@ -60,11 +60,77 @@ Qwen3VisionEncoderLoader::Qwen3VisionEncoderLoader(uint64_t weight_count,
+ 
+ void Qwen3VisionEncoderLoader::load_state_dict(const StateDict& state_dict) {
+   const bool to_host = load_to_host();
++  auto& t = working_tensors();
+   for (const auto& [index, name] : WEIGHT_MAPPING) {
+-    if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
+-      set_weight(state_dict, name, index, WEIGHT_SHARD[index], to_host);
++    auto weight_tensor = state_dict.get_tensor(name);
++    if (weight_tensor.defined() && weight_tensor.dtype() == torch::kInt8) {
++      auto prefix = name.substr(0, name.rfind('.'));
++      auto deq_scale_tensor = state_dict.get_tensor(prefix + ".deq_scale");
++      auto input_scale_tensor = state_dict.get_tensor(prefix + ".input_scale");
++
++      if (deq_scale_tensor.defined()) {
++        auto deq_scale = deq_scale_tensor.to(torch::kFloat32);
++        if (weight_tensor.dim() == 2 && deq_scale.dim() == 1) {
++          deq_scale = deq_scale.unsqueeze(-1);
++        }
++        auto float_weight =
++            weight_tensor.to(torch::kFloat32) * deq_scale;
++
++        if (input_scale_tensor.defined()) {
++          auto input_scale = input_scale_tensor.to(torch::kFloat32);
++          float_weight = float_weight / input_scale;
++        }
++
++        if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
++          int shard_dim = WEIGHT_SHARD.at(index);
++          auto chunks = float_weight.chunk(
++              encode_param_world_size_, shard_dim);
++          float_weight = chunks[encode_param_rank_];
++        }
++
++        float_weight = float_weight.to(dtype_);
++        t[index] = to_host ? float_weight.cpu() : float_weight.to(device_);
++
++        auto original_bias = state_dict.get_tensor(prefix + ".bias");
++        int bias_index = -1;
++        if (name == "attn.qkv.weight") {
++          bias_index = IN_QKV_BIAS;
++        } else if (name == "attn.proj.weight") {
++          bias_index = IN_WATTENTION_OUT_BIAS;
++        } else if (name == "mlp.linear_fc1.weight") {
++          bias_index = IN_LINEAR_FC1_BIAS;
++        }
++
++        if (bias_index >= 0)[M`[< {
++          if (original_bias.defined()) {
++            auto float_bias = original_bias.to(dtype_);
++            if (WEIGHT_SHARD.find(bias_index) != WEIGHT_SHARD.end()) {
++              int shard_dim = WEIGHT_SHARD.at(bias_index);
++              auto bi[M`[<as_chunks = float_bias.chunk(
++                  encode_param_world_size_, shard_dim);
++              float_bias = bias_chunks[encode_param_rank_];
++            }
++            t[bias_index] = to_host ? float_bias.cpu() : float_bias.to(device_);
++          } else {
++            auto bias_size = float_weight.size(0);
++            t[bias_index] = torch::zeros(
++                {bias_size}, float_weight.options());
++          }
++        }
++      } else {
++        if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
++          set_weight(state_dict, name, index,
++                     WEIGHT_SHARD[index], to_host);
++        } else {
++          set_weight(state_dict, name, index, to_host);
++        }
++      }
+     } else {
+-      set_weight(state_dict, name, index, to_host);
++      if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
++        set_weight(state_dict, name, index, WEIGHT_SHARD[index], to_host);
++      } else {
++        set_weight(state_dict, name, index, to_host);
++      }
+     }
+   }
+ }
+diff --git a/xllm/core/layers/npu/loader/qwen_loader_constants.h b/xllm/core/layers/npu/loader/qwen_loader_constants.h
+index 23717276..33d9fcf1 100644
+--- a/xllm/core/layers/npu/loader/qwen_loader_constants.h
++++ b/xllm/core/layers/npu/loader/qwen_loader_constants.h
+@@ -310,6 +310,44 @@ static std::map<int, int> WEIGHT_SHARD_W8A8 = {{IN_Q_WEIGHT, 0},
+                                                {IN_MLP_W1_DEQSCALE, 0},
+                                                {IN_MLP_CPROJ_WEIGHT, 1}};
+ 
++static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8_DYNAMIC = {
++    {IN_NORM_WEIGHT, "input_layernorm.weight"},
++    {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
++    {IN_Q_OFFSET, "self_attn.q_proj.weight_offset"},
++    {IN_Q_SCALE, "self_attn.q_proj.weight_scale"},
++    {IN_K_WEIGHT, "self_attn.k_proj.weight"},
++    {IN_K_OFFSET, "self_attn.k_proj.weight_offset"},
++    {IN_K_SCALE, "self_attn.k_proj.weight_scale"},
++    {IN_V_WEIGHT, "self_attn.v_proj.weight"},
++    {IN_V_OFFSET, "self_attn.v_proj.weight_offset"},
++    {IN_V_SCALE, "self_attn.v_proj.weight_scale"},
++    {IN_ATTENTION_OUT_WEIGHT, "self_attn.o_proj.weight"},
++    {IN_ATTENTION_OUT_OFFSET, "self_attn.o_proj.weight_offset"},
++    {IN_ATTENTION_OUT_SCALE, "self_attn.o_proj.weight_scale"},
++    {IN_SELFOUT_NORM_WEIGHT, "post_attention_layernorm.weight"},
++    {IN_MLP_W2_WEIGHT, "mlp.gate_proj.weight"},
++    {IN_MLP_W2_OFFSET, "mlp.gate_proj.weight_offset"},
++    {IN_MLP_W2_SCALE, "mlp.gate_proj.weight_scale"},
++    {IN_MLP_W1_WEIGHT, "mlp.up_proj.weight"},
++    {IN_MLP_W1_OFFSET, "mlp.up_proj.weight_offset"},
++    {IN_MLP_W1_SCALE, "mlp.up_proj.weight_scale"},
++    {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"},
++    {IN_MLP_CPROJ_OFFSET, "mlp.down_proj.weight_offset"},
++    {IN_MLP_CPROJ_SCALE, "mlp.down_proj.weight_scale"},
++    {Q_NORM_WEIGHT, "self_attn.q_norm.weight"},
++    {K_NORM_WEIGHT, "self_attn.k_norm.weight"}};
++
++static std::map<int, int> WEIGHT_SHARD_W8A8_DYNAMIC = {
++    {IN_Q_WEIGHT, 0},    {IN_Q_OFFSET, 0},    {IN_Q_SCALE, 0},
++    {IN_K_WEIGHT, 0},    {IN_K_OFFSET, 0},    {IN_K_SCALE, 0},
++    {IN_V_WEIGHT, 0},    {IN_V_OFFSET, 0},    {IN_V_SCALE, 0},
++    {IN_ATTENTION_OUT_WEIGHT, 1},
++    {IN_ATTENTION_OUT_OFFSET, 1},
++    {IN_ATTENTION_OUT_SCALE, 1},
++    {IN_MLP_W2_WEIGHT, 0},    {IN_MLP_W2_OFFSET, 0},    {IN_MLP_W2_SCALE, 0},
++    {IN_MLP_W1_WEIGHT, 0},    {IN_MLP_W1_OFFSET, 0},    {IN_MLP_W1_SCALE, 0},
++    {IN_MLP_CPROJ_WEIGHT, 1}, {IN_MLP_CPROJ_OFFSET, 1}, {IN_MLP_CPROJ_SCALE, 1}};
++
+ }  // namespace qwen3_decoder_constants
+ 
+ namespace qwen3_moe_decoder_constants {
+diff --git a/xllm/core/layers/npu/npu_qwen3_decoder_layer_impl.cpp b/xllm/core/layers/npu/npu_qwen3_decoder_layer_impl.cpp
+index c70f6123..092deecb 100644
+--- a/xllm/core/layers/npu/npu_qwen3_decoder_layer_impl.cpp
++++ b/xllm/core/layers/npu/npu_qwen3_decoder_layer_impl.cpp
+@@ -145,6 +145,23 @@ void NpuQwen3DecoderLayerImpl::initialize_quantization_parameters(
+                              static_cast<int>(LinearType::INVALID),
+                              static_cast<int>(LinearType::INVALID),
+                              static_cast<int>(LinearType::INVALID)};
++  } else if (quantize_type_.compare("w8a8_dynamic") == 0) {
++    param.linearDescs = {static_cast<int>(LinearTypeV2::W8A8_DYNAMIC),
++                         static_cast<int>(LinearTypeV2::INVALID),
++                         static_cast<int>(LinearTypeV2::INVALID),
++                         static_cast<int>(LinearTypeV2::W8A8_DYNAMIC),
++                         static_cast<int>(LinearTypeV2::W8A8_DYNAMIC),
++                         static_cast<int>(LinearTypeV2::INVALID),
++                         static_cast<int>(LinearTypeV2::W8A8_DYNAMIC)};
++    param.packQuantType = {static_cast<int>(PackType::ALL_W8A8_DYNAMIC),
++                           static_cast<int>(PackType::ALL_W8A8_DYNAMIC)};
++    param.linearQuantType = {static_cast<int>(LinearType::INT),
++                             static_cast<int>(LinearType::INVALID),
++                             static_cast<int>(LinearType::INVALID),
++                             static_cast<int>(LinearType::INT),
++                             static_cast<int>(LinearType::INT),
++                             static_cast<int>(LinearType::INVALID),
++                             static_cast<int>(LinearType::INT)};
+   } else {
+     param.linearDescs = {static_cast<int>(LinearTypeV2::W8A8),
+                          static_cast<int>(LinearTypeV2::INVALID),
+

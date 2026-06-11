@@ -60,11 +60,77 @@ Qwen3VisionEncoderLoader::Qwen3VisionEncoderLoader(uint64_t weight_count,
 
 void Qwen3VisionEncoderLoader::load_state_dict(const StateDict& state_dict) {
   const bool to_host = load_to_host();
+  auto& t = working_tensors();
   for (const auto& [index, name] : WEIGHT_MAPPING) {
-    if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
-      set_weight(state_dict, name, index, WEIGHT_SHARD[index], to_host);
+    auto weight_tensor = state_dict.get_tensor(name);
+    if (weight_tensor.defined() && weight_tensor.dtype() == torch::kInt8) {
+      auto prefix = name.substr(0, name.rfind('.'));
+      auto deq_scale_tensor = state_dict.get_tensor(prefix + ".deq_scale");
+      auto input_scale_tensor = state_dict.get_tensor(prefix + ".input_scale");
+
+      if (deq_scale_tensor.defined()) {
+        auto deq_scale = deq_scale_tensor.to(torch::kFloat32);
+        if (weight_tensor.dim() == 2 && deq_scale.dim() == 1) {
+          deq_scale = deq_scale.unsqueeze(-1);
+        }
+        auto float_weight =
+            weight_tensor.to(torch::kFloat32) * deq_scale;
+
+        if (input_scale_tensor.defined()) {
+          auto input_scale = input_scale_tensor.to(torch::kFloat32);
+          float_weight = float_weight / input_scale;
+        }
+
+        if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
+          int shard_dim = WEIGHT_SHARD.at(index);
+          auto chunks = float_weight.chunk(
+              encode_param_world_size_, shard_dim);
+          float_weight = chunks[encode_param_rank_];
+        }
+
+        float_weight = float_weight.to(dtype_);
+        t[index] = to_host ? float_weight.cpu() : float_weight.to(device_);
+
+        auto original_bias = state_dict.get_tensor(prefix + ".bias");
+        int bias_index = -1;
+        if (name == "attn.qkv.weight") {
+          bias_index = IN_QKV_BIAS;
+        } else if (name == "attn.proj.weight") {
+          bias_index = IN_WATTENTION_OUT_BIAS;
+        } else if (name == "mlp.linear_fc1.weight") {
+          bias_index = IN_LINEAR_FC1_BIAS;
+        }
+
+        if (bias_index >= 0)[M`[< {
+          if (original_bias.defined()) {
+            auto float_bias = original_bias.to(dtype_);
+            if (WEIGHT_SHARD.find(bias_index) != WEIGHT_SHARD.end()) {
+              int shard_dim = WEIGHT_SHARD.at(bias_index);
+              auto bi[M`[<as_chunks = float_bias.chunk(
+                  encode_param_world_size_, shard_dim);
+              float_bias = bias_chunks[encode_param_rank_];
+            }
+            t[bias_index] = to_host ? float_bias.cpu() : float_bias.to(device_);
+          } else {
+            auto bias_size = float_weight.size(0);
+            t[bias_index] = torch::zeros(
+                {bias_size}, float_weight.options());
+          }
+        }
+      } else {
+        if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
+          set_weight(state_dict, name, index,
+                     WEIGHT_SHARD[index], to_host);
+        } else {
+          set_weight(state_dict, name, index, to_host);
+        }
+      }
     } else {
-      set_weight(state_dict, name, index, to_host);
+      if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
+        set_weight(state_dict, name, index, WEIGHT_SHARD[index], to_host);
+      } else {
+        set_weight(state_dict, name, index, to_host);
+      }
     }
   }
 }
