@@ -16,6 +16,7 @@ limitations under the License.
 #include "composite_block_manager.h"
 
 #include <algorithm>
+#include <iterator>
 #include <utility>
 
 #include "block_manager_impl.h"
@@ -131,6 +132,40 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
     release_blocks = std::min(skipped_blocks, swa_blocks.size());
   }
 
+  size_t valid_release_blocks = 0;
+  for (size_t j = 0; j < release_blocks; ++j) {
+    if (swa_blocks[j].is_valid()) {
+      ++valid_release_blocks;
+    }
+  }
+
+  const size_t swa_blocks_needed = (num_tokens + block_size - 1) / block_size;
+  const size_t old_swa_size = swa_blocks.size();
+  const size_t additional_swa_blocks =
+      swa_blocks_needed > old_swa_size ? swa_blocks_needed - old_swa_size : 0;
+  if (additional_swa_blocks >
+      sub_managers_[0]->num_free_blocks() + valid_release_blocks) {
+    composite->resize(original_manager_count);
+    return false;
+  }
+
+  std::vector<std::vector<Block>> pending_blocks(sub_managers_.size());
+  for (size_t i = 1; i < sub_managers_.size(); ++i) {
+    const size_t num_blocks = composite->at(i).size();
+    const size_t block_size = sub_managers_[i]->block_size();
+    const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
+    if (num_blocks_needed <= num_blocks) {
+      continue;
+    }
+
+    const uint32_t num_additional_blocks = num_blocks_needed - num_blocks;
+    pending_blocks[i] = sub_managers_[i]->allocate(num_additional_blocks);
+    if (pending_blocks[i].size() != num_additional_blocks) {
+      composite->resize(original_manager_count);
+      return false;
+    }
+  }
+
   if (release_blocks > 0) {
     std::vector<Block> blocks_to_release;
     blocks_to_release.reserve(release_blocks);
@@ -147,7 +182,6 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
     }
   }
 
-  const size_t swa_blocks_needed = (num_tokens + block_size - 1) / block_size;
   if (swa_blocks.size() < swa_blocks_needed) {
     const size_t old_size = swa_blocks.size();
     swa_blocks.resize(swa_blocks_needed);
@@ -162,23 +196,12 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
   }
 
   for (size_t i = 1; i < sub_managers_.size(); ++i) {
-    const size_t num_blocks = composite->at(i).size();
-    const size_t block_size = sub_managers_[i]->block_size();
-    const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
-    if (num_blocks_needed <= num_blocks) {
+    if (pending_blocks[i].empty()) {
       continue;
     }
-
-    const uint32_t num_additional_blocks = num_blocks_needed - num_blocks;
-
-    const auto blocks = sub_managers_[i]->allocate(num_additional_blocks);
-    if (blocks.size() != num_additional_blocks) {
-      rollback_new_blocks();
-      return false;
-    }
-
-    composite->at(i).insert(
-        composite->at(i).end(), blocks.begin(), blocks.end());
+    composite->at(i).insert(composite->at(i).end(),
+                            std::make_move_iterator(pending_blocks[i].begin()),
+                            std::make_move_iterator(pending_blocks[i].end()));
   }
   return true;
 }
