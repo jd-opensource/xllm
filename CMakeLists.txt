@@ -34,35 +34,28 @@ if(USE_NPU)
     message(FATAL_ERROR "ASCEND_OPP_PATH is not initialized for NPU build.")
   endif()
 
-  if(DEFINED ENV{XLLM_OPS_GIT_HEAD_CACHED})
-    set(XLLM_OPS_GIT_HEAD_CACHED "$ENV{XLLM_OPS_GIT_HEAD_CACHED}")
+  if(EXISTS "${XLLM_OPS_MARKER_PATH}")
+    file(READ "${XLLM_OPS_MARKER_PATH}" XLLM_OPS_GIT_HEAD_CACHED)
+    string(STRIP "${XLLM_OPS_GIT_HEAD_CACHED}" XLLM_OPS_GIT_HEAD_CACHED)
   endif()
 
   if(DEFINED ENV{XLLM_OPS_BUILD_DIR})
     get_filename_component(XLLM_OPS_BUILD_DIR "$ENV{XLLM_OPS_BUILD_DIR}" ABSOLUTE)
   else()
-    set(XLLM_OPS_BUILD_DIR "${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build")
+    set(XLLM_OPS_BUILD_DIR "${CMAKE_BINARY_DIR}/xllm_ops")
   endif()
 
   if(NOT DEFINED XLLM_OPS_GIT_HEAD_CACHED OR NOT XLLM_OPS_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD_CACHED)
     message(STATUS "xllm_ops git HEAD changed; running precompile via execute_process")
     execute_process(
-      COMMAND ${CMAKE_COMMAND} -E env "XLLM_OPS_BUILD_DIR=${XLLM_OPS_BUILD_DIR}"
-              bash ${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build.sh
+      COMMAND bash "${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build.sh" "--build-dir=${XLLM_OPS_BUILD_DIR}"
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/xllm_ops
       RESULT_VARIABLE XLLM_OPS_RESULT
     )
     if(NOT XLLM_OPS_RESULT EQUAL 0)
       message(FATAL_ERROR "Failed to precompile xllm ops, error code: ${XLLM_OPS_RESULT}")
     endif()
-
-    ## Adapt to the modification in DeekSeekV4 where the installation path of xllm_ops has been changed to custom_xllm_math
-    if(EXISTS "$ENV{NPU_HOME_PATH}/opp/vendors/custom_xllm_math/op_api/include/aclnnop")
-      set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_OPP_PATH}/vendors/custom_xllm_math/.xllm_ops_git_head")
-    endif()
-    message(STATUS "XLLM_OPS_MARKER_PATH: ${XLLM_OPS_MARKER_PATH}")
-
-    set(XLLM_OPS_GIT_HEAD_CACHED "${XLLM_OPS_GIT_HEAD}" CACHE INTERNAL "" FORCE)
+    
     get_filename_component(XLLM_OPS_MARKER_DIR "${XLLM_OPS_MARKER_PATH}" DIRECTORY)
     file(MAKE_DIRECTORY "${XLLM_OPS_MARKER_DIR}")
     file(WRITE "${XLLM_OPS_MARKER_PATH}" "${XLLM_OPS_GIT_HEAD}\n")

@@ -34,7 +34,7 @@ cc_library(
     rec_constrained_topk_fused.cpp
     beam_search_rec_final.cpp
   INCLUDES
-    ${PROJECT_SOURCE_DIR}/third_party/xllm_ops/build/autogen
+    ${XLLM_OPS_BUILD_DIR}/autogen
   DEPS
     atb
     Python::Python
