@@ -23,6 +23,7 @@ limitations under the License.
 
 #include "base_executor_impl.h"
 #include "core/framework/batch/batch.h"
+#include "core/framework/config/execution_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_output.h"
@@ -31,6 +32,22 @@ limitations under the License.
 #include "runtime/options.h"
 
 namespace xllm {
+namespace {
+
+class ScopedConfigSnapshot final {
+ public:
+  ScopedConfigSnapshot() : execution_config_(ExecutionConfig::get_instance()) {}
+
+  ~ScopedConfigSnapshot() {
+    ExecutionConfig::get_instance() = execution_config_;
+  }
+
+ private:
+  ExecutionConfig execution_config_;
+};
+
+}  // namespace
+
 class MockCausalLM : public CausalLM {
  public:
   MockCausalLM(const torch::TensorOptions& options) : options_(options) {
@@ -339,6 +356,68 @@ TEST_F(MluGraphExecutorTest, TargetDecodeCapturesThenReplays) {
   EXPECT_TRUE(
       torch::allclose(first_impl_output, second_impl_output, 1e-5, 1e-6));
   EXPECT_EQ(model_->forward_cnt(), 1);
+}
+
+TEST_F(MluGraphExecutorTest, LargeDecodeBucketCapturesThenReplays) {
+  ScopedConfigSnapshot config_snapshot;
+  ExecutionConfig::get_instance().max_tokens_for_graph_mode(128);
+  options_.is_draft_engine(false);
+  options_.max_seqs_per_batch(128);
+  rebuild_impl();
+
+  const int32_t batch_size = 65;
+  const uint64_t seed = 19;
+  auto forward_input = prepare_inputs(batch_size, seed);
+  const int32_t start_cnt = model_->forward_cnt();
+
+  auto first_output = impl_
+                          ->run({forward_input.token_ids},
+                                {forward_input.positions},
+                                kv_caches_,
+                                {forward_input.input_params})
+                          .hidden_states;
+  auto second_output = impl_
+                           ->run({forward_input.token_ids},
+                                 {forward_input.positions},
+                                 kv_caches_,
+                                 {forward_input.input_params})
+                           .hidden_states;
+
+  torch_mlu::synchronize();
+  EXPECT_TRUE(torch::allclose(first_output, second_output, 1e-5, 1e-6));
+  EXPECT_EQ(model_->forward_cnt(), start_cnt + 1);
+  EXPECT_EQ(model_->last_tokens_size(), 80);
+}
+
+TEST_F(MluGraphExecutorTest, OverConfiguredTokenLimitFallsBackToEager) {
+  ScopedConfigSnapshot config_snapshot;
+  ExecutionConfig::get_instance().max_tokens_for_graph_mode(33);
+  options_.is_draft_engine(false);
+  options_.max_seqs_per_batch(33);
+  rebuild_impl();
+
+  const int32_t batch_size = 33;
+  const uint64_t seed = 79;
+  auto forward_input = prepare_inputs(batch_size, seed);
+  const int32_t start_cnt = model_->forward_cnt();
+
+  auto first_output = impl_
+                          ->run({forward_input.token_ids},
+                                {forward_input.positions},
+                                kv_caches_,
+                                {forward_input.input_params})
+                          .hidden_states;
+  auto second_output = impl_
+                           ->run({forward_input.token_ids},
+                                 {forward_input.positions},
+                                 kv_caches_,
+                                 {forward_input.input_params})
+                           .hidden_states;
+
+  torch_mlu::synchronize();
+  EXPECT_TRUE(torch::allclose(first_output, second_output, 1e-5, 1e-6));
+  EXPECT_EQ(model_->forward_cnt(), start_cnt + 2);
+  EXPECT_EQ(model_->last_tokens_size(), batch_size);
 }
 
 TEST_F(MluGraphExecutorTest, PrefillThenDecodeCapturesAndReplays) {

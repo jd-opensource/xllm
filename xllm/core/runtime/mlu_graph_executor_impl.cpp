@@ -29,11 +29,6 @@ limitations under the License.
 #include "vlm_executor_impl.h"
 
 namespace {
-// Large decode buckets bring little replay benefit on MLU, but they still
-// retain graph buffers for each captured shape. Cap capture at 64 tokens and
-// let larger decode batches fall back to eager to avoid wasting memory.
-constexpr uint32_t kMaxGraphTokens = 64;
-
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t get_bucket_num_tokens(uint32_t num_tokens) {
   if (::xllm::ExecutionConfig::get_instance()
@@ -401,7 +396,13 @@ MluGraphExecutorImpl::MluGraphExecutorImpl(CausalLM* model,
       args_(args),
       device_(device),
       options_(options),
-      pool_(torch_mlu::MempoolId_t{0, 0}) {}
+      pool_(torch_mlu::MempoolId_t{0, 0}) {
+  max_tokens_for_graph_mode_ =
+      ::xllm::ExecutionConfig::get_instance().max_tokens_for_graph_mode();
+  if (max_tokens_for_graph_mode_ < options_.max_seqs_per_batch()) {
+    max_tokens_for_graph_mode_ = options_.max_seqs_per_batch();
+  }
+}
 
 ForwardInput MluGraphExecutorImpl::prepare_inputs(Batch& batch) {
   return batch.prepare_forward_input(
@@ -455,17 +456,19 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
     return run_eager(tokens, positions, kv_caches, params);
   }
 
-  init_param_once();
-
   const uint32_t actual_tokens = static_cast<uint32_t>(tokens.size(0));
   const uint32_t graph_tokens =
       get_graph_dp_tokens(actual_tokens, params, options_);
-  if (graph_tokens > kMaxGraphTokens) {
+  if (static_cast<int64_t>(graph_tokens) > max_tokens_for_graph_mode_) {
     LOG_FIRST_N(INFO, 1)
         << "MLU graph fallback to eager because graph bucket num_tokens "
-        << graph_tokens << " exceeds limit " << kMaxGraphTokens;
+        << graph_tokens << " exceeds max_tokens_for_graph_mode ("
+        << max_tokens_for_graph_mode_ << ")";
     return run_eager(tokens, positions, kv_caches, params);
   }
+
+  init_param_once();
+
   const ModelInputParams graph_params = make_graph_params(params, graph_tokens);
 
   if (graph_params.parallel.dp_global_token_nums !=

@@ -131,6 +131,7 @@ class MluGraphExecutorImpl : public ExecutorImpl {
   torch::Device device_;
   runtime::Options options_;
   torch_mlu::MempoolId_t pool_;
+  int64_t max_tokens_for_graph_mode_ = 0;
 
   std::unordered_map<uint32_t, std::unique_ptr<MluGraph>> graphs_;
   std::unique_ptr<GraphPersistentParam> persistent_param_;
