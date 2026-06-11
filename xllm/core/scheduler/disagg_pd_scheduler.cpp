@@ -610,7 +610,9 @@ void DisaggPDScheduler::prefill_send_first_generation() {
     auto request = running_requests_[i];
     // Check if the request is a recently completed prefill request
     if (request->sequences()[0]->num_generated_tokens() == 1) {
-      request->log_statistic(request->elapsed_seconds());
+      if (!options_.disable_log_stats()) {
+        request->log_statistic(request->elapsed_seconds());
+      }
       requests.emplace_back(request);
       if (!request->state().stream) {
         non_stream_requests.emplace_back(request);
