@@ -35,6 +35,7 @@ limitations under the License.
 #include "core/framework/config/speculative_config.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request_state.h"
+#include "scheduler/profile/graph_warmup.h"
 #include "util/rec_model_utils.h"
 
 namespace xllm {
@@ -64,7 +65,7 @@ ProfileManager::ProfileManager(Engine* engine, const Options& options)
   // more profile here, such as token_budget profile and decode length
   // prediction.
 
-#if defined(USE_NPU) || defined(USE_CUDA)
+#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU)
   // Warmup ACL graph executor if enabled
   if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     if (!is_rec_multi_round_mode()) {
@@ -626,7 +627,8 @@ std::shared_ptr<Request> ProfileManager::generate_single_request(
 }
 
 std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
-    int32_t total_length) {
+    int32_t total_length,
+    std::optional<int32_t> dp_rank) {
   CHECK_GT(total_length, 1) << "Decode profiling requires total_length > 1.";
 
   auto& model_args = engine_->model_args();
@@ -664,6 +666,11 @@ std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
       req_state);
 
   auto* sequence = request->sequences()[0].get();
+  if (dp_rank.has_value()) {
+    CHECK_GE(dp_rank.value(), 0);
+    CHECK_LT(dp_rank.value(), options_.dp_size());
+    sequence->set_dp_rank(dp_rank.value());
+  }
   if (!block_manager_pool_->BlockManagerPool::allocate(sequence,
                                                        seq_capacity)) {
     LOG(FATAL) << "Profiling decode step time failed! Not enough blocks, total "
@@ -812,6 +819,44 @@ double ProfileManager::run_decode_request(
   return latency;
 }
 
+double ProfileManager::run_graph_decode_request(
+    const std::vector<int32_t>& total_length_vec) {
+  CHECK_GT(options_.dp_size(), 0);
+
+  std::vector<Sequence*> sequences;
+  std::vector<size_t> sequences_budget;
+  std::vector<std::shared_ptr<Request>> requests;
+  sequences.reserve(total_length_vec.size());
+  sequences_budget.reserve(total_length_vec.size());
+  requests.reserve(total_length_vec.size());
+
+  for (size_t i = 0; i < total_length_vec.size(); ++i) {
+    int32_t dp_rank = static_cast<int32_t>(i % options_.dp_size());
+    std::shared_ptr<Request> request =
+        generate_single_decode_request(total_length_vec[i], dp_rank);
+    requests.emplace_back(request);
+    sequences.emplace_back(request->sequences()[0].get());
+    sequences_budget.emplace_back(1);
+  }
+
+  auto batches =
+      BatchFactory::get_instance(options_.dp_size())
+          ->create_batches(requests, sequences, sequences_budget, nullptr);
+
+  absl::Time start_time = absl::Now();
+  engine_->step(batches);
+  if (options_.enable_schedule_overlap()) {
+    engine_->update_last_step_result(batches);
+  }
+  double latency = absl::ToDoubleMilliseconds(absl::Now() - start_time);
+  for (auto& request : requests) {
+    block_manager_pool_->deallocate_without_cache(
+        request->sequences()[0].get());
+  }
+
+  return latency;
+}
+
 // Generate a batch of decode requests in DECODE stage and execute one decode
 // step, then return the step latency.
 double ProfileManager::profile_decode_step_time(int32_t token_length,
@@ -884,26 +929,13 @@ void ProfileManager::warmup_for_graph() {
   LOG(INFO) << "Prefill warmup completed: tokens=" << prefill_tokens
             << ", latency=" << prefill_latency << " ms";
 
-  // Generate batch sizes aligned with graph bucket logic.
-  std::vector<int32_t> decode_batch_sizes;
-  const std::vector<int32_t> small_decode_batch_sizes = {1, 2, 4, 8, 16};
-  for (int32_t batch_size : small_decode_batch_sizes) {
-    if (batch_size <= max_seqs_per_batch) {
-      decode_batch_sizes.push_back(batch_size);
-    }
-  }
-  for (int32_t batch_size = 32; batch_size <= max_seqs_per_batch;
-       batch_size += 16) {
-    decode_batch_sizes.push_back(batch_size);
-  }
-  if (decode_batch_sizes.back() != max_seqs_per_batch) {
-    decode_batch_sizes.push_back(max_seqs_per_batch);
-  }
+  std::vector<int32_t> decode_batch_sizes =
+      graph_decode_buckets(max_seqs_per_batch, options_.dp_size());
 
   double decode_total_latency = 0.0;
   for (int32_t batch_size : decode_batch_sizes) {
     std::vector<int32_t> total_length_vec(batch_size, decode_seq_len);
-    decode_total_latency += run_decode_request(total_length_vec);
+    decode_total_latency += run_graph_decode_request(total_length_vec);
   }
 
   LOG(INFO) << "Decode warmup completed: bucket_count="

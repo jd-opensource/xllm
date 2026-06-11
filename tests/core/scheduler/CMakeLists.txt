@@ -1,5 +1,7 @@
 include(cc_test)
 
+add_subdirectory(profile)
+
 cc_test(
   NAME
     chunked_prefill_scheduler_test

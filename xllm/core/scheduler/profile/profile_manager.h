@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "common/macros.h"
@@ -131,7 +132,9 @@ class ProfileManager {
 
   std::shared_ptr<Request> generate_single_request(int32_t token_length,
                                                    int32_t prefix_length);
-  std::shared_ptr<Request> generate_single_decode_request(int32_t total_length);
+  std::shared_ptr<Request> generate_single_decode_request(
+      int32_t total_length,
+      std::optional<int32_t> dp_rank = std::nullopt);
 
   std::string generate_filename(const std::string& file_suffix);
 
@@ -159,6 +162,8 @@ class ProfileManager {
                                     std::vector<int32_t>& token_length_vec);
 
   double run_decode_request(const std::vector<int32_t>& total_length_vec);
+
+  double run_graph_decode_request(const std::vector<int32_t>& total_length_vec);
 
   static const std::vector<ProfileManager::CopyBlockProfile>&
   get_copy_block_profile();
