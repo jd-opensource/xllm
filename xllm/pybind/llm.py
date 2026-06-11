@@ -123,8 +123,6 @@ class LLM:
         model_type, backend = utils._infer_model_type_and_backend(model)
         if backend == "dit":
             raise ValueError("LLM does not support DiT backend models")
-        if backend == "vlm" and task != "generate":
-            raise ValueError("VLM backend only supports generate task in LLM")
         if model_type is None:
             raise ValueError("model_type is required for offline inference")
         utils._configure_cpp_chat_template(use_cpp_chat_template, model_type)
