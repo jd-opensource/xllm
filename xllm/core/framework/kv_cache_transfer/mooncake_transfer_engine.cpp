@@ -502,12 +502,10 @@ bool MooncakeTransferEngine::move_memory_blocks(
       uint64_t block_length = block_lengths[i];
       uint64_t local_block_id = src_block_id;
       uint64_t remote_block_id = dst_block_id;
-#if defined(USE_DCU)
       if (move_opcode == MoveOpcode::READ) {
         local_block_id = dst_block_id;
         remote_block_id = src_block_id;
       }
-#endif
       if (!check_buf_range(
               local_buf_len, buf_bytes, local_block_id, block_length, buf_id) ||
           !check_buf_range(remote_buf_len,

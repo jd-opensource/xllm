@@ -51,6 +51,9 @@ DCULayerSynchronizerImpl::~DCULayerSynchronizerImpl() {
 }
 
 bool DCULayerSynchronizerImpl::synchronize_layer(int64_t layer_index) {
+  CHECK_GE(layer_index, 0) << "layer_index must be non-negative.";
+  CHECK_LT(static_cast<size_t>(layer_index), events_.size())
+      << "layer_index out of bounds.";
   size_t layer = static_cast<size_t>(layer_index);
   while (!event_record_flags_[layer].load(std::memory_order_acquire)) {
     std::this_thread::yield();
@@ -81,6 +84,9 @@ bool DCULayerSynchronizerImpl::synchronize_layer(int64_t layer_index) {
 
 bool DCULayerSynchronizerImpl::record_current(int64_t layer_index,
                                               int32_t device_index) {
+  CHECK_GE(layer_index, 0) << "layer_index must be non-negative.";
+  CHECK_LT(static_cast<size_t>(layer_index), events_.size())
+      << "layer_index out of bounds.";
   size_t layer = static_cast<size_t>(layer_index);
   c10::hip::HIPStream stream = c10::hip::getCurrentHIPStream(device_index);
   hipError_t ret = hipEventRecord(events_[layer], stream.stream());
