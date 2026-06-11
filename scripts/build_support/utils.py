@@ -388,13 +388,25 @@ def _get_cmake_cache_path() -> str:
 
 def _get_xllm_ops_marker_path() -> str:
     opp_root = os.getenv("ASCEND_OPP_PATH")
-    if opp_root:
-        opp_root = os.path.abspath(os.path.expanduser(opp_root))
-        return os.path.join(opp_root, "vendors", "xllm", ".xllm_ops_git_head")
+    if not opp_root:
+        logger.error("ASCEND_OPP_PATH is not initialized for NPU build.")
+        _print_manual_check_commands(["echo $ASCEND_OPP_PATH"])
+        exit(1)
 
-    logger.error("ASCEND_OPP_PATH is not initialized for NPU build.")
-    _print_manual_check_commands(["echo $ASCEND_OPP_PATH"])
-    exit(1)
+    opp_root = os.path.abspath(os.path.expanduser(opp_root))
+    # Adapt to the DeepSeekV4 / CANN 9.0 change where xllm_ops installs under the
+    # "custom_xllm_math" vendor instead of "xllm". The marker must be read from the
+    # same vendor directory CMakeLists.txt writes it to; otherwise the read and
+    # write paths diverge and the incremental-build cache never hits. Detection
+    # mirrors CMakeLists.txt exactly (same ASCEND_OPP_PATH root and probe path).
+    vendor = "xllm"
+    if os.path.isdir(
+        os.path.join(
+            opp_root, "vendors", "custom_xllm_math", "op_api", "include", "aclnnop"
+        )
+    ):
+        vendor = "custom_xllm_math"
+    return os.path.join(opp_root, "vendors", vendor, ".xllm_ops_git_head")
 
 
 def _clear_xllm_ops_cache_git_head(cache_path: str) -> bool:
