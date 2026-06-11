@@ -40,12 +40,11 @@ limitations under the License.
 #include "framework/kv_cache_transfer/push_route.h"
 #include "framework/xtensor/global_xtensor.h"
 #include "framework/xtensor/xtensor_allocator.h"
+#if defined(USE_DCU)
+#include "platform/dcu/dcu_tensor_alloc.h"
+#endif
 #include "platform/mlu/mlu_tensor_alloc.h"
 #include "util/net.h"
-
-#if defined(USE_DCU)
-#include <hip/hip_runtime.h>
-#endif
 
 namespace xllm {
 
@@ -300,62 +299,11 @@ void MooncakeKVCacheTransferDefault::allocate_kv_cache_impl(
   CHECK(!kv_cache_shape.has_index_cache_shape())
       << "DCU Mooncake KV transfer does not support index cache yet.";
 
-  int64_t data_size = static_cast<int64_t>(torch::elementSize(dtype));
-  int64_t k_cache_size_per_layer = data_size;
-  for (int64_t dim : key_cache_shape) {
-    k_cache_size_per_layer *= dim;
-  }
-  int64_t v_cache_size_per_layer = data_size;
-  for (int64_t dim : value_cache_shape) {
-    v_cache_size_per_layer *= dim;
-  }
-
-  torch::TensorOptions options =
-      torch::TensorOptions().dtype(dtype).device(device_);
   for (int64_t i = 0; i < num_layers; ++i) {
-    void* k_cache_buffer = nullptr;
-    void* v_cache_buffer = nullptr;
-    hipError_t hip_ret =
-        hipMalloc(&k_cache_buffer, static_cast<size_t>(k_cache_size_per_layer));
-    CHECK(hip_ret == hipSuccess)
-        << "hipMalloc k cache failed: " << hipGetErrorString(hip_ret);
-    hip_ret =
-        hipMalloc(&v_cache_buffer, static_cast<size_t>(v_cache_size_per_layer));
-    CHECK(hip_ret == hipSuccess)
-        << "hipMalloc v cache failed: " << hipGetErrorString(hip_ret);
-
-    auto k_data_ptr = c10::DataPtr(
-        k_cache_buffer,
-        k_cache_buffer,
-        [](void* ptr) { hipFree(ptr); },
-        device_);
-    auto k_storage_impl = c10::make_intrusive<c10::StorageImpl>(
-        c10::StorageImpl::use_byte_size_t(),
-        c10::SymInt(k_cache_size_per_layer),
-        std::move(k_data_ptr),
-        /*allocator=*/nullptr,
-        /*resizable=*/false);
-    torch::Tensor key_cache = torch::empty({/*size=*/0}, options);
-    key_cache.set_(c10::Storage(std::move(k_storage_impl)),
-                   /*storage_offset=*/0,
-                   c10::IntArrayRef(key_cache_shape));
-
-    auto v_data_ptr = c10::DataPtr(
-        v_cache_buffer,
-        v_cache_buffer,
-        [](void* ptr) { hipFree(ptr); },
-        device_);
-    auto v_storage_impl = c10::make_intrusive<c10::StorageImpl>(
-        c10::StorageImpl::use_byte_size_t(),
-        c10::SymInt(v_cache_size_per_layer),
-        std::move(v_data_ptr),
-        /*allocator=*/nullptr,
-        /*resizable=*/false);
-    torch::Tensor value_cache = torch::empty({/*size=*/0}, options);
-    value_cache.set_(c10::Storage(std::move(v_storage_impl)),
-                     /*storage_offset=*/0,
-                     c10::IntArrayRef(value_cache_shape));
-
+    torch::Tensor key_cache =
+        dcu::alloc_zero_tensor(key_cache_shape, dtype, device_);
+    torch::Tensor value_cache =
+        dcu::alloc_zero_tensor(value_cache_shape, dtype, device_);
     kv_caches.emplace_back(KVCacheTensors{key_cache, value_cache});
   }
 #else
