@@ -419,6 +419,7 @@ struct ModelArgs {
 
   PROPERTY(int32_t, query_num) = 0;
   PROPERTY(bool, encoder_embedding_mode) = false;
+  PROPERTY(bool, embedding_mode) = false;
 
   // number of speculative decoding tokens
   PROPERTY(int64_t, num_speculative_tokens) = 0;
@@ -569,6 +570,7 @@ inline bool has_linear_attention_layers(const ModelArgs& args) {
 inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {
   os << "ModelArgs: [model_type: " << args.model_type();
   os << ", encoder_embedding_mode: " << args.encoder_embedding_mode();
+  os << ", embedding_mode: " << args.embedding_mode();
   os << ", dtype: " << args.dtype();
   os << ", hidden_size: " << args.hidden_size();
   os << ", hidden_act: " << args.hidden_act();
