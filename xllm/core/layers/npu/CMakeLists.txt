@@ -142,8 +142,12 @@ cc_library(
     deepseek_v4_rotary_embedding_lib
   HDRS
     ../common/deepseek_v4_rotary_embedding.h
+    ../common/rotary_embedding_util.h
+  SRCS
+    ../common/deepseek_v4_rotary_embedding.cpp
+    ../common/rotary_embedding_util.cpp
   DEPS
-    :common_layers
+    :platform
     glog::glog
     torch
 )
