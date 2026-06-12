@@ -22,7 +22,9 @@ limitations under the License.
 #include "block_manager_impl.h"
 #include "block_manager_pool.h"
 #include "core/framework/config/scheduler_config.h"
+#include "framework/block/cache_group.h"
 #include "framework/request/incremental_decoder.h"
+#include "framework/request/sequence_kv_state.h"
 
 namespace xllm {
 
@@ -352,6 +354,184 @@ TEST(BlockManagerPoolTest, SequenceCopyDoesNotReuseSingleBlockSlot) {
   ASSERT_TRUE(pool.allocate(&clone));
   EXPECT_TRUE(HasSingleBlockIdOrFail(clone));
   EXPECT_NE(GetSingleBlockIdOrFail(clone), GetSingleBlockIdOrFail(src));
+}
+
+// --- Composite-path BlockManagerPool (block-manager refactor) ---
+// The normal-model pool now routes through ConcurrentCompositeBlockManager (a
+// single C1 group) instead of the legacy BlockManagerImpl. These tests pin the
+// integration the pool owns on top of the per-manager unit tests: path routing,
+// allocate/flush/deallocate accounting, and the cross-sequence prefix match
+// plus whole-prompt back-off that composite_match_shared performs.
+
+namespace {
+
+// Three full C1 blocks worth of distinct, block-aligned prompt tokens.
+const std::vector<int32_t>& CompositePrompt() {
+  static const std::vector<int32_t> prompt = {
+      11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34};
+  return prompt;
+}
+
+BlockManagerPool::Options CompositeOptions(uint32_t num_blocks) {
+  BlockManagerPool::Options options;
+  options.num_blocks(num_blocks)
+      .host_num_blocks(0)
+      .block_size(4)
+      .enable_prefix_cache(true)
+      .num_single_blocks(8);
+  return options;
+}
+
+}  // namespace
+
+TEST(BlockManagerPoolCompositeTest, NormalModelRoutesThroughComposite) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
+
+  BlockManagerPool pool(CompositeOptions(/*num_blocks=*/16), /*dp_size=*/1);
+
+  // One composite C1 manager per DP rank; its leaf reserves block 0 as padding,
+  // so the scheduler-visible free count is num_blocks - 1 and nothing is used.
+  ASSERT_EQ(pool.num_free_blocks().size(), 1u);
+  EXPECT_EQ(pool.num_free_blocks()[0], 15u);
+  EXPECT_EQ(pool.num_used_blocks()[0], 0u);
+  EXPECT_EQ(pool.num_blocks_in_prefix_cache()[0], 0u);
+}
+
+TEST(BlockManagerPoolCompositeTest, AllocateFlushDeallocateAccounting) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
+
+  BlockManagerPool pool(CompositeOptions(/*num_blocks=*/32), /*dp_size=*/1);
+
+  const size_t baseline_free = pool.num_free_blocks()[0];
+  ASSERT_EQ(baseline_free, 31u);
+
+  Sequence seq = MakeSequence(0, CompositePrompt());
+  ASSERT_TRUE(pool.allocate(&seq));
+  EXPECT_TRUE(HasSingleBlockIdOrFail(seq));
+  EXPECT_EQ(pool.num_free_blocks()[0], baseline_free - 3);
+  EXPECT_EQ(pool.num_used_blocks()[0], 3u);
+
+  // Commit the whole prompt so deallocate's flush caches all three blocks.
+  seq.kv_state().set_kv_cache_tokens_num(seq.num_tokens());
+  pool.deallocate(&seq);
+
+  // The leaf marks the blocks logically released (used -> 0), but the group
+  // prefix cache still pins their physical ids, so they never re-enter the free
+  // list: three blocks live in the cache and free stays at baseline - 3.
+  EXPECT_EQ(pool.num_used_blocks()[0], 0u);
+  EXPECT_EQ(pool.num_free_blocks()[0], baseline_free - 3);
+  EXPECT_EQ(pool.num_blocks_in_prefix_cache()[0], 3u);
+}
+
+TEST(BlockManagerPoolCompositeTest, PrefixMatchSeedsCachedTokensWithBackoff) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
+
+  BlockManagerPool pool(CompositeOptions(/*num_blocks=*/32), /*dp_size=*/1);
+
+  // Sequence A allocates, commits, and on deallocate flushes three blocks into
+  // the C1 prefix cache.
+  Sequence seq_a = MakeSequence(0, CompositePrompt());
+  ASSERT_TRUE(pool.allocate(&seq_a));
+  seq_a.kv_state().set_kv_cache_tokens_num(seq_a.num_tokens());
+  pool.deallocate(&seq_a);
+  ASSERT_EQ(pool.num_blocks_in_prefix_cache()[0], 3u);
+
+  // Sequence B re-issues the identical prompt. match restores all three blocks,
+  // but because the whole prompt is cached the pool drops the last shared block
+  // so the forward pass keeps at least one token to recompute:
+  // shared_blocks_num
+  // == 2 and cached tokens == 2 * block_size.
+  Sequence seq_b = MakeSequence(1, CompositePrompt());
+  ASSERT_TRUE(pool.allocate(&seq_b));
+
+  EXPECT_EQ(seq_b.kv_state().kv_cache_tokens_num(), 8u);
+  CacheGroupState* c1 = seq_b.kv_state().group_state(CacheStateId::C1);
+  ASSERT_NE(c1, nullptr);
+  EXPECT_EQ(c1->shared_blocks_num, 2u);
+  // allocate() grows the group back to the full three blocks (two shared + one
+  // freshly recomputed).
+  EXPECT_EQ(c1->blocks.size(), 3u);
+}
+
+TEST(BlockManagerPoolCompositeTest, TryAllocateReservesWholePrompt) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
+
+  BlockManagerPool pool(CompositeOptions(/*num_blocks=*/32), /*dp_size=*/1);
+
+  Sequence seq = MakeSequence(0, CompositePrompt());
+  ASSERT_TRUE(pool.try_allocate(&seq));
+  EXPECT_TRUE(HasSingleBlockIdOrFail(seq));
+  // try_allocate reserves the whole prompt and marks every token cached.
+  EXPECT_EQ(seq.kv_state().kv_cache_tokens_num(), seq.num_tokens());
+  EXPECT_EQ(pool.num_used_blocks()[0], 3u);
+}
+
+TEST(BlockManagerPoolCompositeTest,
+     LazyFlushInsertsCompletedBlocksOnNextAllocate) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
+
+  BlockManagerPool pool(CompositeOptions(/*num_blocks=*/32), /*dp_size=*/1);
+
+  // Five block-aligned prompt tokens, allocated in two chunked-prefill steps.
+  const std::vector<int32_t> prompt = {11, 12, 13, 14, 21, 22, 23, 24, 31, 32,
+                                       33, 34, 41, 42, 43, 44, 51, 52, 53, 54};
+  Sequence seq = MakeSequence(0, prompt);
+
+  // First chunk: allocate three blocks. Nothing is committed, so nothing
+  // flushes and the prefix cache stays empty -- even though no cache() call was
+  // made.
+  ASSERT_TRUE(pool.allocate(&seq, /*num_tokens=*/12));
+  ASSERT_EQ(pool.num_used_blocks()[0], 3u);
+  EXPECT_EQ(pool.num_blocks_in_prefix_cache()[0], 0u);
+
+  // The forward commits the first three blocks.
+  seq.kv_state().set_kv_cache_tokens_num(12);
+
+  // Second chunk grows to five blocks. The lazy flush before this allocate
+  // inserts the three completed blocks WITHOUT any scheduler cache() call,
+  // proving the composite self-flushes on grow.
+  ASSERT_TRUE(pool.allocate(&seq, /*num_tokens=*/20));
+  EXPECT_EQ(pool.num_used_blocks()[0], 5u);
+  EXPECT_EQ(pool.num_blocks_in_prefix_cache()[0], 3u);
+}
+
+TEST(BlockManagerPoolCompositeTest, FlushForSharingCachesCommittedPrefix) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
+
+  BlockManagerPool pool(CompositeOptions(/*num_blocks=*/32), /*dp_size=*/1);
+
+  Sequence seq = MakeSequence(0, CompositePrompt());
+  ASSERT_TRUE(pool.allocate(&seq));
+  seq.kv_state().set_kv_cache_tokens_num(seq.num_tokens());
+
+  // best_of>1 expansion path: flush_for_sharing routes to the composite FOR_-
+  // SHARING flush, caching all three committed blocks so sibling sequences hit.
+  pool.flush_for_sharing(&seq);
+  EXPECT_EQ(pool.num_blocks_in_prefix_cache()[0], 3u);
+}
+
+TEST(BlockManagerPoolCompositeTest, DeallocateWithoutCacheReleasesEverything) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
+
+  BlockManagerPool pool(CompositeOptions(/*num_blocks=*/32), /*dp_size=*/1);
+
+  const size_t baseline_free = pool.num_free_blocks()[0];
+  Sequence seq = MakeSequence(0, CompositePrompt());
+  ASSERT_TRUE(pool.allocate(&seq));
+  ASSERT_EQ(pool.num_used_blocks()[0], 3u);
+
+  // No flush: every block returns to the free list and nothing is cached.
+  pool.deallocate_without_cache(&seq);
+  EXPECT_EQ(pool.num_used_blocks()[0], 0u);
+  EXPECT_EQ(pool.num_free_blocks()[0], baseline_free);
+  EXPECT_EQ(pool.num_blocks_in_prefix_cache()[0], 0u);
 }
 
 }  // namespace xllm

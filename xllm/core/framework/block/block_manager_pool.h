@@ -19,6 +19,8 @@ limitations under the License.
 #include <vector>
 
 #include "block_manager.h"
+#include "framework/block/block_manager_context.h"
+#include "framework/block/concurrent_composite_block_manager.h"
 #include "framework/block/kv_cache_manager.h"
 #include "framework/block/single_block_manager.h"
 
@@ -82,6 +84,7 @@ class BlockManagerPool : public KVCacheManager {
 
   virtual void allocate_shared(Sequence* sequence) override;
   virtual void cache(Sequence* sequence) override;
+  virtual void flush_for_sharing(Sequence* sequence) override;
 
   virtual std::vector<std::vector<BlockTransferInfo>>*
   get_swap_block_transfer_infos() override;
@@ -111,6 +114,22 @@ class BlockManagerPool : public KVCacheManager {
   bool allocate_single_block(Sequence* sequence, int32_t dp_rank);
   void deallocate_single_block(Sequence* sequence, int32_t dp_rank);
 
+  // Number of per-DP managers backing the selected path: composite_managers_
+  // on the normal composite path, block_managers_ otherwise.
+  size_t manager_count() const;
+
+  // Composite-path prefix match: attaches the C1 group's shared blocks to the
+  // sequence and seeds kv_cache_tokens_num_, mirroring add_shared_kv_blocks --
+  // including the whole-prompt-hit back-off that leaves one block to recompute.
+  void composite_match_shared(Sequence* sequence, int32_t dp_rank);
+
+  // Composite-path flush: insert the sequence's completed C1 blocks (up to the
+  // committed-token boundary) into the group prefix cache. The reason is
+  // diagnostic only; the inserted payload is identical for every reason.
+  void flush_composite(Sequence* sequence,
+                       int32_t dp_rank,
+                       PrefixCacheFlushReason reason);
+
  private:
   std::vector<std::vector<BlockTransferInfo>> swap_block_transfer_infos_;
   std::vector<std::unique_ptr<SingleBlockManager>> single_block_managers_;
@@ -119,6 +138,15 @@ class BlockManagerPool : public KVCacheManager {
   // the options for the block manager
   Options options_;
   std::vector<std::unique_ptr<BlockManager>> block_managers_;
+
+  // Normal-model composite path (block-manager refactor): when true,
+  // block_managers_ stays empty and each DP rank is served by a
+  // ConcurrentCompositeBlockManager built from a single C1 cache group. The
+  // xtensor, DSV4 (manager_types), disagg-PD, kvcache-store and host-block
+  // paths keep using block_managers_.
+  bool normal_composite_ = false;
+  std::vector<std::unique_ptr<ConcurrentCompositeBlockManager>>
+      composite_managers_;
 };
 
 }  // namespace xllm

@@ -947,8 +947,8 @@ void ContinuousScheduler::handle_running_requests(
 
   // check if the request can be expanded
   if (request->expand_sequences()) {
-    // cache the blocks to share among the sequences
-    kv_cache_manager_->cache(request->sequences()[0].get());
+    // flush the blocks to share among the expanded sequences
+    kv_cache_manager_->flush_for_sharing(request->sequences()[0].get());
   }
 
   // release blocks for finished sequences here
