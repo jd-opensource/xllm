@@ -44,7 +44,8 @@ DiTMaster::DiTMaster(const Options& options)
   CHECK(engine_->init());
 
   DiTScheduler::Options scheduler_options;
-  scheduler_options.max_request_per_batch(options.max_requests_per_batch());
+  scheduler_options.max_request_per_batch(options.max_requests_per_batch())
+      .disable_log_stats(options.disable_log_stats());
 
   scheduler_ = create_dit_scheduler(engine_.get(), scheduler_options);
   LOG(INFO) << "created dit scheduler in DiTMaster.";

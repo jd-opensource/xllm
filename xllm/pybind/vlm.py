@@ -1,8 +1,9 @@
 import os
 import signal
 import sys
+import threading
 from . import utils
-from typing import List, Optional, Union, Dict, Any
+from typing import Any, Callable, Dict, List, Optional, Union
 from xllm_export import (VLMMaster, Options, RequestOutput,
                          RequestParams, MMData)
 from .errors import ValidationError
@@ -10,6 +11,23 @@ from .params import (
     SamplingParams,
     to_request_params_list,
 )
+
+
+def _get_tqdm(
+    use_tqdm: Union[bool, Callable[..., Any]],
+) -> Optional[Callable[..., Any]]:
+    if not use_tqdm:
+        return None
+    if callable(use_tqdm):
+        return use_tqdm
+    try:
+        from tqdm import tqdm
+    except ImportError as exc:
+        raise ImportError(
+            "tqdm is required when use_tqdm=True. "
+            "Set use_tqdm=False to disable the progress bar."
+        ) from exc
+    return tqdm
 
 
 class VLM:
@@ -56,6 +74,7 @@ class VLM:
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
         use_cpp_chat_template: bool = True,
+        disable_log_stats: bool = True,
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -115,6 +134,7 @@ class VLM:
         options.is_local = is_local
         options.input_shm_size = input_shm_size
         options.output_shm_size = output_shm_size
+        options.disable_log_stats = disable_log_stats
         utils._configure_cpp_chat_template(use_cpp_chat_template, model_type)
         self.master = VLMMaster(options)
 
@@ -139,6 +159,7 @@ class VLM:
             List[SamplingParams],
         ]] = None,
         wait_for_schedule: bool = True,
+        use_tqdm: Union[bool, Callable[..., Any]] = True,
         **kwargs: Any,
     ) -> List[RequestOutput]:
         from . import mm_utils
@@ -162,32 +183,46 @@ class VLM:
             )
 
         outputs = [None] * len(prompts)
+        progress_bar = None
+        progress_bar_lock = threading.Lock()
+        tqdm_cls = _get_tqdm(use_tqdm)
+        if tqdm_cls is not None:
+            progress_bar = tqdm_cls(total=len(prompts), desc="Processed prompts")
+
         def callback(index: int, output: RequestOutput) -> bool:
             outputs[index] = output
+            if progress_bar is not None:
+                with progress_bar_lock:
+                    progress_bar.update(1)
             return True
-        # schedule the batch requests
-        if image_urls is not None:
-            self.master.handle_batch_request_with_image_urls(
-                prompts, image_urls, request_params_list, callback
-            )
-        else:
-            self.master.handle_batch_request(
-                prompts, mm_datas, request_params_list, callback
-            )
 
-        # wait for batch request to be scheduled
-        if wait_for_schedule:
-            pass
+        try:
+            # schedule the batch requests
+            if image_urls is not None:
+                self.master.handle_batch_request_with_image_urls(
+                    prompts, image_urls, request_params_list, callback
+                )
+            else:
+                self.master.handle_batch_request(
+                    prompts, mm_datas, request_params_list, callback
+                )
 
-        # run until all scheduled requsts complete
-        self.master.generate()
+            # wait for batch request to be scheduled
+            if wait_for_schedule:
+                pass
 
-        # throw an exception if there is any error
-        for index, output in enumerate(outputs):
-            if output is None:
-                raise RuntimeError("Request failed, no output received")
-            if output.status is not None and not output.status.ok:
-                raise ValidationError(output.status.code, output.status.message)
-            # carry over the prompt to the output
-            output.prompt = prompts[index]
+            # run until all scheduled requsts complete
+            self.master.generate()
+
+            # throw an exception if there is any error
+            for index, output in enumerate(outputs):
+                if output is None:
+                    raise RuntimeError("Request failed, no output received")
+                if output.status is not None and not output.status.ok:
+                    raise ValidationError(output.status.code, output.status.message)
+                # carry over the prompt to the output
+                output.prompt = prompts[index]
+        finally:
+            if progress_bar is not None:
+                progress_bar.close()
         return outputs

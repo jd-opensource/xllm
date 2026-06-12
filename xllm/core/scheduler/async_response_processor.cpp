@@ -35,7 +35,8 @@ namespace xllm {
 AsyncResponseProcessor::AsyncResponseProcessor(
     const Tokenizer* tokenizer,
     const std::optional<InstanceRole>& role,
-    bool enable_service_routing)
+    bool enable_service_routing,
+    bool disable_log_stats)
     : response_threadpool_(
           /*num_threads=*/::xllm::ServiceConfig::get_instance()
               .num_response_handling_threads(),
@@ -50,14 +51,18 @@ AsyncResponseProcessor::AsyncResponseProcessor(
           /*pool_name=*/"AsyncResponseProcessor.generate_output"),
       tokenizer_(tokenizer->clone()),
       role_(role.value_or(InstanceRole::DEFAULT)),
-      enable_batch_response_(enable_service_routing) {}
+      enable_batch_response_(enable_service_routing),
+      disable_log_stats_(disable_log_stats) {}
 
 void AsyncResponseProcessor::process_failed_request(
     std::shared_ptr<Request> request,
     Status status) {
   // schedule the response handling
-  auto runnable = [request = request, status = status]() {
-    request->log_error_statistic(status);
+  const bool disable_log_stats = disable_log_stats_;
+  auto runnable = [disable_log_stats, request = request, status = status]() {
+    if (!disable_log_stats) {
+      request->log_error_statistic(status);
+    }
     RequestOutput output;
     output.request_id = request->request_id();
     output.service_request_id = request->service_request_id();
@@ -102,7 +107,9 @@ void AsyncResponseProcessor::process_completed_request(
                       static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
     RequestOutput req_output =
         request->generate_output(*tokenizer_, &generate_output_threadpool_);
-    request->log_statistic(end_2_end_latency_seconds);
+    if (!disable_log_stats_) {
+      request->log_statistic(end_2_end_latency_seconds);
+    }
     request->state().output_func(req_output);
   };
   if (request->state().response_thread_id < 0) {
@@ -133,7 +140,9 @@ void AsyncResponseProcessor::batch_process_completed_requests(
           end_2_end_latency_milliseconds,
           static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
       if (request->finished() || request->cancelled()) {
-        request->log_statistic(end_2_end_latency_seconds);
+        if (!disable_log_stats_) {
+          request->log_statistic(end_2_end_latency_seconds);
+        }
       }
 
       *request_output = std::move(request->generate_output(*tokenizer_));

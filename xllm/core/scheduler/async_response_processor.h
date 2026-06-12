@@ -30,7 +30,8 @@ class AsyncResponseProcessor final {
  public:
   AsyncResponseProcessor(const Tokenizer* tokenizer,
                          const std::optional<InstanceRole>& role,
-                         bool enable_service_routing);
+                         bool enable_service_routing,
+                         bool disable_log_stats);
   virtual ~AsyncResponseProcessor() = default;
 
   void process_completed_request(std::shared_ptr<Request> request);
@@ -74,6 +75,8 @@ class AsyncResponseProcessor final {
   // `True` means decode instance will response batch request_outputs to
   // prefill or xllm service, this will decrease rpc cost.
   bool enable_batch_response_ = false;
+
+  bool disable_log_stats_ = false;
 };
 
 }  // namespace xllm
