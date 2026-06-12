@@ -1287,6 +1287,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
 
   auto args = model_loader->model_args();
   auto quant_args = model_loader->quant_args();
+  const bool embedding_mode = options_.task_type() == "embed";
+  args.embedding_mode(embedding_mode);
   torch::ScalarType dtype = util::parse_dtype(args.dtype(), device_);
 
   const int64_t tokenizer_vocab_size = tokenizer->vocab_size();
