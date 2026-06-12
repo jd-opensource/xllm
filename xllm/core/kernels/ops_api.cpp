@@ -436,6 +436,8 @@ torch::Tensor group_gemm(GroupGemmParams& params) {
                          params.token_count,
                          params.combine_idx,
                          params.output);
+#elif defined(USE_DCU)
+  return dcu::group_gemm(params.a, params.b, params.token_count, params.output);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -534,6 +536,10 @@ std::vector<torch::Tensor> moe_gen_idx(MoeGenIdxParams& params) {
   return mlu::moe_gen_idx(params.expert_id, params.expert_num);
 #elif defined(USE_ILU)
   return ilu::moe_gen_idx(params.expert_id, params.expert_num);
+#elif defined(USE_DCU)
+  auto [src_dst, dst_src, expert_sizes] =
+      cuda::moe_compute_index(params.expert_id, params.expert_num);
+  return {src_dst, dst_src, expert_sizes};
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -580,6 +586,16 @@ torch::Tensor moe_combine_result(MoeCombineResultParams& params) {
   return output;
 #elif defined(USE_ILU)
   return ilu::moe_combine_result(params.input, params.reduce_weight);
+#elif defined(USE_DCU)
+  // N = params.reduce_weight.size(0), topk = params.reduce_weight.size(1)
+  int64_t N = params.reduce_weight.size(0);
+  int32_t topk = static_cast<int32_t>(params.reduce_weight.size(1));
+  auto out =
+      cuda::moe_combine_result(params.input, params.reduce_weight, N, topk);
+  if (params.residual.has_value()) {
+    out = out + params.residual.value();
+  }
+  return out;
 #else
   NOT_IMPLEMENTED();
 #endif

@@ -31,6 +31,24 @@ torch::Tensor matmul(torch::Tensor a,
                      torch::Tensor b,
                      std::optional<torch::Tensor> bias);
 
+// MoE group GEMM via CK Tile grouped_gemm_tileloop.
+//
+// Computes a batched per-expert GEMM:
+//   for each expert e:
+//     C[e] = A[t_start:t_end, :] * B[e, :, :]^T
+//
+// Parameters:
+//   input       — [total_tokens, K]  contiguous, fp16 or bf16
+//   weight      — [num_experts, N, K] contiguous, same dtype as input
+//   token_count — [num_experts] int32, number of tokens per expert
+//   output      — optional [total_tokens, N] contiguous; allocated if omitted
+//
+// Returns output tensor.
+torch::Tensor group_gemm(const torch::Tensor& input,
+                         const torch::Tensor& weight,
+                         const torch::Tensor& token_count,
+                         std::optional<torch::Tensor> output = std::nullopt);
+
 // Build a 2D block_table [B, max_pages] int32 from CSR-format paged KV
 // metadata.
 //
