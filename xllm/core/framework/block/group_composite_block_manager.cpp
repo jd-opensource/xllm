@@ -126,8 +126,23 @@ bool GroupCompositeBlockManager::allocate(BlockManagerContext* context,
   CHECK_EQ(groups->size(), runtimes_.size());
 
   for (size_t i = 0; i < runtimes_.size(); ++i) {
-    const bool ok =
-        runtimes_[i].policy->allocate(context, &(*groups)[i], num_tokens);
+    CacheGroupRuntime& runtime = runtimes_[i];
+    bool ok = runtime.policy->allocate(context, &(*groups)[i], num_tokens);
+    if (!ok && runtime.prefix_cache != nullptr) {
+      // Group-local allocation fallback: the leaf pool ran dry, but this group
+      // owns a prefix cache pinning completed blocks out of the free list.
+      // Evict exactly the shortfall from THIS group's cache (never another
+      // group's) and retry once. Evicted blocks are not restored if a later
+      // group in the same allocate fails -- the prefix cache is a best-effort
+      // reuse pool, not part of the all-or-nothing block reservation.
+      const size_t needed =
+          runtime.policy->additional_blocks_needed((*groups)[i], num_tokens);
+      const size_t free = runtime.allocator->num_free_blocks();
+      if (needed > free) {
+        runtime.prefix_cache->evict(needed - free);
+      }
+      ok = runtime.policy->allocate(context, &(*groups)[i], num_tokens);
+    }
     if (ok) {
       continue;
     }

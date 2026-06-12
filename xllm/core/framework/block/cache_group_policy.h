@@ -49,6 +49,18 @@ class ICacheGroupPolicy {
 
   virtual void rollback(BlockManagerContext* context,
                         CacheGroupState* state) = 0;
+
+  // Blocks this policy must still draw from its allocator to grow `state` to
+  // cover `num_tokens` -- i.e. the allocator shortfall the orchestrator has to
+  // make room for (by evicting this group's prefix cache) before retrying a
+  // failed allocate(). Defaults to 0 for policies whose growth is not a pure
+  // function of the committed token count (ring / once); only the incremental
+  // policy reports a meaningful figure, which is also the only group that owns
+  // a prefix cache in phase 1.
+  virtual size_t additional_blocks_needed(const CacheGroupState& state,
+                                          size_t num_tokens) const {
+    return 0;
+  }
 };
 
 // Token-linear growth: needed_blocks = ceil(num_tokens / block_size), new
@@ -63,6 +75,8 @@ class IncrementalAppendPolicy final : public ICacheGroupPolicy {
   void deallocate(BlockManagerContext* context,
                   CacheGroupState* state) override;
   void rollback(BlockManagerContext* context, CacheGroupState* state) override;
+  size_t additional_blocks_needed(const CacheGroupState& state,
+                                  size_t num_tokens) const override;
 
  private:
   CacheGroupSpec spec_;

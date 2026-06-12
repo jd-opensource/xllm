@@ -99,6 +99,15 @@ void IncrementalAppendPolicy::rollback(BlockManagerContext* context,
   state->last_alloc_new_blocks = 0;
 }
 
+size_t IncrementalAppendPolicy::additional_blocks_needed(
+    const CacheGroupState& state,
+    size_t num_tokens) const {
+  const uint64_t needed_blocks = ceil_div(num_tokens, spec_.block_size);
+  return needed_blocks > state.blocks.size()
+             ? needed_blocks - state.blocks.size()
+             : 0;
+}
+
 RollingWindowPolicy::RollingWindowPolicy(const CacheGroupSpec& spec,
                                          BlockManager* allocator)
     : spec_(spec), allocator_(allocator) {

@@ -320,4 +320,86 @@ TEST(GroupCompositeBlockManagerTest, NonCacheableGroupsDisablePrefixCache) {
   EXPECT_TRUE(matched.group_matches.empty());
 }
 
+// Group-local allocation fallback: when the C1 leaf pool is exhausted but its
+// prefix cache still pins reclaimable blocks, allocate() evicts exactly the
+// shortfall from that group's cache and the retry succeeds.
+TEST(GroupCompositeBlockManagerTest, AllocateEvictsGroupPrefixCacheOnShortage) {
+  // Free baseline is 3 (block 0 is padding) -- room for one 3-block sequence.
+  GroupCompositeBlockManager manager(
+      {make_cacheable_c1_spec(/*num_blocks=*/4)});
+
+  const std::vector<int32_t> tokens = make_tokens(3 * kBlockSize);
+
+  // Sequence A fills the pool then, on deallocate, the internal tail flush
+  // inserts its three committed blocks into the C1 cache: the live blocks are
+  // released but the cache still pins all three physical ids out of the free
+  // list.
+  KVCacheState kv_a;
+  PrefixHashState hash_a;
+  BlockManagerContext context_a;
+  context_a.kv_state = &kv_a;
+  context_a.tokens = Slice<int32_t>(tokens);
+  context_a.hash_state = &hash_a;
+  ASSERT_TRUE(manager.allocate(&context_a, /*num_tokens=*/3 * kBlockSize));
+  kv_a.set_kv_cache_tokens_num(3 * kBlockSize);
+  manager.deallocate(&context_a);
+  ASSERT_EQ(manager.num_blocks_in_prefix_cache(), 3u);
+  ASSERT_EQ(manager.group_free_blocks(CacheStateId::C1), 0u);
+
+  // Sequence B needs three fresh blocks but the free list is empty. Without the
+  // fallback the leaf returns nothing; with it the group evicts its cache and
+  // the retry allocates the reclaimed ids. A bare context (no tokens/hash)
+  // performs no insert of its own.
+  KVCacheState kv_b;
+  BlockManagerContext context_b;
+  context_b.kv_state = &kv_b;
+  EXPECT_TRUE(manager.allocate(&context_b, /*num_tokens=*/3 * kBlockSize));
+  EXPECT_EQ(group_block_count(&kv_b, CacheStateId::C1), 3u);
+  // The cache gave up exactly the blocks B reclaimed.
+  EXPECT_EQ(manager.num_blocks_in_prefix_cache(), 0u);
+}
+
+// When even a full eviction of the failing group's cache cannot cover the
+// request, allocate() fails, rolls back the groups already grown in this call,
+// and leaves the eviction in place (the cache is not part of the reservation).
+TEST(GroupCompositeBlockManagerTest,
+     AllocateEvictionFallbackStillFailsWhenCacheTooSmall) {
+  // SINGLE_RES is ordered first so it grows successfully and must be rolled
+  // back when the cacheable C1 group fails after exhausting its cache.
+  GroupCompositeBlockManager manager(
+      {make_single_res_spec(/*num_blocks=*/4),
+       make_cacheable_c1_spec(/*num_blocks=*/4)});
+
+  const std::vector<int32_t> tokens = make_tokens(2 * kBlockSize);
+
+  // Sequence A caches two C1 blocks (8 tokens) via the deallocate tail flush,
+  // leaving the C1 leaf with one free block and two pinned in the cache.
+  KVCacheState kv_a;
+  PrefixHashState hash_a;
+  BlockManagerContext context_a;
+  context_a.kv_state = &kv_a;
+  context_a.tokens = Slice<int32_t>(tokens);
+  context_a.hash_state = &hash_a;
+  ASSERT_TRUE(manager.allocate(&context_a, /*num_tokens=*/2 * kBlockSize));
+  kv_a.set_kv_cache_tokens_num(2 * kBlockSize);
+  manager.deallocate(&context_a);
+  ASSERT_EQ(manager.num_blocks_in_prefix_cache(), 2u);
+  ASSERT_EQ(manager.group_free_blocks(CacheStateId::C1), 1u);
+
+  // Sequence B needs four C1 blocks (16 tokens). Even after evicting both
+  // cached blocks the leaf has only three free, so the allocate fails.
+  KVCacheState kv_b;
+  BlockManagerContext context_b;
+  context_b.kv_state = &kv_b;
+  EXPECT_FALSE(manager.allocate(&context_b, /*num_tokens=*/4 * kBlockSize));
+
+  // C1 grew nothing; the eviction persisted (cache emptied, three ids free).
+  EXPECT_EQ(group_block_count(&kv_b, CacheStateId::C1), 0u);
+  EXPECT_EQ(manager.num_blocks_in_prefix_cache(), 0u);
+  EXPECT_EQ(manager.group_free_blocks(CacheStateId::C1), 3u);
+  // SINGLE_RES grew its block first, then rolled back to its full free pool.
+  EXPECT_EQ(group_block_count(&kv_b, CacheStateId::SINGLE_RES), 0u);
+  EXPECT_EQ(manager.group_free_blocks(CacheStateId::SINGLE_RES), 3u);
+}
+
 }  // namespace xllm
