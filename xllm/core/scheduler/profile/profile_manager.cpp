@@ -877,7 +877,16 @@ void ProfileManager::warmup_for_graph() {
 
   int32_t prefill_tokens =
       std::min(options_.max_tokens_per_batch(), max_context_len);
-  int32_t max_seqs_per_batch = options_.max_seqs_per_batch();
+  // Decode batches larger than graph_decode_batch_size_limit fall back to
+  // eager mode (see AclGraphExecutorImpl::run), so the ACL graph is never
+  // captured beyond that size. Cap the warmup batch size accordingly to avoid
+  // exhausting the single-block pool (sized by max_concurrent_requests) when
+  // max_seqs_per_batch is configured larger than it.
+  int32_t decode_batch_size_limit = std::max<int32_t>(
+      1,
+      ::xllm::ExecutionConfig::get_instance().graph_decode_batch_size_limit());
+  int32_t max_seqs_per_batch =
+      std::min(options_.max_seqs_per_batch(), decode_batch_size_limit);
   int32_t decode_seq_len = std::min(16, max_context_len);
 
   double prefill_latency = run_request(prefill_tokens, 0, 1);
