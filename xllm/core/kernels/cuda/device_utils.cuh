@@ -23,6 +23,9 @@ limitations under the License.
 namespace cub = hipcub;
 #else
 #include <cub/cub.cuh>
+#if CUB_VERSION >= 200800
+#include <cuda/functional>
+#endif
 #endif
 
 namespace xllm::kernel::cuda {
@@ -64,14 +67,13 @@ __device__ __forceinline__ T xllm_ldg(const T* ptr) {
 #endif
 }
 
-// Define reduction operators based on CUDA version
-// CUDA 13 (12.9+) deprecated cub::Max/Min in favor of cuda::maximum/minimum
-#if CUDA_VERSION >= 12090
-using MaxReduceOp = ::cuda::maximum<>;
-using MinReduceOp = ::cuda::minimum<>;
-#elif defined(USE_DCU)
+// Define reduction operators based on CUB version.
+#if defined(USE_DCU)
 using MaxReduceOp = hipcub::Max;
 using MinReduceOp = hipcub::Min;
+#elif CUB_VERSION >= 200800
+using MaxReduceOp = ::cuda::maximum<>;
+using MinReduceOp = ::cuda::minimum<>;
 #else
 using MaxReduceOp = cub::Max;
 using MinReduceOp = cub::Min;
