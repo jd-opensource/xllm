@@ -32,8 +32,8 @@ CompositeMatchResult NoPrefixPolicy::match(
   return CompositeMatchResult{};
 }
 
-PrefixCacheInsertResult NoPrefixPolicy::flush(
-    const PrefixCacheFlushContext& /*context*/) {
+PrefixCacheInsertResult NoPrefixPolicy::insert_committed(
+    const PrefixCacheInsertContext& /*context*/) {
   return PrefixCacheInsertResult{};
 }
 
@@ -77,8 +77,8 @@ CompositeMatchResult IncrementalOnlyPrefixPolicy::match(
   return result;
 }
 
-PrefixCacheInsertResult IncrementalOnlyPrefixPolicy::flush(
-    const PrefixCacheFlushContext& context) {
+PrefixCacheInsertResult IncrementalOnlyPrefixPolicy::insert_committed(
+    const PrefixCacheInsertContext& context) {
   PrefixCacheInsertResult result;
   CHECK(context.kv_state != nullptr);
   CHECK(context.hash_state != nullptr);

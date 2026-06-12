@@ -123,14 +123,16 @@ TEST(KVCacheStateTest, SharedCountsReadThroughC1GroupAfterMatch) {
   const std::vector<int32_t> tokens = make_tokens(3 * kBlockSize);
 
   KVCacheState kv_a;
+  PrefixHashState hash_a;
   BlockManagerContext context_a;
   context_a.kv_state = &kv_a;
+  context_a.tokens = Slice<int32_t>(tokens);
+  context_a.hash_state = &hash_a;
   ASSERT_TRUE(manager.allocate(&context_a, /*num_tokens=*/3 * kBlockSize));
-  PrefixHashState hash_a;
-  manager.flush_prefix_cache(&context_a,
-                             Slice<int32_t>(tokens),
-                             /*committed_tokens=*/3 * kBlockSize,
-                             &hash_a);
+  // Commit the three blocks, then the next allocate lazily inserts them into
+  // the prefix cache.
+  kv_a.set_kv_cache_tokens_num(3 * kBlockSize);
+  ASSERT_TRUE(manager.allocate(&context_a, /*num_tokens=*/3 * kBlockSize));
 
   KVCacheState kv_b;
   BlockManagerContext context_b;

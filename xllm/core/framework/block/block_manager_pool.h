@@ -84,7 +84,6 @@ class BlockManagerPool : public KVCacheManager {
 
   virtual void allocate_shared(Sequence* sequence) override;
   virtual void cache(Sequence* sequence) override;
-  virtual void flush_for_sharing(Sequence* sequence) override;
 
   virtual std::vector<std::vector<BlockTransferInfo>>*
   get_swap_block_transfer_infos() override;
@@ -122,13 +121,6 @@ class BlockManagerPool : public KVCacheManager {
   // sequence and seeds kv_cache_tokens_num_, mirroring add_shared_kv_blocks --
   // including the whole-prompt-hit back-off that leaves one block to recompute.
   void composite_match_shared(Sequence* sequence, int32_t dp_rank);
-
-  // Composite-path flush: insert the sequence's completed C1 blocks (up to the
-  // committed-token boundary) into the group prefix cache. The reason is
-  // diagnostic only; the inserted payload is identical for every reason.
-  void flush_composite(Sequence* sequence,
-                       int32_t dp_rank,
-                       PrefixCacheFlushReason reason);
 
  private:
   std::vector<std::vector<BlockTransferInfo>> swap_block_transfer_infos_;

@@ -54,16 +54,6 @@ class ConcurrentCompositeBlockManager final {
                                           const Slice<int32_t>& tokens,
                                           const MMData* mm_data = nullptr);
 
-  // Insert the sequence's newly-completed full blocks into the group-local
-  // prefix caches. Serialized for the same reason as match.
-  PrefixCacheInsertResult flush_prefix_cache(
-      BlockManagerContext* context,
-      const Slice<int32_t>& tokens,
-      size_t committed_tokens,
-      PrefixHashState* hash_state,
-      PrefixCacheFlushReason reason = PrefixCacheFlushReason::BEFORE_DEALLOCATE,
-      const MMData* mm_data = nullptr);
-
   size_t num_groups() const { return composite_.num_groups(); }
 
   size_t num_free_blocks() const;

@@ -684,9 +684,6 @@ void ContinuousScheduler::handle_decode_requests(
             allocate_failed = true;
             break;
           }
-          if (sequence->if_cache_block_for_prefill()) {
-            kv_cache_manager_->cache(sequence);
-          }
           candidate_sequences.emplace_back(sequence);
           candidate_token_budgets.emplace_back(decode_step_tokens);
           allocated_tokens += decode_step_tokens;
@@ -753,10 +750,6 @@ void ContinuousScheduler::handle_decode_requests(
         if (!kv_cache_manager_->allocate(sequence.get(), updated_num_tokens)) {
           has_enough_blocks = false;
           break;
-        }
-
-        if (sequence->if_cache_block_for_prefill()) {
-          kv_cache_manager_->cache(sequence.get());
         }
 
         // update the allocated tokens for the sequence
@@ -945,11 +938,10 @@ void ContinuousScheduler::handle_running_requests(
                << request->request_id();
   }
 
-  // check if the request can be expanded
-  if (request->expand_sequences()) {
-    // flush the blocks to share among the expanded sequences
-    kv_cache_manager_->flush_for_sharing(request->sequences()[0].get());
-  }
+  // check if the request can be expanded. best_of>1 prefix sharing across the
+  // expanded sequences now comes from the COW expansion path (later migration
+  // step), not from a scheduler-driven prefix-cache flush.
+  request->expand_sequences();
 
   // release blocks for finished sequences here
   for (auto& sequence : request->sequences()) {

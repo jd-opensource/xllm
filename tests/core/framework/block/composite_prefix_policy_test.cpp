@@ -79,18 +79,17 @@ CacheablePrefixEntry make_c1_entry(PrefixCache* cache) {
   return entry;
 }
 
-PrefixCacheFlushContext make_flush_context(KVCacheState* kv_state,
-                                           const Slice<int32_t>& tokens,
-                                           size_t committed_tokens,
-                                           PrefixHashState* hash_state) {
-  PrefixCacheFlushContext context;
+PrefixCacheInsertContext make_insert_context(KVCacheState* kv_state,
+                                             const Slice<int32_t>& tokens,
+                                             size_t committed_tokens,
+                                             PrefixHashState* hash_state) {
+  PrefixCacheInsertContext context;
   context.kv_state = kv_state;
   context.tokens = tokens;
   context.committed_tokens = committed_tokens;
   context.hash_state = hash_state;
   context.role = CacheStorageRole::DEVICE;
   context.device_dp_rank = 0;
-  context.reason = PrefixCacheFlushReason::BEFORE_DEALLOCATE;
   return context;
 }
 
@@ -106,11 +105,11 @@ PrefixCacheMatchContext make_match_context(KVCacheState* kv_state,
 
 }  // namespace
 
-// flush stamps each newly-completed full C1 block with its cumulative prefix
-// hash, inserts it into the cache, advances prefix_cached_tokens, and reports
-// exactly the keys it had not seen before; a re-flush at the same boundary is a
-// no-op.
-TEST(CompositePrefixPolicyTest, IncrementalFlushInsertsAndIsIdempotent) {
+// insert_committed stamps each newly-completed full C1 block with its
+// cumulative prefix hash, inserts it into the cache, advances
+// prefix_cached_tokens, and reports exactly the keys it had not seen before; a
+// re-insert at the same boundary is a no-op.
+TEST(CompositePrefixPolicyTest, IncrementalInsertIsIdempotent) {
   auto allocator = make_leaf_allocator(/*num_blocks=*/16);
   PrefixCache cache(kStride);
   IncrementalOnlyPrefixPolicy policy(make_c1_entry(&cache));
@@ -121,12 +120,12 @@ TEST(CompositePrefixPolicyTest, IncrementalFlushInsertsAndIsIdempotent) {
       push_c1_group(&kv_state, allocator.get(), /*block_count=*/3);
   PrefixHashState hash_state;
 
-  PrefixCacheFlushContext flush_ctx =
-      make_flush_context(&kv_state,
-                         Slice<int32_t>(tokens),
-                         /*committed_tokens=*/3 * kStride,
-                         &hash_state);
-  PrefixCacheInsertResult inserted = policy.flush(flush_ctx);
+  PrefixCacheInsertContext insert_ctx =
+      make_insert_context(&kv_state,
+                          Slice<int32_t>(tokens),
+                          /*committed_tokens=*/3 * kStride,
+                          &hash_state);
+  PrefixCacheInsertResult inserted = policy.insert_committed(insert_ctx);
 
   EXPECT_EQ(inserted.inserted_blocks.size(), 3u);
   EXPECT_EQ(cache.num_blocks(), 3u);
@@ -143,8 +142,8 @@ TEST(CompositePrefixPolicyTest, IncrementalFlushInsertsAndIsIdempotent) {
   }
   EXPECT_EQ(token_ends, (std::set<size_t>{kStride, 2 * kStride, 3 * kStride}));
 
-  // Re-flushing the same committed prefix inserts nothing new.
-  PrefixCacheInsertResult again = policy.flush(flush_ctx);
+  // Re-inserting the same committed prefix inserts nothing new.
+  PrefixCacheInsertResult again = policy.insert_committed(insert_ctx);
   EXPECT_TRUE(again.inserted_blocks.empty());
   EXPECT_EQ(cache.num_blocks(), 3u);
   (void)block_ids;
@@ -159,14 +158,14 @@ TEST(CompositePrefixPolicyTest, MatchRestoresInsertedPrefix) {
 
   const std::vector<int32_t> tokens = make_tokens(3 * kStride);
 
-  // Sequence A flushes its 3 full blocks into the cache.
+  // Sequence A inserts its 3 full blocks into the cache.
   KVCacheState kv_a;
   const std::vector<int32_t> a_ids =
       push_c1_group(&kv_a, allocator.get(), /*block_count=*/3);
   PrefixHashState hash_a;
-  PrefixCacheFlushContext flush_ctx = make_flush_context(
+  PrefixCacheInsertContext insert_ctx = make_insert_context(
       &kv_a, Slice<int32_t>(tokens), /*committed_tokens=*/3 * kStride, &hash_a);
-  ASSERT_EQ(policy.flush(flush_ctx).inserted_blocks.size(), 3u);
+  ASSERT_EQ(policy.insert_committed(insert_ctx).inserted_blocks.size(), 3u);
 
   // Sequence B holds an empty C1 group and matches the same prompt.
   KVCacheState kv_b;
@@ -193,9 +192,10 @@ TEST(CompositePrefixPolicyTest, MatchRestoresInsertedPrefix) {
   }
 }
 
-// flush only commits whole blocks up to the committed-token boundary: with 10
-// committed tokens and stride 4, only the first two blocks (8 tokens) flush.
-TEST(CompositePrefixPolicyTest, FlushStopsAtCommittedFullBlockBoundary) {
+// insert_committed only commits whole blocks up to the committed-token
+// boundary: with 10 committed tokens and stride 4, only the first two blocks
+// (8 tokens) are inserted.
+TEST(CompositePrefixPolicyTest, InsertStopsAtCommittedFullBlockBoundary) {
   auto allocator = make_leaf_allocator(/*num_blocks=*/16);
   PrefixCache cache(kStride);
   IncrementalOnlyPrefixPolicy policy(make_c1_entry(&cache));
@@ -205,9 +205,9 @@ TEST(CompositePrefixPolicyTest, FlushStopsAtCommittedFullBlockBoundary) {
   push_c1_group(&kv_state, allocator.get(), /*block_count=*/3);
   PrefixHashState hash_state;
 
-  PrefixCacheFlushContext flush_ctx = make_flush_context(
+  PrefixCacheInsertContext insert_ctx = make_insert_context(
       &kv_state, Slice<int32_t>(tokens), /*committed_tokens=*/10, &hash_state);
-  PrefixCacheInsertResult inserted = policy.flush(flush_ctx);
+  PrefixCacheInsertResult inserted = policy.insert_committed(insert_ctx);
 
   EXPECT_EQ(inserted.inserted_blocks.size(), 2u);
   EXPECT_EQ(cache.num_blocks(), 2u);
@@ -229,12 +229,12 @@ TEST(CompositePrefixPolicyTest, NoPrefixPolicyReturnsEmpty) {
   EXPECT_EQ(matched.matched_tokens, 0u);
   EXPECT_TRUE(matched.group_matches.empty());
 
-  PrefixCacheFlushContext flush_ctx =
-      make_flush_context(&kv_state,
-                         Slice<int32_t>(tokens),
-                         /*committed_tokens=*/3 * kStride,
-                         &hash_state);
-  PrefixCacheInsertResult inserted = policy.flush(flush_ctx);
+  PrefixCacheInsertContext insert_ctx =
+      make_insert_context(&kv_state,
+                          Slice<int32_t>(tokens),
+                          /*committed_tokens=*/3 * kStride,
+                          &hash_state);
+  PrefixCacheInsertResult inserted = policy.insert_committed(insert_ctx);
   EXPECT_TRUE(inserted.inserted_blocks.empty());
 }
 

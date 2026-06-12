@@ -56,11 +56,6 @@ class KVCacheManager {
   virtual void allocate_shared(Sequence* sequence) = 0;
   virtual void cache(Sequence* sequence) = 0;
 
-  // Flush a sequence's committed prefix so sibling sequences (best_of>1
-  // expansion) can share it. Defaults to cache(): behavior-preserving for every
-  // manager that does not distinguish the sharing flush from the cleanup flush.
-  virtual void flush_for_sharing(Sequence* sequence) { cache(sequence); }
-
   virtual std::vector<std::vector<BlockTransferInfo>>*
   get_swap_block_transfer_infos() = 0;
 

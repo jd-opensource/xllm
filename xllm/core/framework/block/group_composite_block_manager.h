@@ -89,20 +89,6 @@ class GroupCompositeBlockManager final {
                                           const Slice<int32_t>& tokens,
                                           const MMData* mm_data = nullptr);
 
-  // Insert the sequence's newly-completed full blocks (up to
-  // `committed_tokens`) into the group-local prefix caches, advancing each
-  // group's prefix_cached_tokens. `hash_state` carries the sequence's
-  // incremental prefix hash chain. Returns the blocks newly added to a cache
-  // (for downstream Hierarchy/store paths); already-present keys are not
-  // reported.
-  PrefixCacheInsertResult flush_prefix_cache(
-      BlockManagerContext* context,
-      const Slice<int32_t>& tokens,
-      size_t committed_tokens,
-      PrefixHashState* hash_state,
-      PrefixCacheFlushReason reason = PrefixCacheFlushReason::BEFORE_DEALLOCATE,
-      const MMData* mm_data = nullptr);
-
   size_t num_groups() const { return runtimes_.size(); }
 
   // Total free blocks summed across all group allocators.
@@ -132,9 +118,19 @@ class GroupCompositeBlockManager final {
   // stamping each entry's state_id. Idempotent across a sequence lifetime.
   void ensure_group_states(KVCacheState* kv_state) const;
 
+  // Insert the sequence's newly-completed full blocks into the group-local
+  // prefix caches, advancing each cacheable group's prefix_cached_tokens. This
+  // is the internal "fill once per completed block" step: it runs at allocate
+  // (lazily flushing the previous forward's committed blocks before growing)
+  // and at deallocate (the final tail blocks before release). The committed-
+  // token boundary is read from `context->kv_state->kv_cache_tokens_num()`.
+  // No-op unless the context carries a hash_state and a non-empty token view
+  // (see BlockManagerContext) and at least one group is prefix-cacheable.
+  void insert_committed_blocks(BlockManagerContext* context);
+
   std::vector<CacheGroupRuntime> runtimes_;
 
-  // Cross-group prefix match/flush. Exactly one per composite: IncrementalOnly
+  // Cross-group prefix match/insert. Exactly one per composite: IncrementalOnly
   // for normal (C1) models, NoPrefix when no group is prefix-cacheable.
   std::unique_ptr<ICompositePrefixPolicy> prefix_policy_;
 };

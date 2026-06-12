@@ -31,19 +31,8 @@ class PrefixCache;
 class PrefixHashState;
 class MMData;
 
-// Why the composite is flushing: lazy flush before (shared) allocate, final
-// flush before deallocate, or the explicit best_of>1 sharing flush. The insert
-// payload is identical across reasons (only committed full blocks); the reason
-// is carried for policy decisions and diagnostics.
-enum class PrefixCacheFlushReason : int8_t {
-  BEFORE_ALLOCATE = 0,
-  BEFORE_ALLOCATE_SHARED = 1,
-  BEFORE_DEALLOCATE = 2,
-  FOR_SHARING = 3,
-};
-
-// Whether an inserted block came from a full-block flush (incremental groups)
-// or a full-restore-chunk flush (DSV4 chunk-atomic groups).
+// Whether an inserted block came from a full-block insert (incremental groups)
+// or a full-restore-chunk insert (DSV4 chunk-atomic groups).
 enum class PrefixCacheInsertKind : int8_t {
   FULL_BLOCK = 0,
   FULL_RESTORE_CHUNK = 1,
@@ -103,7 +92,7 @@ struct PrefixCacheMatchContext {
   int32_t device_dp_rank = -1;
 };
 
-struct PrefixCacheFlushContext {
+struct PrefixCacheInsertContext {
   KVCacheState* kv_state = nullptr;
   Slice<int32_t> tokens;
   size_t committed_tokens = 0;
@@ -111,7 +100,6 @@ struct PrefixCacheFlushContext {
   const MMData* mm_data = nullptr;
   CacheStorageRole role = CacheStorageRole::DEVICE;
   int32_t device_dp_rank = -1;
-  PrefixCacheFlushReason reason = PrefixCacheFlushReason::BEFORE_ALLOCATE;
 };
 
 // Aggregates per-group prefix caches into a single composite match/flush. There
@@ -128,29 +116,29 @@ class ICompositePrefixPolicy {
 
   // Inserts newly-completed full blocks of cacheable groups into their caches,
   // advancing each group's prefix_cached_tokens.
-  virtual PrefixCacheInsertResult flush(
-      const PrefixCacheFlushContext& context) = 0;
+  virtual PrefixCacheInsertResult insert_committed(
+      const PrefixCacheInsertContext& context) = 0;
 };
 
-// Disables prefix caching: match is always 0, flush never inserts. Used by
-// Qwen3.5+ (Linear state is unrestorable) and the first-phase DSV4 path.
+// Disables prefix caching: match is always 0, insert never adds anything. Used
+// by Qwen3.5+ (Linear state is unrestorable) and the first-phase DSV4 path.
 class NoPrefixPolicy final : public ICompositePrefixPolicy {
  public:
   CompositeMatchResult match(const PrefixCacheMatchContext& context) override;
-  PrefixCacheInsertResult flush(
-      const PrefixCacheFlushContext& context) override;
+  PrefixCacheInsertResult insert_committed(
+      const PrefixCacheInsertContext& context) override;
 };
 
 // Normal-model policy: a single C1 prefix cache. The last continuous prefix
 // key hit is immediately restorable, and every newly-completed full C1 block is
-// flushed in prefill and decode.
+// inserted in prefill and decode.
 class IncrementalOnlyPrefixPolicy final : public ICompositePrefixPolicy {
  public:
   explicit IncrementalOnlyPrefixPolicy(const CacheablePrefixEntry& c1_entry);
 
   CompositeMatchResult match(const PrefixCacheMatchContext& context) override;
-  PrefixCacheInsertResult flush(
-      const PrefixCacheFlushContext& context) override;
+  PrefixCacheInsertResult insert_committed(
+      const PrefixCacheInsertContext& context) override;
 
  private:
   CacheablePrefixEntry c1_;

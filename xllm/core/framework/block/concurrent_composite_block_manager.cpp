@@ -40,18 +40,6 @@ CompositeMatchResult ConcurrentCompositeBlockManager::match_prefix_cache(
   return composite_.match_prefix_cache(context, tokens, mm_data);
 }
 
-PrefixCacheInsertResult ConcurrentCompositeBlockManager::flush_prefix_cache(
-    BlockManagerContext* context,
-    const Slice<int32_t>& tokens,
-    size_t committed_tokens,
-    PrefixHashState* hash_state,
-    PrefixCacheFlushReason reason,
-    const MMData* mm_data) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return composite_.flush_prefix_cache(
-      context, tokens, committed_tokens, hash_state, reason, mm_data);
-}
-
 size_t ConcurrentCompositeBlockManager::num_free_blocks() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return composite_.num_free_blocks();

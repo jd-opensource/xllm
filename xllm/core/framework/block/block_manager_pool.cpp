@@ -53,7 +53,26 @@ std::vector<CacheGroupSpec> make_normal_composite_specs(
 
 // Bind a sequence's device KV state to one composite manager call. The normal
 // pool only ever targets the device role; the host pool is unaffected here.
+// The token view and prefix-hash chain let the composite insert completed
+// blocks into its prefix caches from inside allocate/deallocate (see
+// GroupCompositeBlockManager::insert_committed_blocks). Callers that must
+// release without caching (preempt) use make_bare_device_context instead.
 BlockManagerContext make_device_context(Sequence* sequence, int32_t dp_rank) {
+  BlockManagerContext context;
+  context.sequence = sequence;
+  context.kv_state = &sequence->kv_state();
+  context.role = CacheStorageRole::DEVICE;
+  context.device_dp_rank = dp_rank;
+  context.tokens = sequence->tokens();
+  context.hash_state = &sequence->prefix_hash_state();
+  return context;
+}
+
+// Like make_device_context but without the token view / hash chain, so the
+// composite's internal prefix-cache insert is skipped. Used by the preempt
+// path, which must release uncomputed blocks without writing them to a cache.
+BlockManagerContext make_bare_device_context(Sequence* sequence,
+                                             int32_t dp_rank) {
   BlockManagerContext context;
   context.sequence = sequence;
   context.kv_state = &sequence->kv_state();
@@ -245,8 +264,9 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
 
   if (normal_composite_) {
-    // Flush completed blocks into the prefix cache, then release every group.
-    cache(sequence);
+    // The composite inserts the final completed blocks into the prefix cache
+    // from inside deallocate (the context carries the token view + hash chain),
+    // then releases every group.
     BlockManagerContext context = make_device_context(sequence, dp_rank);
     composite_managers_[dp_rank]->deallocate(&context);
     deallocate_single_block(sequence, dp_rank);
@@ -302,20 +322,12 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   }
 
   if (normal_composite_) {
-    if (options_.enable_prefix_cache()) {
-      if (started_empty) {
-        // First prefill: restore any cached prefix before growing; growth
-        // appends on top of the matched C1 blocks.
-        composite_match_shared(sequence, dp_rank);
-      } else {
-        // Subsequent grow (decode / chunked prefill): lazily flush the blocks
-        // the previous forward completed before extending. Idempotent with the
-        // scheduler's explicit cache() -- the policy skips already-cached
-        // blocks -- and lets the composite stay self-sufficient once the
-        // scheduler stops driving the flush.
-        flush_composite(
-            sequence, dp_rank, PrefixCacheFlushReason::BEFORE_ALLOCATE);
-      }
+    if (options_.enable_prefix_cache() && started_empty) {
+      // First prefill: restore any cached prefix before growing; growth
+      // appends on top of the matched C1 blocks. The lazy flush for subsequent
+      // grows (decode / chunked prefill) now happens inside the composite's
+      // allocate, so the scheduler never drives a separate flush.
+      composite_match_shared(sequence, dp_rank);
     }
     BlockManagerContext context = make_device_context(sequence, dp_rank);
     if (!composite_managers_[dp_rank]->allocate(&context, num_tokens)) {
@@ -557,41 +569,12 @@ void BlockManagerPool::composite_match_shared(Sequence* sequence,
   sequence->kv_state().set_kv_cache_tokens_num(matched_tokens);
 }
 
-void BlockManagerPool::flush_composite(Sequence* sequence,
-                                       int32_t dp_rank,
-                                       PrefixCacheFlushReason reason) {
-  // Flush every C1 block completed up to the committed-token boundary into the
-  // group-local prefix cache; already-cached blocks are skipped by the policy.
-  BlockManagerContext context = make_device_context(sequence, dp_rank);
-  composite_managers_[dp_rank]->flush_prefix_cache(
-      &context,
-      sequence->tokens(),
-      /*committed_tokens=*/sequence->kv_state().kv_cache_tokens_num(),
-      &sequence->prefix_hash_state(),
-      reason);
-}
-
-void BlockManagerPool::flush_for_sharing(Sequence* sequence) {
-  if (normal_composite_) {
-    if (!options_.enable_prefix_cache()) {
-      return;
-    }
-    int32_t dp_rank = get_dp_rank(sequence);
-    flush_composite(sequence, dp_rank, PrefixCacheFlushReason::FOR_SHARING);
-    return;
-  }
-  // Legacy managers do not separate the sharing flush from the cleanup flush.
-  cache(sequence);
-}
-
 void BlockManagerPool::cache(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
   if (normal_composite_) {
-    if (!options_.enable_prefix_cache()) {
-      return;
-    }
-    flush_composite(
-        sequence, dp_rank, PrefixCacheFlushReason::BEFORE_DEALLOCATE);
+    // The composite inserts completed blocks into its prefix caches internally
+    // from allocate/deallocate; the scheduler no longer drives a separate
+    // cache step on this path.
     return;
   }
   if (block_managers_[dp_rank]->is_composite()) {
@@ -688,8 +671,10 @@ void BlockManagerPool::deallocate_without_cache(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
 
   if (normal_composite_) {
-    // Release every group without flushing into the prefix cache.
-    BlockManagerContext context = make_device_context(sequence, dp_rank);
+    // Release every group without inserting into the prefix cache: a bare
+    // context carries no token view / hash chain, so the composite's internal
+    // insert is skipped and uncomputed blocks are never cached.
+    BlockManagerContext context = make_bare_device_context(sequence, dp_rank);
     composite_managers_[dp_rank]->deallocate(&context);
     deallocate_single_block(sequence, dp_rank);
     sequence->reset();

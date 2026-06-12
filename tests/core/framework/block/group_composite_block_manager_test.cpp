@@ -200,30 +200,33 @@ TEST(GroupCompositeBlockManagerTest, ReallocatesAfterDeallocate) {
   EXPECT_EQ(group_block_count(&kv_state, CacheStateId::SINGLE_RES), 1u);
 }
 
-// A prefix-cacheable C1 group flushes its committed blocks into a group-local
-// cache; a second sequence with the same prompt restores them via match.
+// A prefix-cacheable C1 group inserts its committed blocks into a group-local
+// cache from inside allocate (lazy flush); a second sequence with the same
+// prompt restores them via match.
 TEST(GroupCompositeBlockManagerTest, PrefixCacheRoundtripAcrossSequences) {
   GroupCompositeBlockManager manager({make_cacheable_c1_spec(/*num_blocks=*/16),
                                       make_single_res_spec(/*num_blocks=*/4)});
 
   const std::vector<int32_t> tokens = make_tokens(3 * kBlockSize);
 
-  // Sequence A grows three C1 blocks and flushes them.
+  // Sequence A grows three C1 blocks; the context carries the token view and
+  // hash chain so the composite can insert completed blocks internally.
   KVCacheState kv_a;
+  PrefixHashState hash_a;
   BlockManagerContext context_a;
   context_a.kv_state = &kv_a;
+  context_a.tokens = Slice<int32_t>(tokens);
+  context_a.hash_state = &hash_a;
   ASSERT_TRUE(manager.allocate(&context_a, /*num_tokens=*/3 * kBlockSize));
   ASSERT_EQ(group_block_count(&kv_a, CacheStateId::C1), 3u);
 
-  PrefixHashState hash_a;
-  PrefixCacheInsertResult flushed =
-      manager.flush_prefix_cache(&context_a,
-                                 Slice<int32_t>(tokens),
-                                 /*committed_tokens=*/3 * kBlockSize,
-                                 &hash_a);
-  EXPECT_EQ(flushed.inserted_blocks.size(), 3u);
+  // Once the three blocks commit, the next allocate lazily inserts them into
+  // the group-local prefix cache before (re)growing.
+  kv_a.set_kv_cache_tokens_num(3 * kBlockSize);
+  ASSERT_TRUE(manager.allocate(&context_a, /*num_tokens=*/3 * kBlockSize));
   EXPECT_EQ(kv_a.group_state(CacheStateId::C1)->prefix_cached_tokens,
             3u * kBlockSize);
+  EXPECT_EQ(manager.num_blocks_in_prefix_cache(), 3u);
 
   // Sequence B matches the same prompt and restores the three shared blocks.
   KVCacheState kv_b;
@@ -257,23 +260,24 @@ TEST(GroupCompositeBlockManagerTest, AggregatesBlockAccountingAcrossGroups) {
   EXPECT_EQ(manager.num_blocks_in_prefix_cache(), 0u);
   EXPECT_EQ(manager.kv_cache_utilization(), 0.0);
 
+  const std::vector<int32_t> tokens = make_tokens(3 * kBlockSize);
   KVCacheState kv_state;
+  PrefixHashState hash_state;
   BlockManagerContext context;
   context.kv_state = &kv_state;
+  context.tokens = Slice<int32_t>(tokens);
+  context.hash_state = &hash_state;
   // 3 C1 blocks + 1 SINGLE_RES block are charged to used.
   ASSERT_TRUE(manager.allocate(&context, /*num_tokens=*/3 * kBlockSize));
   EXPECT_EQ(manager.num_used_blocks(), 4u);
   EXPECT_EQ(manager.num_total_blocks(), 18u);
   EXPECT_NEAR(manager.kv_cache_utilization(), 4.0 / 18.0, 1e-9);
 
-  // Flushing the three committed C1 blocks populates the group-local prefix
-  // cache; the non-cacheable SINGLE_RES group contributes nothing.
-  const std::vector<int32_t> tokens = make_tokens(3 * kBlockSize);
-  PrefixHashState hash_state;
-  manager.flush_prefix_cache(&context,
-                             Slice<int32_t>(tokens),
-                             /*committed_tokens=*/3 * kBlockSize,
-                             &hash_state);
+  // Once committed, the next allocate lazily inserts the three C1 blocks into
+  // the group-local prefix cache; the non-cacheable SINGLE_RES group
+  // contributes nothing.
+  kv_state.set_kv_cache_tokens_num(3 * kBlockSize);
+  ASSERT_TRUE(manager.allocate(&context, /*num_tokens=*/3 * kBlockSize));
   EXPECT_EQ(manager.num_blocks_in_prefix_cache(), 3u);
 }
 
@@ -289,7 +293,7 @@ TEST(GroupCompositeBlockManagerTest, UtilizationIsZeroWhenNoCapacity) {
 }
 
 // With no prefix-cacheable group, the composite installs the NoPrefix policy:
-// match restores nothing and flush inserts nothing.
+// the internal insert adds nothing and match restores nothing.
 TEST(GroupCompositeBlockManagerTest, NonCacheableGroupsDisablePrefixCache) {
   GroupCompositeBlockManager manager({make_c1_spec(/*num_blocks=*/16),
                                       make_single_res_spec(/*num_blocks=*/4)});
@@ -297,17 +301,18 @@ TEST(GroupCompositeBlockManagerTest, NonCacheableGroupsDisablePrefixCache) {
   const std::vector<int32_t> tokens = make_tokens(3 * kBlockSize);
 
   KVCacheState kv_state;
+  PrefixHashState hash_state;
   BlockManagerContext context;
   context.kv_state = &kv_state;
+  context.tokens = Slice<int32_t>(tokens);
+  context.hash_state = &hash_state;
   ASSERT_TRUE(manager.allocate(&context, /*num_tokens=*/3 * kBlockSize));
 
-  PrefixHashState hash_state;
-  PrefixCacheInsertResult flushed =
-      manager.flush_prefix_cache(&context,
-                                 Slice<int32_t>(tokens),
-                                 /*committed_tokens=*/3 * kBlockSize,
-                                 &hash_state);
-  EXPECT_TRUE(flushed.inserted_blocks.empty());
+  // Even after the blocks commit, the NoPrefix policy inserts nothing on the
+  // next allocate's lazy flush.
+  kv_state.set_kv_cache_tokens_num(3 * kBlockSize);
+  ASSERT_TRUE(manager.allocate(&context, /*num_tokens=*/3 * kBlockSize));
+  EXPECT_EQ(manager.num_blocks_in_prefix_cache(), 0u);
 
   CompositeMatchResult matched =
       manager.match_prefix_cache(&context, Slice<int32_t>(tokens));

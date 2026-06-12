@@ -116,6 +116,12 @@ bool GroupCompositeBlockManager::allocate(BlockManagerContext* context,
 
   KVCacheState* kv_state = context->kv_state;
   ensure_group_states(kv_state);
+
+  // Lazy flush: the blocks the previous forward pass completed are now
+  // committed, so insert them into the prefix caches before growing further.
+  // No-op on a fresh sequence (nothing committed) and on bare contexts.
+  insert_committed_blocks(context);
+
   std::vector<CacheGroupState>* groups = kv_state->mutable_groups();
   CHECK_EQ(groups->size(), runtimes_.size());
 
@@ -144,6 +150,11 @@ void GroupCompositeBlockManager::deallocate(BlockManagerContext* context) {
     return;
   }
   CHECK_EQ(groups->size(), runtimes_.size());
+
+  // Final tail flush: insert the last completed blocks before releasing. Bare
+  // contexts (preempt) skip this and release without caching.
+  insert_committed_blocks(context);
+
   for (size_t i = 0; i < runtimes_.size(); ++i) {
     runtimes_[i].policy->deallocate(context, &(*groups)[i]);
   }
@@ -169,27 +180,27 @@ CompositeMatchResult GroupCompositeBlockManager::match_prefix_cache(
   return prefix_policy_->match(match_ctx);
 }
 
-PrefixCacheInsertResult GroupCompositeBlockManager::flush_prefix_cache(
-    BlockManagerContext* context,
-    const Slice<int32_t>& tokens,
-    size_t committed_tokens,
-    PrefixHashState* hash_state,
-    PrefixCacheFlushReason reason,
-    const MMData* mm_data) {
+void GroupCompositeBlockManager::insert_committed_blocks(
+    BlockManagerContext* context) {
   CHECK(context != nullptr);
   CHECK(context->kv_state != nullptr);
-  CHECK(hash_state != nullptr);
 
-  PrefixCacheFlushContext flush_ctx;
-  flush_ctx.kv_state = context->kv_state;
-  flush_ctx.tokens = tokens;
-  flush_ctx.committed_tokens = committed_tokens;
-  flush_ctx.hash_state = hash_state;
-  flush_ctx.mm_data = mm_data;
-  flush_ctx.role = context->role;
-  flush_ctx.device_dp_rank = context->device_dp_rank;
-  flush_ctx.reason = reason;
-  return prefix_policy_->flush(flush_ctx);
+  // The internal insert only runs when the caller wired the token view and the
+  // prefix-hash chain. The preempt path (deallocate_without_cache) deliberately
+  // passes neither, so its release never writes uncomputed blocks to the cache.
+  if (context->hash_state == nullptr || context->tokens.empty()) {
+    return;
+  }
+
+  PrefixCacheInsertContext insert_ctx;
+  insert_ctx.kv_state = context->kv_state;
+  insert_ctx.tokens = context->tokens;
+  // The committed boundary is the KV the forward pass has actually written.
+  insert_ctx.committed_tokens = context->kv_state->kv_cache_tokens_num();
+  insert_ctx.hash_state = context->hash_state;
+  insert_ctx.role = context->role;
+  insert_ctx.device_dp_rank = context->device_dp_rank;
+  prefix_policy_->insert_committed(insert_ctx);
 }
 
 size_t GroupCompositeBlockManager::num_free_blocks() const {

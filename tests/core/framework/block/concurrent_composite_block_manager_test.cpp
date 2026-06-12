@@ -91,9 +91,10 @@ TEST(ConcurrentCompositeBlockManagerTest, ForwardsSequenceLevelCalls) {
   EXPECT_EQ(manager.num_free_blocks(), 12u);
 }
 
-// The wrapper forwards flush/match to the orchestrator under its lock: sequence
-// A flushes three committed C1 blocks, sequence B restores them via match.
-TEST(ConcurrentCompositeBlockManagerTest, ForwardsPrefixCacheFlushAndMatch) {
+// The wrapper serializes allocate/deallocate (which insert internally) and
+// match under its lock: sequence A's committed C1 blocks reach the cache via
+// the lazy flush on its next allocate, and sequence B restores them via match.
+TEST(ConcurrentCompositeBlockManagerTest, ForwardsPrefixCacheInsertAndMatch) {
   ConcurrentCompositeBlockManager manager(
       {make_cacheable_c1_spec(/*num_blocks=*/16),
        make_single_res_spec(/*num_blocks=*/4)});
@@ -101,17 +102,17 @@ TEST(ConcurrentCompositeBlockManagerTest, ForwardsPrefixCacheFlushAndMatch) {
   const std::vector<int32_t> tokens = make_tokens(3 * kBlockSize);
 
   KVCacheState kv_a;
+  PrefixHashState hash_a;
   BlockManagerContext context_a;
   context_a.kv_state = &kv_a;
+  context_a.tokens = Slice<int32_t>(tokens);
+  context_a.hash_state = &hash_a;
   ASSERT_TRUE(manager.allocate(&context_a, /*num_tokens=*/3 * kBlockSize));
 
-  PrefixHashState hash_a;
-  PrefixCacheInsertResult flushed =
-      manager.flush_prefix_cache(&context_a,
-                                 Slice<int32_t>(tokens),
-                                 /*committed_tokens=*/3 * kBlockSize,
-                                 &hash_a);
-  EXPECT_EQ(flushed.inserted_blocks.size(), 3u);
+  // Commit the three blocks, then the next allocate lazily inserts them.
+  kv_a.set_kv_cache_tokens_num(3 * kBlockSize);
+  ASSERT_TRUE(manager.allocate(&context_a, /*num_tokens=*/3 * kBlockSize));
+  EXPECT_EQ(manager.num_blocks_in_prefix_cache(), 3u);
 
   KVCacheState kv_b;
   BlockManagerContext context_b;
@@ -141,16 +142,18 @@ TEST(ConcurrentCompositeBlockManagerTest, ForwardsBlockAccounting) {
 
   const std::vector<int32_t> tokens = make_tokens(3 * kBlockSize);
   KVCacheState kv_state;
+  PrefixHashState hash_state;
   BlockManagerContext context;
   context.kv_state = &kv_state;
+  context.tokens = Slice<int32_t>(tokens);
+  context.hash_state = &hash_state;
   ASSERT_TRUE(manager.allocate(&context, /*num_tokens=*/3 * kBlockSize));
   EXPECT_EQ(manager.num_used_blocks(), 4u);
 
-  PrefixHashState hash_state;
-  manager.flush_prefix_cache(&context,
-                             Slice<int32_t>(tokens),
-                             /*committed_tokens=*/3 * kBlockSize,
-                             &hash_state);
+  // The committed blocks reach the prefix cache via the next allocate's lazy
+  // insert.
+  kv_state.set_kv_cache_tokens_num(3 * kBlockSize);
+  ASSERT_TRUE(manager.allocate(&context, /*num_tokens=*/3 * kBlockSize));
   EXPECT_EQ(manager.num_blocks_in_prefix_cache(), 3u);
 }
 

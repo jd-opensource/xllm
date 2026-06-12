@@ -360,8 +360,9 @@ TEST(BlockManagerPoolTest, SequenceCopyDoesNotReuseSingleBlockSlot) {
 // The normal-model pool now routes through ConcurrentCompositeBlockManager (a
 // single C1 group) instead of the legacy BlockManagerImpl. These tests pin the
 // integration the pool owns on top of the per-manager unit tests: path routing,
-// allocate/flush/deallocate accounting, and the cross-sequence prefix match
-// plus whole-prompt back-off that composite_match_shared performs.
+// allocate/deallocate accounting (with the prefix-cache insert now internal to
+// the composite), and the cross-sequence prefix match plus whole-prompt
+// back-off that composite_match_shared performs.
 
 namespace {
 
@@ -413,7 +414,8 @@ TEST(BlockManagerPoolCompositeTest, AllocateFlushDeallocateAccounting) {
   EXPECT_EQ(pool.num_free_blocks()[0], baseline_free - 3);
   EXPECT_EQ(pool.num_used_blocks()[0], 3u);
 
-  // Commit the whole prompt so deallocate's flush caches all three blocks.
+  // Commit the whole prompt so deallocate's internal insert caches all three
+  // blocks before releasing them.
   seq.kv_state().set_kv_cache_tokens_num(seq.num_tokens());
   pool.deallocate(&seq);
 
@@ -497,22 +499,6 @@ TEST(BlockManagerPoolCompositeTest,
   // proving the composite self-flushes on grow.
   ASSERT_TRUE(pool.allocate(&seq, /*num_tokens=*/20));
   EXPECT_EQ(pool.num_used_blocks()[0], 5u);
-  EXPECT_EQ(pool.num_blocks_in_prefix_cache()[0], 3u);
-}
-
-TEST(BlockManagerPoolCompositeTest, FlushForSharingCachesCommittedPrefix) {
-  ScopedValue<int32_t> max_seqs_guard(
-      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
-
-  BlockManagerPool pool(CompositeOptions(/*num_blocks=*/32), /*dp_size=*/1);
-
-  Sequence seq = MakeSequence(0, CompositePrompt());
-  ASSERT_TRUE(pool.allocate(&seq));
-  seq.kv_state().set_kv_cache_tokens_num(seq.num_tokens());
-
-  // best_of>1 expansion path: flush_for_sharing routes to the composite FOR_-
-  // SHARING flush, caching all three committed blocks so sibling sequences hit.
-  pool.flush_for_sharing(&seq);
   EXPECT_EQ(pool.num_blocks_in_prefix_cache()[0], 3u);
 }
 
