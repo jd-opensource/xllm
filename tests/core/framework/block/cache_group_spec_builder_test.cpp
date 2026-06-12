@@ -122,12 +122,21 @@ TEST(CacheGroupSpecBuilderTest, Dsv4EmitsSwaAndCompressedGroupsInExportOrder) {
   EXPECT_EQ(specs[1].state_id, CacheStateId::C4);
   EXPECT_EQ(specs[2].state_id, CacheStateId::C128);
   EXPECT_EQ(specs[3].state_id, CacheStateId::SINGLE_RES);
+  // SINGLE_RES is not exported to multi_block_tables (sentinel export_index),
+  // so multi_block_table_groups() skips it for DSV4 sequences.
+  EXPECT_EQ(specs[3].export_index, -1);
 
   EXPECT_EQ(find_spec(specs, CacheStateId::C1), nullptr);
 
   const CacheGroupSpec& swa = specs[0];
   EXPECT_EQ(swa.policy_type, CachePolicyType::ROLLING_WINDOW);
   EXPECT_EQ(swa.block_size, 16u);
+  // The rolling-window SWA group exports exactly window_blocks columns. That
+  // column count is the modulo base the worker reads as
+  // semantic_cols = raw_bt.size(1) (dsa_metadata_builder.cpp:414) and indexes as
+  // (pos / block_size) % semantic_cols. So exporting the ring (window_blocks
+  // wide) is equivalent to the OLD full-length-with-holes SWA table -- the
+  // kernel never touches columns outside the window -- and needs no worker edit.
   EXPECT_EQ(swa.window_blocks, 8u);
   EXPECT_EQ(swa.num_blocks, 64u);
   EXPECT_EQ(swa.export_targets[0], WorkerExportTarget::MULTI_BLOCK_TABLES);

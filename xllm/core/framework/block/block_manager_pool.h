@@ -42,13 +42,16 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(int64_t, num_layers) = 0;  // Required when enable_xtensor is true
     PROPERTY(int64_t, slot_size) = 0;   // Memory size per slot (for xtensor)
     PROPERTY(std::string, model_id);    // Model ID for multi-model support
-    // Token-level sliding window size for CompositeBlockManager.
+    // Token-level sliding window size for the DSV4 SWA group.
     PROPERTY(uint32_t, sliding_window_size) = 0;
-    // Base SWA/cache-state block rows retained per sequence.
+    // SWA ring blocks retained per sequence (== the DSV4 rolling-window size).
     PROPERTY(uint32_t, swa_blocks_per_seq) = 0;
     // Scheduler token budget used to size the shared SWA burst pool.
     PROPERTY(uint32_t, max_tokens_per_batch) = 0;
-    // For CompositeBlockManager.
+    // DSV4 selector: non-empty marks a DeepSeek-V4 model, routing the pool to
+    // make_dsv4_composite_specs. The legacy per-entry numeric meaning is gone;
+    // only emptiness is read now (compress_ratios carries the real C4/C128
+    // ratios, with a leading 0 placeholder for the SWA slot).
     PROPERTY(std::vector<uint32_t>, manager_types) = {};
     PROPERTY(std::vector<uint32_t>, compress_ratios) = {};
     PROPERTY(uint32_t, max_seqs_per_batch) = 0;
@@ -131,12 +134,13 @@ class BlockManagerPool : public KVCacheManager {
   Options options_;
   std::vector<std::unique_ptr<BlockManager>> block_managers_;
 
-  // Normal-model composite path (block-manager refactor): when true,
+  // Cache-group composite path (block-manager refactor): when true,
   // block_managers_ stays empty and each DP rank is served by a
-  // ConcurrentCompositeBlockManager built from a single C1 cache group. The
-  // xtensor, DSV4 (manager_types), disagg-PD, kvcache-store and host-block
-  // paths keep using block_managers_.
-  bool normal_composite_ = false;
+  // ConcurrentCompositeBlockManager. The normal model uses a single C1 group;
+  // DSV4 (selected by a non-empty manager_types) uses the SWA + compressed
+  // C4/C128 groups. The xtensor path and normal-model specialized modes
+  // (disagg-PD, kvcache-store, host blocks) keep using block_managers_.
+  bool composite_ = false;
   std::vector<std::unique_ptr<ConcurrentCompositeBlockManager>>
       composite_managers_;
 };

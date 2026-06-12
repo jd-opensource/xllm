@@ -71,6 +71,22 @@ Slice<Block> KVCacheState::group_blocks(CacheStateId state_id) const {
   return {};
 }
 
+std::vector<const CacheGroupState*> KVCacheState::multi_block_table_groups()
+    const {
+  std::vector<const CacheGroupState*> exported;
+  for (const CacheGroupState& group : groups_) {
+    if (group.export_index >= 0) {
+      exported.push_back(&group);
+    }
+  }
+  std::sort(exported.begin(),
+            exported.end(),
+            [](const CacheGroupState* a, const CacheGroupState* b) {
+              return a->export_index < b->export_index;
+            });
+  return exported;
+}
+
 size_t KVCacheState::shared_kv_tokens_num() const {
   if (const CacheGroupState* c1 = c1_view_group()) {
     if (c1->blocks.empty() || c1->shared_blocks_num == 0) {
@@ -95,25 +111,6 @@ void KVCacheState::set_kv_cache_tokens_num(size_t num) {
 void KVCacheState::incr_kv_cache_tokens_num(size_t num) {
   CHECK(kv_cache_tokens_num_ + num <= current_max_tokens_capacity());
   kv_cache_tokens_num_ += num;
-  slice_window_pos_ += num;
-}
-
-void KVCacheState::set_slice_window_size(uint32_t size) {
-  CHECK(size > 0);
-  CHECK(!composite_blocks_.empty() && !composite_blocks_[0].empty());
-  slice_window_size_ = size;
-  slice_window_pos_ = 0;
-  slice_window_buffer_ = size;
-}
-
-void KVCacheState::update_slice_window_pos() {
-  if (slice_window_size_ > 0) {
-    if (slice_window_pos_ >= slice_window_buffer_) {
-      // Keep SWA physical block order stable. DSA metadata maps logical
-      // positions to physical blocks with modulo arithmetic.
-      slice_window_pos_ = slice_window_pos_ % slice_window_size_;
-    }
-  }
 }
 
 void KVCacheState::add_kv_blocks(const std::vector<Block>& new_blocks) {
@@ -169,20 +166,30 @@ void KVCacheState::add_shared_kv_blocks(std::vector<Block>&& blocks,
 
 size_t KVCacheState::current_max_tokens_capacity() const {
   if (const CacheGroupState* c1 = c1_view_group()) {
-    // Composite path: only the C1 incremental group has a linear token
-    // capacity; an empty group contributes none yet.
+    // Composite path with a C1 attention group (normal / Qwen3.5+): only the
+    // incremental C1 group carries a linear token capacity; an empty group
+    // contributes none yet.
     if (c1->blocks.empty()) {
       return 0;
     }
     return c1->blocks.size() * c1->blocks[0].size();
   }
+  if (!groups_.empty()) {
+    // Composite path with no C1 group (DSV4): the SWA ring's windowed capacity
+    // would falsely cap token growth, so derive the linear capacity from the
+    // finest incremental compressed group (C4, then C128).
+    for (const CacheStateId state_id : {CacheStateId::C4, CacheStateId::C128}) {
+      const Slice<Block> blocks = group_blocks(state_id);
+      if (!blocks.empty()) {
+        return blocks.size() * blocks[0].size();
+      }
+    }
+    return 0;
+  }
   if (!blocks_.empty()) {
     // all blocks have the same size
     const size_t block_size = blocks_[0].size();
     return blocks_.size() * block_size;
-  }
-  if (!composite_blocks_.empty() && !composite_blocks_[1].empty()) {
-    return composite_blocks_[1].size() * composite_blocks_[1][0].size();
   }
   return 0;
 }
@@ -247,7 +254,6 @@ void KVCacheState::reset() {
   num_owned_shared_blocks_ = 0;
   pushed_local_block_count_ = 0;
   blocks_.clear();
-  composite_blocks_.clear();
   groups_.clear();
   transfer_kv_info_.reset();
   next_transfer_block_idx_ = 0;

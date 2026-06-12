@@ -40,8 +40,6 @@ class KVCacheState {
   void add_shared_kv_blocks(std::vector<Block>&& blocks,
                             size_t current_total_num_tokens);
   void incr_shared_kv_blocks_num(size_t num);
-  void set_slice_window_size(uint32_t size);
-  void update_slice_window_pos();
 
   size_t current_max_tokens_capacity() const;
 
@@ -63,19 +61,10 @@ class KVCacheState {
   size_t num_kv_blocks() const;
   std::vector<int32_t> kv_cache_slots(int32_t pos_start, int32_t pos_end);
 
-  // composite block managers: blocks per sub-manager index (for
-  // CompositeBlockManager)
-  const std::vector<std::vector<Block>>& composite_blocks() const {
-    return composite_blocks_;
-  }
-  std::vector<std::vector<Block>>* mutable_composite_blocks() {
-    return &composite_blocks_;
-  }
-
   // Per-cache-group runtime state, index-aligned with the owning composite
   // manager's CacheGroupRuntime entries. This is the CompositeKVState role of
-  // the block-manager refactor; the legacy blocks_/composite_blocks_ views
-  // above are retained during migration.
+  // the block-manager refactor; the legacy flat blocks_ view above is retained
+  // for the monolithic (non-composite) path.
   const std::vector<CacheGroupState>& groups() const { return groups_; }
   std::vector<CacheGroupState>* mutable_groups() { return &groups_; }
   // Returns the group state for `state_id`, or nullptr when this sequence holds
@@ -83,6 +72,12 @@ class KVCacheState {
   CacheGroupState* group_state(CacheStateId state_id);
   // Blocks currently held by `state_id`; empty when the group is absent.
   Slice<Block> group_blocks(CacheStateId state_id) const;
+
+  // Groups that export to the worker's multi_block_tables (export_index >= 0),
+  // ordered by export_index. Empty for the normal/Qwen flat path (C1 has
+  // export_index == -1) and for non-composite sequences. DSV4 returns its
+  // SWA / C4 / C128 groups in worker export order.
+  std::vector<const CacheGroupState*> multi_block_table_groups() const;
 
   // True once this sequence is managed by the group-composite manager (its
   // per-group state vector has been materialized). The legacy flat views below
@@ -134,20 +129,11 @@ class KVCacheState {
   // shared blocks number of the sequence.
   uint32_t num_owned_shared_blocks_ = 0;
 
-  // blocks allocated per composite sub-manager index (used when BlockManager is
-  // CompositeBlockManager). DeepSeek V4 leans on this so each per-manager
-  // block table can be assembled independently of the legacy `blocks_` slot.
-  std::vector<std::vector<Block>> composite_blocks_;
-
   // Per-cache-group runtime state for the CacheGroupRuntime-based composite
   // manager. Index-aligned with the manager's states_ (worker export order).
+  // DSV4 keeps its SWA / C4 / C128 groups here, each assembling its own block
+  // table independently of the flat `blocks_` slot.
   std::vector<CacheGroupState> groups_;
-
-  // Sliding-window bookkeeping (DSA SWA: keeps the physical block order
-  // stable so DSA metadata's modulo-based logical->physical mapping holds).
-  uint32_t slice_window_pos_ = 0;
-  uint32_t slice_window_size_ = 0;
-  uint32_t slice_window_buffer_ = 0;
 
   // Number of local KV blocks already pushed to the decode instance.
   // Used for incremental push in chunked prefill + PD disagg mode.

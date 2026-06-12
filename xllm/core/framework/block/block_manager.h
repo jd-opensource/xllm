@@ -47,13 +47,14 @@ class BlockManager {
     PROPERTY(bool, enable_prefix_cache) = true;
     PROPERTY(bool, enable_disagg_pd) = false;
     PROPERTY(bool, enable_cache_upload) = false;
-    // Token-level sliding window size for composite SWA allocation.
+    // Token-level sliding window size for the DSV4 SWA group.
     PROPERTY(uint32_t, sliding_window_size) = 0;
     // Base SWA/cache-state block rows retained per sequence.
     PROPERTY(uint32_t, swa_blocks_per_seq) = 0;
     // Scheduler token budget used to size the shared SWA burst pool.
     PROPERTY(uint32_t, max_tokens_per_batch) = 0;
-    // For CompositeBlockManager (passed from upstream).
+    // DSV4 selector forwarded from the pool: non-empty marks a DeepSeek-V4
+    // model. The pool decodes the cache-group layout from compress_ratios.
     PROPERTY(std::vector<uint32_t>, manager_types) = {};
     PROPERTY(std::vector<uint32_t>, compress_ratios) = {};
     PROPERTY(uint32_t, max_seqs_per_batch) = 0;
@@ -104,13 +105,6 @@ class BlockManager {
 
   // get number of total blocks
   virtual size_t num_total_blocks() const = 0;
-
-  // CompositeBlockManager: Pool calls these when is_composite() is true.
-  virtual bool is_composite() const { return false; }
-  virtual bool allocate_for_sequence(Sequence* seq, size_t num_tokens) {
-    return false;
-  }
-  virtual void deallocate_sequence(Sequence* seq) {}
 
  protected:
   // the options for the block manager

@@ -30,9 +30,9 @@ enum class CachePolicyType : int8_t {
   PER_SEQUENCE_ONCE = 2,
 };
 
-// Identity of one cache state inside a CompositeBlockManager. Unique entry
-// key: PrefixCacheGroup cannot be the key because all non-cacheable states
-// share PrefixCacheGroup::INVALID.
+// Identity of one cache state inside a group-composite block manager. Unique
+// entry key: PrefixCacheGroup cannot be the key because all non-cacheable
+// states share PrefixCacheGroup::INVALID.
 enum class CacheStateId : int8_t {
   C1 = 0,
   C4 = 1,
@@ -143,6 +143,10 @@ struct RingSlotReplacement {
 // Per-sequence runtime state of one cache group.
 struct CacheGroupState {
   CacheStateId state_id = CacheStateId::C1;
+  // Worker multi_block_tables slot for this group, copied from the owning
+  // CacheGroupSpec at state materialization. -1 means the group is not exported
+  // to multi_block_tables (e.g. the flat C1 view or SINGLE_RES).
+  int32_t export_index = -1;
   std::vector<Block> blocks;
   size_t shared_blocks_num = 0;
   size_t prefix_cached_tokens = 0;

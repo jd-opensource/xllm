@@ -27,7 +27,7 @@ class BlockManager;
 
 // Per-cache-group allocation strategy. One instance serves one
 // CacheGroupRuntime entry and is shared by all sequences of that manager, so
-// calls must be serialized by the owning (Concurrent)CompositeBlockManager.
+// calls must be serialized by the owning ConcurrentCompositeBlockManager.
 //
 // rollback() undoes the most recent successful allocate() on the same state
 // and must be invoked before any other policy call touches that state; the

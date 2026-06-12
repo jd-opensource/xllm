@@ -143,4 +143,119 @@ TEST(KVCacheStateTest, SharedCountsReadThroughC1GroupAfterMatch) {
   EXPECT_EQ(kv_b.shared_kv_tokens_num(), 3u * kBlockSize);
 }
 
+// multi_block_table_groups() returns only the groups that export to the
+// worker's multi_block_tables (export_index >= 0), ordered by export_index, so
+// DSV4 assembles its SWA/C4/C128 tables in worker slot order regardless of the
+// groups_ vector order. The non-exported SINGLE_RES group (export_index < 0) is
+// skipped.
+TEST(KVCacheStateTest, MultiBlockTableGroupsOrderedByExportIndex) {
+  KVCacheState state;
+  std::vector<CacheGroupState>* groups = state.mutable_groups();
+
+  // Deliberately push the groups out of export order.
+  CacheGroupState single;
+  single.state_id = CacheStateId::SINGLE_RES;
+  single.export_index = -1;
+  groups->push_back(single);
+
+  CacheGroupState c128;
+  c128.state_id = CacheStateId::C128;
+  c128.export_index = 2;
+  groups->push_back(c128);
+
+  CacheGroupState swa;
+  swa.state_id = CacheStateId::SWA;
+  swa.export_index = 0;
+  groups->push_back(swa);
+
+  CacheGroupState c4;
+  c4.state_id = CacheStateId::C4;
+  c4.export_index = 1;
+  groups->push_back(c4);
+
+  std::vector<const CacheGroupState*> exported =
+      state.multi_block_table_groups();
+  ASSERT_EQ(exported.size(), 3u);
+  EXPECT_EQ(exported[0]->state_id, CacheStateId::SWA);
+  EXPECT_EQ(exported[1]->state_id, CacheStateId::C4);
+  EXPECT_EQ(exported[2]->state_id, CacheStateId::C128);
+}
+
+// The normal/Qwen flat path carries a single C1 group whose export_index is the
+// -1 sentinel (the worker reads C1 through the flat block-table path, not
+// multi_block_tables), so no group is exported.
+TEST(KVCacheStateTest, MultiBlockTableGroupsEmptyForFlatC1) {
+  KVCacheState state;
+  CacheGroupState c1;
+  c1.state_id = CacheStateId::C1;
+  c1.export_index = -1;
+  state.mutable_groups()->push_back(c1);
+
+  EXPECT_TRUE(state.multi_block_table_groups().empty());
+}
+
+namespace {
+
+// Build a CacheGroupState holding `count` blocks each `block_size` tokens wide.
+CacheGroupState make_group_with_blocks(CacheStateId state_id,
+                                       uint32_t block_size,
+                                       size_t count) {
+  CacheGroupState group;
+  group.state_id = state_id;
+  for (size_t i = 0; i < count; ++i) {
+    group.blocks.emplace_back(block_size);
+  }
+  return group;
+}
+
+}  // namespace
+
+// DSV4 composite state has no C1 group, so current_max_tokens_capacity() must
+// derive the linear token budget from the finest incremental compressed group
+// (C4). The SWA ring's windowed capacity is excluded -- it would falsely cap
+// token growth -- and C128 is only the fallback when C4 is absent.
+TEST(KVCacheStateTest, CurrentMaxTokensCapacityReadsC4GroupForDsv4) {
+  KVCacheState state;
+  std::vector<CacheGroupState>* groups = state.mutable_groups();
+  // SWA ring of 5 narrow blocks: a window, not a linear capacity.
+  groups->push_back(
+      make_group_with_blocks(CacheStateId::SWA, /*block_size=*/kBlockSize, 5));
+  // C4 group: 3 blocks of kBlockSize*4 -> the capacity the budget must report.
+  groups->push_back(make_group_with_blocks(CacheStateId::C4,
+                                           /*block_size=*/kBlockSize * 4, 3));
+  // C128 group present but coarser; must be ignored while C4 exists.
+  groups->push_back(make_group_with_blocks(CacheStateId::C128,
+                                           /*block_size=*/kBlockSize * 128, 2));
+
+  EXPECT_TRUE(state.on_composite_path());
+  EXPECT_EQ(state.current_max_tokens_capacity(), 3u * kBlockSize * 4u);
+}
+
+// When a DSV4 sequence carries C128 but no C4 group, the capacity falls back to
+// the C128 group rather than the SWA ring.
+TEST(KVCacheStateTest, CurrentMaxTokensCapacityFallsBackToC128WhenNoC4) {
+  KVCacheState state;
+  std::vector<CacheGroupState>* groups = state.mutable_groups();
+  groups->push_back(
+      make_group_with_blocks(CacheStateId::SWA, /*block_size=*/kBlockSize, 5));
+  groups->push_back(make_group_with_blocks(CacheStateId::C128,
+                                           /*block_size=*/kBlockSize * 128, 2));
+
+  EXPECT_EQ(state.current_max_tokens_capacity(), 2u * kBlockSize * 128u);
+}
+
+// A composite DSV4 state whose compressed groups hold no blocks yet contributes
+// no linear capacity (the SWA ring never stands in for it).
+TEST(KVCacheStateTest, CurrentMaxTokensCapacityZeroWhenCompressedGroupsEmpty) {
+  KVCacheState state;
+  std::vector<CacheGroupState>* groups = state.mutable_groups();
+  groups->push_back(
+      make_group_with_blocks(CacheStateId::SWA, /*block_size=*/kBlockSize, 5));
+  groups->push_back(
+      make_group_with_blocks(CacheStateId::C4, /*block_size=*/kBlockSize * 4, 0));
+
+  EXPECT_TRUE(state.on_composite_path());
+  EXPECT_EQ(state.current_max_tokens_capacity(), 0u);
+}
+
 }  // namespace xllm

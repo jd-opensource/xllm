@@ -402,4 +402,38 @@ TEST(GroupCompositeBlockManagerTest,
   EXPECT_EQ(manager.group_free_blocks(CacheStateId::SINGLE_RES), 3u);
 }
 
+// Each spec's export_index is copied onto its per-sequence group state when the
+// composite materializes the states, so the worker can later emit the
+// multi_block_tables slots in DSV4's SWA/C4/C128 order. SINGLE_RES keeps the
+// sentinel -1 and is therefore excluded from multi_block_table_groups().
+TEST(GroupCompositeBlockManagerTest, StampsExportIndexOntoGroupStates) {
+  CacheGroupSpec swa = make_swa_spec(/*window_blocks=*/4, /*num_blocks=*/12);
+  swa.export_index = 0;
+  CacheGroupSpec c4 = make_c1_spec(/*num_blocks=*/16);
+  c4.state_id = CacheStateId::C4;
+  c4.export_index = 1;
+  CacheGroupSpec single = make_single_res_spec(/*num_blocks=*/4);
+  single.export_index = -1;
+
+  GroupCompositeBlockManager manager({swa, c4, single});
+
+  KVCacheState kv_state;
+  BlockManagerContext context;
+  context.kv_state = &kv_state;
+  ASSERT_TRUE(manager.allocate(&context, /*num_tokens=*/9));
+
+  ASSERT_EQ(kv_state.groups().size(), 3u);
+  EXPECT_EQ(kv_state.group_state(CacheStateId::SWA)->export_index, 0);
+  EXPECT_EQ(kv_state.group_state(CacheStateId::C4)->export_index, 1);
+  EXPECT_EQ(kv_state.group_state(CacheStateId::SINGLE_RES)->export_index, -1);
+
+  // The exported groups come back in ascending export_index order; the
+  // SINGLE_RES group (export_index < 0) is skipped.
+  std::vector<const CacheGroupState*> exported =
+      kv_state.multi_block_table_groups();
+  ASSERT_EQ(exported.size(), 2u);
+  EXPECT_EQ(exported[0]->state_id, CacheStateId::SWA);
+  EXPECT_EQ(exported[1]->state_id, CacheStateId::C4);
+}
+
 }  // namespace xllm

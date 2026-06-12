@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/multimodal/mm_visitor.h"
+#include "framework/block/cache_group.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/sequence.h"
@@ -750,20 +751,24 @@ void BatchInputBuilder::setup_kv_cache_info(
   sequence->kv_state().incr_kv_cache_tokens_num(/*size=*/q_seq_len);
 
   const auto blocks = sequence->kv_state().kv_blocks();
-  const auto composite_blocks = sequence->kv_state().composite_blocks();
-  if (!composite_blocks.empty()) {
+  const std::vector<const CacheGroupState*> mbt_groups =
+      sequence->kv_state().multi_block_table_groups();
+  if (!mbt_groups.empty()) {
+    // DSV4: each cache group that exports to multi_block_tables (SWA, C4, C128
+    // in export_index order) fills one worker row. SINGLE_RES is excluded
+    // (export_index < 0), and the flat attention path below is skipped.
     if (state.multi_block_tables.empty()) {
-      state.multi_block_tables.resize(composite_blocks.size());
+      state.multi_block_tables.resize(mbt_groups.size());
     }
-    CHECK_EQ(state.multi_block_tables.size(), composite_blocks.size())
-        << "composite block manager count mismatch. existing_manager_num="
+    CHECK_EQ(state.multi_block_tables.size(), mbt_groups.size())
+        << "composite cache-group count mismatch. existing_group_num="
         << state.multi_block_tables.size()
-        << ", current_manager_num=" << composite_blocks.size();
-    for (size_t m = 0; m < composite_blocks.size(); ++m) {
-      const auto& composite_block = composite_blocks[m];
+        << ", current_group_num=" << mbt_groups.size();
+    for (size_t m = 0; m < mbt_groups.size(); ++m) {
+      const std::vector<Block>& group_blocks = mbt_groups[m]->blocks;
       std::vector<int32_t> block_ids;
-      block_ids.reserve(composite_block.size());
-      for (const auto& block : composite_block) {
+      block_ids.reserve(group_blocks.size());
+      for (const Block& block : group_blocks) {
         block_ids.push_back(block.id());
       }
       state.multi_block_tables[m].emplace_back(std::move(block_ids));
@@ -771,8 +776,8 @@ void BatchInputBuilder::setup_kv_cache_info(
     return;
   }
 
-  // Keep [manager][batch][block_ids] row-aligned even if a sequence has no
-  // composite blocks.
+  // Keep [group][batch][block_ids] row-aligned even if a sequence has no
+  // exported composite cache groups.
   if (!state.multi_block_tables.empty()) {
     for (auto& mgr_tables : state.multi_block_tables) {
       mgr_tables.emplace_back(std::vector<int32_t>{});

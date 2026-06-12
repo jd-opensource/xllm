@@ -105,6 +105,7 @@ void GroupCompositeBlockManager::ensure_group_states(
   for (const CacheGroupRuntime& runtime : runtimes_) {
     CacheGroupState state;
     state.state_id = runtime.spec.state_id;
+    state.export_index = runtime.spec.export_index;
     groups->emplace_back(std::move(state));
   }
 }

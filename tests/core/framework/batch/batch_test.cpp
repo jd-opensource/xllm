@@ -22,6 +22,7 @@ limitations under the License.
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -30,6 +31,7 @@ limitations under the License.
 #include "framework/block/block.h"
 #include "framework/block/block_manager_impl.h"
 #include "framework/block/block_manager_pool.h"
+#include "framework/block/cache_group.h"
 #include "framework/config/beam_search_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
@@ -59,6 +61,35 @@ class BatchInputBuilderTestPeer final {
         seq_len,
         block_size,
         advanced_transfer_block_idx);
+  }
+
+  // Drives the private setup_kv_cache_info() over a single DSV4 sequence and
+  // returns the resulting [group][batch][block_ids] multi_block_tables, so the
+  // test can assert the worker rows land in export_index order.
+  static std::vector<std::vector<std::vector<int32_t>>> collect_multi_block_tables(
+      Sequence* sequence,
+      uint32_t q_seq_len) {
+    const std::vector<Sequence*> sequences;
+    const std::vector<uint32_t> allowed_max_tokens;
+    const std::vector<torch::Tensor> input_embeddings_vec;
+    const std::vector<MMData> mm_data_vec;
+    BatchInputBuilder builder(sequences,
+                              allowed_max_tokens,
+                              input_embeddings_vec,
+                              mm_data_vec,
+                              /*swap_block_transfer_infos=*/nullptr,
+                              /*batch_id=*/0,
+                              /*args=*/nullptr,
+                              BatchForwardType::PREFILL);
+    BatchInputBuilder::BuilderState state;
+    std::unordered_set<int32_t> write_block_ids;
+    builder.setup_kv_cache_info(sequence,
+                                /*n_kv_cache_tokens=*/0,
+                                /*seq_len=*/q_seq_len,
+                                /*q_seq_len=*/q_seq_len,
+                                &state,
+                                &write_block_ids);
+    return state.multi_block_tables;
   }
 };
 
@@ -143,6 +174,22 @@ Sequence make_basic_sequence(const std::vector<int32_t>& prompt_token_ids) {
                   /*mm_data=*/MMData(),
                   decoder,
                   seq_params);
+}
+
+// Build one DSV4 cache group holding `block_count` blocks each `block_size`
+// tokens wide. Block ids are the default sentinel (-1); the test only inspects
+// the per-group block counts and their export ordering.
+CacheGroupState make_dsv4_group(CacheStateId state_id,
+                                int32_t export_index,
+                                uint32_t block_size,
+                                size_t block_count) {
+  CacheGroupState group;
+  group.state_id = state_id;
+  group.export_index = export_index;
+  for (size_t i = 0; i < block_count; ++i) {
+    group.blocks.emplace_back(block_size);
+  }
+  return group;
 }
 
 }  // namespace
@@ -292,6 +339,49 @@ TEST(BatchInputBuilderTest, RemoteCoverageShortageDies) {
         (void)info;
       },
       "remote");
+}
+
+// A DSV4-shaped groups_ vector must populate multi_block_tables in
+// export_index order (SWA, C4, C128) regardless of the groups_ insertion order,
+// and the non-exported SINGLE_RES group (export_index < 0) must be dropped.
+TEST(BatchInputBuilderTest, Dsv4SetupKvCacheInfoFillsMultiBlockTablesInExportOrder) {
+  constexpr uint32_t kBlockSize = 4;
+  Sequence sequence = make_basic_sequence({1, 2, 3, 4});
+  std::vector<CacheGroupState>* groups = sequence.kv_state().mutable_groups();
+
+  // Push the groups deliberately OUT of export order so the assertion proves the
+  // builder sorts by export_index, not by groups_ insertion order. Each group
+  // carries a distinct block count (SWA=3, C4=2, C128=1) so the rows are
+  // distinguishable by size alone.
+  groups->push_back(make_dsv4_group(CacheStateId::C128, /*export_index=*/2,
+                                    /*block_size=*/kBlockSize * 128,
+                                    /*block_count=*/1));
+  groups->push_back(make_dsv4_group(CacheStateId::SWA, /*export_index=*/0,
+                                    /*block_size=*/kBlockSize,
+                                    /*block_count=*/3));
+  // C4 must hold enough capacity for the incr_kv_cache_tokens_num(q_seq_len)
+  // CHECK inside setup_kv_cache_info: 2 * (kBlockSize * 4) = 32 >= q_seq_len.
+  groups->push_back(make_dsv4_group(CacheStateId::C4, /*export_index=*/1,
+                                    /*block_size=*/kBlockSize * 4,
+                                    /*block_count=*/2));
+  // SINGLE_RES carries the sentinel export_index and must be skipped.
+  groups->push_back(make_dsv4_group(CacheStateId::SINGLE_RES,
+                                    /*export_index=*/-1,
+                                    /*block_size=*/1,
+                                    /*block_count=*/9));
+
+  const std::vector<std::vector<std::vector<int32_t>>> multi_block_tables =
+      BatchInputBuilderTestPeer::collect_multi_block_tables(&sequence,
+                                                            /*q_seq_len=*/4);
+
+  // Three worker rows -- SWA, C4, C128 in export order; SINGLE_RES dropped.
+  ASSERT_EQ(multi_block_tables.size(), 3u);
+  ASSERT_EQ(multi_block_tables[0].size(), 1u);
+  ASSERT_EQ(multi_block_tables[1].size(), 1u);
+  ASSERT_EQ(multi_block_tables[2].size(), 1u);
+  EXPECT_EQ(multi_block_tables[0][0].size(), 3u);  // SWA ring (export 0)
+  EXPECT_EQ(multi_block_tables[1][0].size(), 2u);  // C4 (export 1)
+  EXPECT_EQ(multi_block_tables[2][0].size(), 1u);  // C128 (export 2)
 }
 
 TEST(BatchTest, ProcessSampleOutputStoresMtpBootstrapEmbedding) {

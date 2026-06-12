@@ -103,8 +103,9 @@ struct PrefixCacheInsertContext {
 };
 
 // Aggregates per-group prefix caches into a single composite match/flush. There
-// is exactly one policy per CompositeBlockManager; it owns the cross-group
-// alignment that the per-group PrefixCache deliberately does not understand.
+// is exactly one policy per group-composite block manager; it owns the
+// cross-group alignment that the per-group PrefixCache deliberately does not
+// understand.
 class ICompositePrefixPolicy {
  public:
   virtual ~ICompositePrefixPolicy() = default;

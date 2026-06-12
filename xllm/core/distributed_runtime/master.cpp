@@ -155,8 +155,7 @@ Master::Master(const Options& options, EngineType type)
     const std::string model_type = util::get_model_type(model_path);
     if (util::is_deepseek_v4_model_type(model_type)) {
       LOG(WARNING) << model_type
-                   << " does not support prefix cache with "
-                      "CompositeBlockManager yet, fallback to "
+                   << " does not support prefix cache yet, fallback to "
                       "enable_prefix_cache=false";
       options_.enable_prefix_cache(false);
       KVCacheConfig::get_instance().enable_prefix_cache(false);
