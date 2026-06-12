@@ -81,6 +81,11 @@ class PrefixCache {
   virtual size_t insert(Slice<Block>& blocks);
   virtual size_t insert(const std::vector<Block>& blocks);
 
+  // Insert pre-hashed blocks and report only the keys newly added to the cache
+  // (already-present keys are touched for LRU but not reported). Used by the
+  // composite prefix policy to build its PrefixCacheInsertResult from a flush.
+  size_t insert(Slice<Block>& blocks, std::vector<XXH3Key>* insert_keys);
+
   // evict blocks hold by the prefix cache
   // return the actual number of evicted blocks
   virtual size_t evict(size_t n_blocks);
@@ -112,8 +117,6 @@ class PrefixCache {
                         size_t existed_shared_blocks_num,
                         const MMData& mm_data,
                         std::vector<XXH3Key>* insert_keys);
-
-  size_t insert(Slice<Block>& blocks, std::vector<XXH3Key>* insert_keys);
 
   size_t evict(size_t n_blocks, std::vector<XXH3Key>* evict_keys);
 

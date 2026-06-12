@@ -18,6 +18,13 @@ cc_library(
   HDRS
     block.h
     block_manager.h
+    block_manager_context.h
+    cache_group.h
+    cache_group_policy.h
+    cache_group_spec_builder.h
+    composite_prefix_policy.h
+    group_composite_block_manager.h
+    concurrent_composite_block_manager.h
     single_block_manager.h
     block_manager_pool.h
     block_manager_impl.h
@@ -25,8 +32,13 @@ cc_library(
     hierarchy_block_manager_pool.h
     sliding_window_block_manager.h
     composite_block_manager.h
-  SRCS 
+  SRCS
     block.cpp
+    cache_group_policy.cpp
+    cache_group_spec_builder.cpp
+    composite_prefix_policy.cpp
+    group_composite_block_manager.cpp
+    concurrent_composite_block_manager.cpp
     single_block_manager.cpp
     block_manager_pool.cpp
     concurrent_block_manager_impl.cpp

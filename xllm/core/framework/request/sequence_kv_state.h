@@ -22,6 +22,7 @@ limitations under the License.
 #include "core/common/types.h"
 #include "core/util/slice.h"
 #include "framework/block/block.h"
+#include "framework/block/cache_group.h"
 
 namespace xllm {
 
@@ -71,6 +72,23 @@ class KVCacheState {
     return &composite_blocks_;
   }
 
+  // Per-cache-group runtime state, index-aligned with the owning composite
+  // manager's CacheGroupRuntime entries. This is the CompositeKVState role of
+  // the block-manager refactor; the legacy blocks_/composite_blocks_ views
+  // above are retained during migration.
+  const std::vector<CacheGroupState>& groups() const { return groups_; }
+  std::vector<CacheGroupState>* mutable_groups() { return &groups_; }
+  // Returns the group state for `state_id`, or nullptr when this sequence holds
+  // no such group.
+  CacheGroupState* group_state(CacheStateId state_id);
+  // Blocks currently held by `state_id`; empty when the group is absent.
+  Slice<Block> group_blocks(CacheStateId state_id) const;
+
+  // True once this sequence is managed by the group-composite manager (its
+  // per-group state vector has been materialized). The legacy flat views below
+  // then read through to the C1 attention group instead of `blocks_`.
+  bool on_composite_path() const { return !groups_.empty(); }
+
   void set_transfer_kv_info(TransferKVInfo&& info);
   std::optional<TransferKVInfo>& transfer_kv_info();
 
@@ -90,6 +108,11 @@ class KVCacheState {
   void process_beam_search(std::optional<Block> new_block = std::nullopt);
 
  private:
+  // The C1 attention group when this sequence is on the composite path, else
+  // nullptr. Backs the legacy flat views (kv_blocks / num_kv_blocks /
+  // kv_cache_slots / capacity / shared counts) for normal and Qwen3.5+ models.
+  const CacheGroupState* c1_view_group() const;
+
   // number of tokens in kv cache
   size_t kv_cache_tokens_num_ = 0;
 
@@ -115,6 +138,10 @@ class KVCacheState {
   // CompositeBlockManager). DeepSeek V4 leans on this so each per-manager
   // block table can be assembled independently of the legacy `blocks_` slot.
   std::vector<std::vector<Block>> composite_blocks_;
+
+  // Per-cache-group runtime state for the CacheGroupRuntime-based composite
+  // manager. Index-aligned with the manager's states_ (worker export order).
+  std::vector<CacheGroupState> groups_;
 
   // Sliding-window bookkeeping (DSA SWA: keeps the physical block order
   // stable so DSA metadata's modulo-based logical->physical mapping holds).

@@ -33,6 +33,7 @@ limitations under the License.
 #include "core/util/slice.h"
 #include "finish_reason.h"
 #include "framework/block/block.h"
+#include "framework/prefix_cache/prefix_hash_state.h"
 #include "incremental_decoder.h"
 #include "rec_type.h"
 #include "request_output.h"
@@ -292,6 +293,12 @@ class Sequence final {
 
   KVCacheState& host_kv_state() { return host_kv_state_; }
 
+  // Incremental per-group prefix-hash chain, consumed by the composite
+  // manager's flush path so prefix-cache inserts never recompute the hash from
+  // token 0. Pure function of the sequence tokens, so it survives reset()
+  // unchanged.
+  PrefixHashState& prefix_hash_state() { return prefix_hash_state_; }
+
   // for generated tokens
   float get_acc_logprob();
   // Returns the beam base score: accumulated logprob excluding last token.
@@ -447,6 +454,9 @@ class Sequence final {
   KVCacheState kv_state_;
 
   KVCacheState host_kv_state_;
+
+  // Per-sequence incremental prefix-hash chain (see prefix_hash_state()).
+  PrefixHashState prefix_hash_state_;
 
   std::unique_ptr<LogprobState> logprob_state_;
 

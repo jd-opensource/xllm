@@ -34,11 +34,50 @@ void try_replace_unique_blocks(std::vector<Block>&& matched_shared_blocks,
 }
 }  // namespace
 
+const CacheGroupState* KVCacheState::c1_view_group() const {
+  if (groups_.empty()) {
+    return nullptr;
+  }
+  for (const CacheGroupState& group : groups_) {
+    if (group.state_id == CacheStateId::C1) {
+      return &group;
+    }
+  }
+  return nullptr;
+}
+
 size_t KVCacheState::shared_kv_blocks_num() const {
+  if (const CacheGroupState* c1 = c1_view_group()) {
+    return c1->shared_blocks_num;
+  }
   return num_owned_shared_blocks_;
 }
 
+CacheGroupState* KVCacheState::group_state(CacheStateId state_id) {
+  for (CacheGroupState& group : groups_) {
+    if (group.state_id == state_id) {
+      return &group;
+    }
+  }
+  return nullptr;
+}
+
+Slice<Block> KVCacheState::group_blocks(CacheStateId state_id) const {
+  for (const CacheGroupState& group : groups_) {
+    if (group.state_id == state_id) {
+      return group.blocks;
+    }
+  }
+  return {};
+}
+
 size_t KVCacheState::shared_kv_tokens_num() const {
+  if (const CacheGroupState* c1 = c1_view_group()) {
+    if (c1->blocks.empty() || c1->shared_blocks_num == 0) {
+      return 0;
+    }
+    return c1->shared_blocks_num * c1->blocks[0].size();
+  }
   if (blocks_.empty() || num_owned_shared_blocks_ == 0) {
     return 0;
   }
@@ -129,6 +168,14 @@ void KVCacheState::add_shared_kv_blocks(std::vector<Block>&& blocks,
 }
 
 size_t KVCacheState::current_max_tokens_capacity() const {
+  if (const CacheGroupState* c1 = c1_view_group()) {
+    // Composite path: only the C1 incremental group has a linear token
+    // capacity; an empty group contributes none yet.
+    if (c1->blocks.empty()) {
+      return 0;
+    }
+    return c1->blocks.size() * c1->blocks[0].size();
+  }
   if (!blocks_.empty()) {
     // all blocks have the same size
     const size_t block_size = blocks_[0].size();
@@ -141,23 +188,34 @@ size_t KVCacheState::current_max_tokens_capacity() const {
 }
 
 // returns allocated cache blocks
-Slice<Block> KVCacheState::kv_blocks() const { return blocks_; }
+Slice<Block> KVCacheState::kv_blocks() const {
+  if (const CacheGroupState* c1 = c1_view_group()) {
+    return c1->blocks;
+  }
+  return blocks_;
+}
 
 std::vector<Block>* KVCacheState::mutable_kv_blocks() { return &blocks_; }
 
 // get the number of blocks
-size_t KVCacheState::num_kv_blocks() const { return blocks_.size(); }
+size_t KVCacheState::num_kv_blocks() const {
+  if (const CacheGroupState* c1 = c1_view_group()) {
+    return c1->blocks.size();
+  }
+  return blocks_.size();
+}
 
 std::vector<int32_t> KVCacheState::kv_cache_slots(int32_t pos_start,
                                                   int32_t pos_end) {
-  CHECK(!blocks_.empty()) << "no cache blocks available";
+  const Slice<Block> blocks = kv_blocks();
+  CHECK(!blocks.empty()) << "no cache blocks available";
 
   std::vector<int32_t> slots;
   slots.reserve(pos_end - pos_start);
 
-  const size_t block_size = blocks_[0].size();
+  const size_t block_size = blocks[0].size();
   for (int32_t i = pos_start; i < pos_end; ++i) {
-    const int32_t block_id = blocks_[i / block_size].id();
+    const int32_t block_id = blocks[i / block_size].id();
     const int32_t block_offset = i % block_size;
     slots.push_back(block_id * block_size + block_offset);
   }
@@ -190,6 +248,7 @@ void KVCacheState::reset() {
   pushed_local_block_count_ = 0;
   blocks_.clear();
   composite_blocks_.clear();
+  groups_.clear();
   transfer_kv_info_.reset();
   next_transfer_block_idx_ = 0;
 }

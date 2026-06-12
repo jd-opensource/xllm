@@ -28,7 +28,7 @@ namespace xllm {
 Block::Block(uint32_t size) : size_(size) {}
 
 Block::Block(int32_t id, BlockManager* manager)
-    : id_(id), ref_count_(new uint32_t(1)), manager_(manager) {
+    : id_(id), ref_count_(new std::atomic<uint32_t>(1)), manager_(manager) {
   // get the block size from the manager
   size_ = manager_ == nullptr ? 0 : manager_->block_size();
 }
@@ -103,12 +103,15 @@ Block& Block::operator=(Block&& other) noexcept {
 
 void Block::inc_ref_count() {
   if (ref_count_ != nullptr) {
-    ++(*ref_count_);
+    ref_count_->fetch_add(1, std::memory_order_relaxed);
   }
 }
 
 void Block::dec_ref_count() {
-  if (ref_count_ != nullptr && --(*ref_count_) == 0) {
+  // acq_rel: the thread dropping the last reference must observe all writes
+  // made through other aliases before recycling the block id
+  if (ref_count_ != nullptr &&
+      ref_count_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
     // release the reference count memory
     delete ref_count_;
     // return the block id to the manager

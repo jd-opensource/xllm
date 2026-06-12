@@ -16,3 +16,15 @@ cc_test(
 )
 target_link_libraries(prefix_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto Folly::folly :xllm_server)
 add_dependencies(prefix_test brpc-static)
+
+cc_test(
+  NAME
+    prefix_hash_state_test
+  SRCS
+    prefix_hash_state_test.cpp
+  DEPS
+    :block
+    :config
+    :prefix_cache
+    GTest::gtest_main
+)

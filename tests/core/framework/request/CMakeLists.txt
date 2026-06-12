@@ -60,6 +60,9 @@ cc_test(
   SRCS
     sequence_kv_state_test.cpp
   DEPS
+    :block
+    :config
+    :prefix_cache
     :request
     $<$<BOOL:${USE_MLU}>:torch_mlu>
     $<$<BOOL:${USE_NPU}>:torch_npu>

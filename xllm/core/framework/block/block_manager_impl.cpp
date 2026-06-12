@@ -75,10 +75,13 @@ BlockManagerImpl::BlockManagerImpl(const Options& options)
 }
 
 std::vector<Block> BlockManagerImpl::allocate(size_t num_blocks) {
+  // eviction must run outside free_mutex_: evicted Block destructors
+  // re-enter free(), which takes the same non-recursive leaf lock
   if (!has_enough_blocks(num_blocks)) {
     return {};
   }
 
+  std::lock_guard<std::mutex> lock(free_mutex_);
   CHECK(num_blocks <= num_free_blocks_) << "Not enough blocks available";
   std::vector<Block> blocks;
   blocks.reserve(num_blocks);
@@ -91,12 +94,12 @@ std::vector<Block> BlockManagerImpl::allocate(size_t num_blocks) {
     blocks.emplace_back(block_id, this);
   }
 
-  // const auto block_ids = allocate(num_blocks);
   num_used_blocks_.fetch_add(num_blocks, std::memory_order_relaxed);
   return blocks;
 }
 
 void BlockManagerImpl::deallocate(const Slice<Block>& blocks) {
+  std::lock_guard<std::mutex> lock(free_mutex_);
   for (const auto& block : blocks) {
     if (!block.is_valid()) {
       continue;
@@ -173,6 +176,7 @@ std::vector<Block> BlockManagerImpl::allocate_shared(
     COUNTER_ADD(prefix_cache_match_length_total, prefix_length);
 
     // update effective block usage
+    std::lock_guard<std::mutex> lock(free_mutex_);
     for (const auto& block : shared_blocks) {
       if (mark_used(&usage_accounted_ids_, block.id())) {
         num_used_blocks_.fetch_add(1, std::memory_order_relaxed);
@@ -214,6 +218,7 @@ void BlockManagerImpl::get_merged_kvcache_event(KvCacheEvent* event) const {
 
 // allocate a block id
 Block BlockManagerImpl::allocate() {
+  std::lock_guard<std::mutex> lock(free_mutex_);
   CHECK(num_free_blocks_ > 0) << "No more blocks available";
   size_t prev_count = num_free_blocks_.fetch_sub(1, std::memory_order_relaxed);
   const int32_t block_id = free_blocks_[prev_count - 1];
@@ -224,6 +229,7 @@ Block BlockManagerImpl::allocate() {
 void BlockManagerImpl::free(int32_t block_id) {
   // do nothing for reserved block 0
   if (block_id != 0) {
+    std::lock_guard<std::mutex> lock(free_mutex_);
     if (clear_used(&usage_accounted_ids_, block_id)) {
       CHECK_GT(num_used_blocks_.load(std::memory_order_relaxed), 0u);
       num_used_blocks_.fetch_sub(1, std::memory_order_relaxed);

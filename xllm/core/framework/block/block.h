@@ -19,6 +19,7 @@ limitations under the License.
 #include <openssl/sha.h>
 #include <string.h>
 
+#include <atomic>
 #include <cstdint>
 #include <vector>
 
@@ -50,7 +51,10 @@ class Block final {
   constexpr uint32_t size() const { return size_; }
 
   // get the reference count, 0 if the block is invalid after move
-  uint32_t ref_count() const { return ref_count_ == nullptr ? 0 : *ref_count_; }
+  uint32_t ref_count() const {
+    return ref_count_ == nullptr ? 0
+                                 : ref_count_->load(std::memory_order_acquire);
+  }
 
   // check if the block is shared
   bool is_shared() const { return ref_count() > 1; }
@@ -88,8 +92,10 @@ class Block final {
   // block size
   uint32_t size_ = 0;
 
-  // reference count
-  uint32_t* ref_count_ = nullptr;
+  // reference count, shared by all aliases of the same physical block;
+  // atomic because the last alias may be dropped from a non-scheduler thread
+  // (hierarchy offload callback, disagg PD threadpool)
+  std::atomic<uint32_t>* ref_count_ = nullptr;
 
   // manager that manages this block
   BlockManager* manager_ = nullptr;

@@ -16,6 +16,8 @@ limitations under the License.
 
 #pragma once
 
+#include <mutex>
+
 #include "block_manager.h"
 #include "framework/kv_cache/kv_cache_event.h"
 
@@ -107,6 +109,13 @@ class BlockManagerImpl : public BlockManager {
 
   // Whether a block is already counted in num_used_blocks_.
   std::vector<uint8_t> usage_accounted_ids_;
+
+  // Leaf lock guarding free_blocks_/usage_accounted_ids_ mutation. free() is
+  // re-entered from Block destructors on non-scheduler threads (hierarchy
+  // offload callback, disagg PD threadpool), so the free list must be safe
+  // without the upper concurrent wrapper. Never call out (prefix cache,
+  // composite layer) while holding it.
+  mutable std::mutex free_mutex_;
 };
 
 }  // namespace xllm
