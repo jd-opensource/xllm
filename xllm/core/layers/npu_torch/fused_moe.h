@@ -88,6 +88,7 @@ class FusedMoEImpl : public torch::nn::Module {
   bool is_minimax_m3_ = false;
   bool shared_expert_gate_is_loaded_ = false;
   int64_t renormalize_;
+  double route_scale_ = 1.0;
   double swiglu_limit_ = 0.0;
   std::string hidden_act_;
   std::string scoring_func_;

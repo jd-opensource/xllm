@@ -376,6 +376,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       is_deepseek_v4_(util::is_deepseek_v4_model_type(model_args.model_type())),
       is_minimax_m3_(is_minimax_m3_model_type(model_args.model_type())),
       renormalize_(model_args.norm_topk_prob() ? 1 : 0),
+      route_scale_(static_cast<double>(model_args.routed_scaling_factor())),
       swiglu_limit_(static_cast<double>(model_args.swiglu_limit())),
       hidden_act_(model_args.hidden_act()),
       scoring_func_(model_args.scoring_func().empty()
