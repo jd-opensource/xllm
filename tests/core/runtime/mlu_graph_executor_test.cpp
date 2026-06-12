@@ -37,14 +37,17 @@ namespace {
 
 class ScopedConfigSnapshot final {
  public:
-  ScopedConfigSnapshot() : execution_config_(ExecutionConfig::get_instance()) {}
+  ScopedConfigSnapshot()
+      : max_tokens_for_graph_mode_(
+            ExecutionConfig::get_instance().max_tokens_for_graph_mode()) {}
 
   ~ScopedConfigSnapshot() {
-    ExecutionConfig::get_instance() = execution_config_;
+    ExecutionConfig::get_instance().max_tokens_for_graph_mode(
+        max_tokens_for_graph_mode_);
   }
 
  private:
-  ExecutionConfig execution_config_;
+  int32_t max_tokens_for_graph_mode_;
 };
 
 }  // namespace

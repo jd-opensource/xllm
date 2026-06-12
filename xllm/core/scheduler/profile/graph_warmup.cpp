@@ -39,16 +39,16 @@ std::vector<int32_t> graph_warmup_buckets(int32_t max_seqs_per_batch) {
   const std::vector<int32_t> small_buckets = {1, 2, 4, 8, 16};
   for (int32_t bucket : small_buckets) {
     if (bucket <= max_seqs_per_batch) {
-      buckets.push_back(bucket);
+      buckets.emplace_back(bucket);
     }
   }
 
   for (int32_t bucket = 32; bucket <= max_seqs_per_batch; bucket += 16) {
-    buckets.push_back(bucket);
+    buckets.emplace_back(bucket);
   }
 
   if (buckets.back() != max_seqs_per_batch) {
-    buckets.push_back(max_seqs_per_batch);
+    buckets.emplace_back(max_seqs_per_batch);
   }
 
   return buckets;
@@ -67,7 +67,7 @@ std::vector<int32_t> graph_decode_buckets(int32_t max_seqs_per_batch,
   decode_buckets.reserve(buckets.size());
   for (int32_t bucket : buckets) {
     if (!skip_graph_bucket(bucket, dp_size)) {
-      decode_buckets.push_back(bucket);
+      decode_buckets.emplace_back(bucket);
     }
   }
 
