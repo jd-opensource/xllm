@@ -11,6 +11,7 @@ cc_library(
     indexer.h
     deepseek_v4/dsa_cache_mapping.h
     deepseek_v4/dsa_metadata_builder_mlu.h
+    deepseek_v4/hyper_connection.h
     deepseek_v32_sp_context.h
     deepseek_v32_sp_plan.h
     moe_gate.h
@@ -18,6 +19,7 @@ cc_library(
     qwen3_5_fused_moe.h
     qwen3_5_attention.h
     qwen3_5_decoder_layer.h
+    moe_softplus_topk.h
   SRCS
     attention.cpp
     deepseek_v2_attention.cpp
@@ -26,6 +28,7 @@ cc_library(
     deepseek_v2_sparse_moe_block.cpp
     indexer.cpp
     deepseek_v4/dsa_metadata_builder_mlu.cpp
+    deepseek_v4/hyper_connection.cpp
     moe_gate.cpp
     fused_moe.cpp
     fused_moe_base.cpp
@@ -33,6 +36,7 @@ cc_library(
     qwen3_5_fused_moe.cpp
     qwen3_5_attention.cpp
     qwen3_5_decoder_layer.cpp
+    moe_softplus_topk.cpp
   DEPS
     :common_layers
 )
