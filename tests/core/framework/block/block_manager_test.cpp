@@ -354,4 +354,96 @@ TEST(BlockManagerPoolTest, SequenceCopyDoesNotReuseSingleBlockSlot) {
   EXPECT_NE(GetSingleBlockIdOrFail(clone), GetSingleBlockIdOrFail(src));
 }
 
+namespace {
+
+// Independently compute the chained block hashes for `tokens`, mirroring
+// xxh3_128bits_hash() so we can check Sequence::update_block_hashes().
+std::vector<XXH3Key> ExpectedChain(const std::vector<int32_t>& tokens,
+                                   uint32_t block_size) {
+  const size_t n_blocks = tokens.size() / block_size;
+  std::vector<XXH3Key> hashes;
+  hashes.reserve(n_blocks);
+  const Slice<int32_t> slice(tokens);
+  for (size_t b = 0; b < n_blocks; ++b) {
+    XXH3Key key;
+    const uint8_t* pre = (b == 0) ? nullptr : hashes.back().data;
+    xxh3_128bits_hash(
+        pre, slice.slice(b * block_size, (b + 1) * block_size), key.data);
+    hashes.emplace_back(key);
+  }
+  return hashes;
+}
+
+}  // namespace
+
+// Validates the production hash builder Sequence::update_block_hashes():
+// correct chain, idempotency, and invalidation after a token rewrite.
+TEST(BlockManagerPoolTest, SequenceUpdateBlockHashes) {
+  const uint32_t block_size = 4;
+  const uint32_t n_blocks = 5;
+  std::vector<int32_t> prompt;
+  prompt.reserve(n_blocks * block_size);
+  for (uint32_t i = 0; i < n_blocks * block_size; ++i) {
+    prompt.push_back(static_cast<int32_t>(i * 7 + 1));
+  }
+
+  // Build the Sequence in-test so the sampling/stopping params outlive it.
+  RequestSamplingParam sampling_param;
+  sampling_param.beam_width = 0;
+  sampling_param.is_embeddings = false;
+  StoppingChecker stopping_checker;
+  SequenceParams params;
+  params.seq_capacity = prompt.size() + 8;
+  params.bos_token_id = 0;
+  params.request_id = "seq_block_hash_test";
+  params.sampling_param = &sampling_param;
+  params.stopping_checker = &stopping_checker;
+  IncrementalDecoder decoder(/*prompt=*/"prompt",
+                             /*num_prompt_tokens=*/prompt.size(),
+                             /*echo=*/false,
+                             /*skip_special_tokens=*/true);
+  Sequence seq(/*index=*/0,
+               prompt,
+               /*input_embedding=*/torch::Tensor(),
+               /*mm_data=*/MMData(),
+               decoder,
+               params);
+
+  const std::vector<XXH3Key> expected = ExpectedChain(prompt, block_size);
+
+  seq.update_block_hashes(block_size, BlockHasherType::TEXT);
+  ASSERT_EQ(seq.block_hashes().size(), n_blocks);
+  for (uint32_t i = 0; i < n_blocks; ++i) {
+    EXPECT_EQ(std::memcmp(seq.block_hashes()[i].data,
+                          expected[i].data,
+                          XXH3_128BITS_HASH_VALUE_LEN),
+              0);
+  }
+
+  // Idempotent: no new full block -> nothing recomputed/appended.
+  seq.update_block_hashes(block_size, BlockHasherType::TEXT);
+  EXPECT_EQ(seq.block_hashes().size(), n_blocks);
+
+  // Rewriting a token in block index 2 invalidates block 2 and everything
+  // after it; blocks 0 and 1 survive.
+  seq.update_token(2 * block_size + 1, Token(/*id=*/999999));
+  EXPECT_EQ(seq.block_hashes().size(), 2u);
+
+  // Recompute: blocks 0/1 unchanged, block 2 differs from the old chain.
+  seq.update_block_hashes(block_size, BlockHasherType::TEXT);
+  ASSERT_EQ(seq.block_hashes().size(), n_blocks);
+  EXPECT_EQ(std::memcmp(seq.block_hashes()[0].data,
+                        expected[0].data,
+                        XXH3_128BITS_HASH_VALUE_LEN),
+            0);
+  EXPECT_EQ(std::memcmp(seq.block_hashes()[1].data,
+                        expected[1].data,
+                        XXH3_128BITS_HASH_VALUE_LEN),
+            0);
+  EXPECT_NE(std::memcmp(seq.block_hashes()[2].data,
+                        expected[2].data,
+                        XXH3_128BITS_HASH_VALUE_LEN),
+            0);
+}
+
 }  // namespace xllm

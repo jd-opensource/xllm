@@ -159,13 +159,14 @@ bool BlockManagerImpl::has_enough_blocks(uint32_t num_blocks) {
 std::vector<Block> BlockManagerImpl::allocate_shared(
     const Slice<int32_t>& token_ids,
     const Slice<Block>& existed_shared_blocks,
-    const MMData& mm_data) {
+    const MMData& mm_data,
+    const Slice<XXH3Key>& block_hashes) {
   // only allocate shared blocks for prefill sequences
   if (options_.enable_prefix_cache()) {
     AUTO_COUNTER(prefix_cache_latency_seconds_match);
 
-    std::vector<Block> shared_blocks =
-        prefix_cache_->match(token_ids, existed_shared_blocks, mm_data);
+    std::vector<Block> shared_blocks = prefix_cache_->match(
+        token_ids, existed_shared_blocks, mm_data, block_hashes);
 
     const size_t prefix_length =
         shared_blocks.empty() ? 0
@@ -186,12 +187,13 @@ std::vector<Block> BlockManagerImpl::allocate_shared(
 void BlockManagerImpl::cache(const Slice<int32_t>& token_ids,
                              std::vector<Block>& blocks,
                              size_t existed_shared_blocks_num,
-                             const MMData& mm_data) {
+                             const MMData& mm_data,
+                             const Slice<XXH3Key>& block_hashes) {
   if (options_.enable_prefix_cache()) {
     AUTO_COUNTER(prefix_cache_latency_seconds_insert);
     // Add the kv cache to the prefix cache
     prefix_cache_->insert(
-        token_ids, blocks, existed_shared_blocks_num, mm_data);
+        token_ids, blocks, existed_shared_blocks_num, mm_data, block_hashes);
   }
 }
 

@@ -77,8 +77,10 @@ void process_typed_brpc_request(std::unique_ptr<Service>& service_impl,
                                 const char* service_name) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
@@ -147,8 +149,10 @@ void APIService::Completions(::google::protobuf::RpcController* controller,
                              ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null.";
     return;
@@ -175,8 +179,10 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
                                  ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
@@ -215,8 +221,10 @@ void APIService::Sample(::google::protobuf::RpcController* controller,
                         ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null.";
     return;
@@ -241,8 +249,10 @@ void APIService::SampleHttp(::google::protobuf::RpcController* controller,
                             ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
@@ -383,8 +393,10 @@ void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
   // TODO with xllm-service
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
@@ -403,8 +415,10 @@ void APIService::ChatCompletionsHttp(
     ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
@@ -425,8 +439,10 @@ void APIService::Embeddings(::google::protobuf::RpcController* controller,
                             ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
@@ -464,8 +480,10 @@ void handle_embedding_request(std::unique_ptr<Service>& embedding_service_impl_,
                               ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
@@ -534,8 +552,10 @@ void APIService::ImageGenerationHttp(
     ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
@@ -586,8 +606,10 @@ void APIService::AudioGenerationHttp(
     ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, static_cast<void*>(controller)));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | response | controller is null";
     return;
@@ -638,8 +660,10 @@ void APIService::VideoGenerationHttp(
     ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
@@ -684,8 +708,10 @@ void APIService::RerankHttp(::google::protobuf::RpcController* controller,
                             ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
@@ -842,8 +868,10 @@ void APIService::AnthropicMessagesHttp(
     ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
+      [](void* /*unused*/) { request_in_metric(nullptr); },
+      [controller](void* /*unused*/) {
+        request_out_metric(static_cast<void*>(controller));
+      });
 
   if (!request || !response || !controller) {
     LOG(ERROR) << "brpc request | respose | controller is null";

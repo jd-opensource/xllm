@@ -113,7 +113,7 @@ void top_k_top_p(torch::Tensor& logits,
   aclrtStream stream = c10_npu::getCurrentNPUStream(device_id).stream();
   create_acltensor(&logits_ids, logits);
   create_acltensor(&topK_ids, topK);
-  create_acltensor(&topP_ids, topP);
+  create_acltensor(&topP_ids, topP.to(logits.scalar_type()));
 
   uint64_t workspace_size = 0;
   aclOpExecutor* executor = nullptr;

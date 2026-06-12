@@ -131,7 +131,8 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   response_processor_ = std::make_unique<AsyncResponseProcessor>(
       engine_->tokenizer(),
       options_.instance_role(),
-      options_.enable_service_routing());
+      options_.enable_service_routing(),
+      options_.disable_log_stats());
   create_waiting_queue(options);
   create_running_queue(options);
   if (options_.enable_service_routing()) {

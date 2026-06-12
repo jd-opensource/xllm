@@ -272,7 +272,8 @@ std::vector<Block> CompositeBlockManager::allocate(size_t /*num_blocks*/) {
 std::vector<Block> CompositeBlockManager::allocate_shared(
     const Slice<int32_t>& /*tokens_ids*/,
     const Slice<Block>& /*existed_shared_blocks*/,
-    const MMData& /*mm_data*/) {
+    const MMData& /*mm_data*/,
+    const Slice<XXH3Key>& /*block_hashes*/) {
   NOT_IMPLEMENTED();
   return {};
 }
@@ -280,7 +281,8 @@ std::vector<Block> CompositeBlockManager::allocate_shared(
 void CompositeBlockManager::cache(const Slice<int32_t>& /*token_ids*/,
                                   std::vector<Block>& /*blocks*/,
                                   size_t /*existed_shared_blocks_num*/,
-                                  const MMData& /*mm_data*/) {
+                                  const MMData& /*mm_data*/,
+                                  const Slice<XXH3Key>& /*block_hashes*/) {
   // Prefix cache is not supported for CompositeBlockManager yet.
   // Keep cache() as a no-op so scheduler-side prefill cache hooks
   // do not crash when composite manager is enabled (e.g. DeepSeek V4).

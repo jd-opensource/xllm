@@ -318,12 +318,17 @@ bool BlockManagerPool::try_allocate(Sequence* sequence) {
   std::vector<Block> shared_blocks;
   size_t shared_num = 0;
   if (options_.enable_prefix_cache()) {
+    sequence->update_block_hashes(static_cast<uint32_t>(options_.block_size()),
+                                  options_.hasher_type());
     const auto& existed_shared_blocks = sequence->kv_state().kv_blocks().slice(
         0, sequence->kv_state().shared_kv_blocks_num());
     // If the sequence holds shared_blocks, the hash values of these blocks do
     // not need to be recalculated and can be reused directly.
-    shared_blocks = block_managers_[dp_rank]->allocate_shared(
-        sequence->tokens(), existed_shared_blocks, sequence->mm_data());
+    shared_blocks =
+        block_managers_[dp_rank]->allocate_shared(sequence->tokens(),
+                                                  existed_shared_blocks,
+                                                  sequence->mm_data(),
+                                                  sequence->block_hashes());
 
     if (!shared_blocks.empty()) {
       sequence->add_kv_blocks(shared_blocks);
@@ -387,13 +392,17 @@ void BlockManagerPool::allocate_shared(Sequence* sequence) {
   // only allocate shared blocks for prefill sequences
   if (options_.enable_prefix_cache()) {
     int32_t dp_rank = get_dp_rank(sequence);
+    sequence->update_block_hashes(static_cast<uint32_t>(options_.block_size()),
+                                  options_.hasher_type());
     const auto& existed_shared_blocks = sequence->kv_state().kv_blocks().slice(
         0, sequence->kv_state().shared_kv_blocks_num());
     // If the sequence holds shared_blocks, the hash values of these blocks do
     // not need to be recalculated and can be reused directly.
     std::vector<Block> shared_blocks =
-        block_managers_[dp_rank]->allocate_shared(
-            sequence->tokens(), existed_shared_blocks, sequence->mm_data());
+        block_managers_[dp_rank]->allocate_shared(sequence->tokens(),
+                                                  existed_shared_blocks,
+                                                  sequence->mm_data(),
+                                                  sequence->block_hashes());
     sequence->add_shared_kv_blocks(std::move(shared_blocks));
   }
 }
@@ -404,11 +413,16 @@ void BlockManagerPool::cache(Sequence* sequence) {
     // Prefix cache is not supported for CompositeBlockManager yet.
     return;
   }
+  sequence->update_block_hashes(static_cast<uint32_t>(options_.block_size()),
+                                options_.hasher_type());
   const auto token_ids = sequence->cached_tokens();
   auto* blocks = sequence->kv_state().mutable_kv_blocks();
   auto existed_shared_blocks_num = sequence->kv_state().shared_kv_blocks_num();
-  block_managers_[dp_rank]->cache(
-      token_ids, *blocks, existed_shared_blocks_num, sequence->mm_data());
+  block_managers_[dp_rank]->cache(token_ids,
+                                  *blocks,
+                                  existed_shared_blocks_num,
+                                  sequence->mm_data(),
+                                  sequence->block_hashes());
 }
 
 void BlockManagerPool::get_merged_kvcache_event(KvCacheEvent* event) const {

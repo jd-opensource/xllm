@@ -469,8 +469,8 @@ void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
   ContinuousScheduler::step(timeout);
   // DEBUG ONLY
   if (last_batch_lengths_.size()) {
-    LOG(INFO) << " - PERF_MODEL_DEBUG: "
-              << llm_flops_.decode(last_batch_lengths_).latency * 1000 << " ms";
+    VLOG(1) << " - PERF_MODEL_DEBUG: "
+            << llm_flops_.decode(last_batch_lengths_).latency * 1000 << " ms";
   }
 
   // Check memory utilization rate to see if the scheduler is able to pull an
@@ -943,6 +943,8 @@ void PDOOCScheduler::prefill_send_first_generation() {
         auto token = gen->mutable_tokens()->Add();
         token->set_token_id(
             request->sequences()[0]->first_token().value().token_id);
+        token->set_time_to_first_token_latency_seconds(
+            request->sequences()[0]->time_to_first_token_latency_seconds());
         if (request->sequences()[0]
                 ->first_token()
                 .value()
@@ -1077,6 +1079,12 @@ bool PDOOCScheduler::decode_recv_multi_generations(
 
   // Add all migration tokens to the sequence
   for (const auto& remote_token : migration_tokens) {
+    if (remote_token.time_to_first_token_latency_seconds() > 0 &&
+        request->sequences()[0]->time_to_first_token_latency_seconds() <= 0) {
+      request->sequences()[0]->set_time_to_first_token_latency_seconds(
+          remote_token.time_to_first_token_latency_seconds());
+    }
+
     Token token(remote_token.token_id());
     if (remote_token.has_logprob()) {
       token.logprob = remote_token.logprob();
@@ -1120,15 +1128,20 @@ bool PDOOCScheduler::decode_recv_multi_generations(
     }
 
     int32_t dst_dp_rank = request->sequences()[0]->dp_rank();
-    engine_->pull_kv_blocks(src_dp_size,
-                            src_dp_rank,
-                            src_cluster_ids,
-                            src_addrs,
-                            src_block_ids,
-                            dst_dp_rank,
-                            dst_block_ids,
-                            src_linear_state_ids,
-                            dst_linear_state_ids);
+    if (!engine_->pull_kv_blocks(src_dp_size,
+                                 src_dp_rank,
+                                 src_cluster_ids,
+                                 src_addrs,
+                                 src_block_ids,
+                                 dst_dp_rank,
+                                 dst_block_ids,
+                                 src_linear_state_ids,
+                                 dst_linear_state_ids)) {
+      LOG(ERROR) << "Failed to pull KV blocks for offline migration, req_id: "
+                 << req_id;
+      kv_cache_manager_->deallocate(request.get());
+      return false;
+    }
   }
 
   request_queue_.write(request);
@@ -1289,9 +1302,6 @@ void PDOOCScheduler::dispatch_offline_requests() {
       std::pair<std::shared_ptr<Request>, std::string> transfer_pair =
           std::make_pair(request, target_instance);
       offline_requests_to_transfer_.enqueue(transfer_pair);
-
-      VLOG(1) << "Successfully dispatched offline request "
-              << request->request_id() << " to " << target_instance;
     }
   }
 }
@@ -1382,14 +1392,27 @@ void PDOOCScheduler::prefill_send_multi_generations() {
       auto generated_token_ids = sequence->get_generated_tokens();
 
       // Add all generated token IDs to migration_tokens
-      for (const auto token_id : generated_token_ids) {
+      for (size_t token_index = 0; token_index < generated_token_ids.size();
+           ++token_index) {
         auto remote_token = multi_req->mutable_tokens()->Add();
-        remote_token->set_token_id(token_id);
+        remote_token->set_token_id(generated_token_ids[token_index]);
         remote_token->set_has_logprob(false);
+        if (token_index == 0) {
+          remote_token->set_time_to_first_token_latency_seconds(
+              sequence->time_to_first_token_latency_seconds());
+        }
       }
 
-      multi_req->set_kv_cache_transfer_mode(options_.kv_cache_transfer_mode());
-      if (options_.kv_cache_transfer_mode() == "PULL") {
+      auto kv_cache_transfer_mode = options_.kv_cache_transfer_mode();
+#if defined(USE_DCU)
+      if (kv_cache_transfer_mode == "PUSH") {
+        // Offline migration happens after prefill forward has produced tokens.
+        // Use decode-side pull so KV is copied before the request continues.
+        kv_cache_transfer_mode = "PULL";
+      }
+#endif
+      multi_req->set_kv_cache_transfer_mode(kv_cache_transfer_mode);
+      if (kv_cache_transfer_mode == "PULL") {
         for (auto cluster_id : instance_info_.cluster_ids) {
           multi_req->mutable_cluster_ids()->Add(cluster_id);
         }

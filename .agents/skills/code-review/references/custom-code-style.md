@@ -267,6 +267,21 @@ auto layer = DecoderLayer(/*hidden_size=*/4096, /*num_heads=*/32);
 auto layer = DecoderLayer(4096, 32);
 ```
 
+- **Prefer lambdas over `std::bind`**. Lambdas have explicit capture lists and parameter types. When a parameter is unused, annotate it with `/*unused*/`.
+
+```cpp
+// Good
+auto fn = [this](const etcd::Response& response, uint64_t prefix_len) {
+  handle_watch(response, prefix_len);
+};
+[](void* /*unused*/) { request_in_metric(nullptr); }
+
+// Bad
+auto fn = std::bind(&MyClass::handle_watch, this,
+                    std::placeholders::_1, std::placeholders::_2);
+std::bind(request_in_metric, nullptr)
+```
+
 ---
 
 ## 9. STL Best Practices

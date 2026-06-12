@@ -64,18 +64,25 @@ class PrefixCache {
     sleep(2);
   };
 
+  // When `block_hashes` covers all matchable blocks, the chained hash is reused
+  // directly and no hash is recomputed; otherwise it is computed on the fly
+  // from `token_ids`/`mm_data` (backward-compatible fallback).
   virtual std::vector<Block> match(
       const Slice<int32_t>& token_ids,
       const Slice<Block>& existed_shared_blocks = {},
-      const MMData& mm_data = MMData());
+      const MMData& mm_data = MMData(),
+      const Slice<XXH3Key>& block_hashes = {});
 
   // insert the token ids and blocks into the prefix tree
   // and set hash key to the corresponding block
-  // return the length of new inserted tokens
+  // return the length of new inserted tokens.
+  // `block_hashes` carries the precomputed chained hash and is reused when it
+  // covers all inserted blocks; otherwise the hash is computed on the fly.
   virtual size_t insert(const Slice<int32_t>& token_ids,
                         std::vector<Block>& blocks,
                         size_t existed_shared_blocks_num = 0,
-                        const MMData& mm_data = MMData());
+                        const MMData& mm_data = MMData(),
+                        const Slice<XXH3Key>& block_hashes = {});
 
   // insert the blocks with hash key into the prefix tree
   virtual size_t insert(Slice<Block>& blocks);
@@ -111,6 +118,7 @@ class PrefixCache {
                         std::vector<Block>& blocks,
                         size_t existed_shared_blocks_num,
                         const MMData& mm_data,
+                        const Slice<XXH3Key>& block_hashes,
                         std::vector<XXH3Key>* insert_keys);
 
   size_t insert(Slice<Block>& blocks, std::vector<XXH3Key>* insert_keys);

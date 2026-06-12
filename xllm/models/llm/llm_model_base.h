@@ -171,9 +171,14 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
  public:
   LlmForCausalLMImplBase(const ModelContext& context) {
     tie_word_embeddings = context.get_model_args().tie_word_embeddings();
+    embedding_mode_ = context.get_model_args().embedding_mode();
     // register submodules
     model_ = register_module("model", LlmModelType(context));
-    lm_head_ = register_module("lm_head", layer::LmHead(context));
+    if (!embedding_mode_) {
+      lm_head_ = register_module("lm_head", layer::LmHead(context));
+    } else {
+      LOG(INFO) << "Skip registering lm_head in embedding mode.";
+    }
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -195,6 +200,8 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   // returns: [num_tokens, vocab_size]
   virtual torch::Tensor logits(const torch::Tensor& hidden_states,
                                const torch::Tensor& seleted_idxes) {
+    CHECK(!lm_head_.is_empty())
+        << "lm_head is not initialized in embedding mode.";
     // select tokens if provided
     auto h = hidden_states;
     if (seleted_idxes.defined()) {
@@ -229,21 +236,23 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
                                    "model.",
                                    ""}));
 
-      if (tie_word_embeddings) {
-        auto lm_head_state_dict =
-            state_dict->get_dict_with_prefix(std::vector<std::string>{
-                prefix + "embed_tokens.", "embed_tokens.", "embed."});
-        lm_head_->load_state_dict(lm_head_state_dict);
-      } else {
-        auto lm_head_state_dict = state_dict->get_dict_with_prefix(
-            std::vector<std::string>{"lm_head.",
-                                     "model.lm_head.",
-                                     "model.head.",
-                                     "head.",
-                                     prefix,
-                                     prefix + "lm_head.",
-                                     prefix + "head."});
-        lm_head_->load_state_dict(lm_head_state_dict);
+      if (!embedding_mode_) {
+        if (tie_word_embeddings) {
+          auto lm_head_state_dict =
+              state_dict->get_dict_with_prefix(std::vector<std::string>{
+                  prefix + "embed_tokens.", "embed_tokens.", "embed."});
+          lm_head_->load_state_dict(lm_head_state_dict);
+        } else {
+          auto lm_head_state_dict = state_dict->get_dict_with_prefix(
+              std::vector<std::string>{"lm_head.",
+                                       "model.lm_head.",
+                                       "model.head.",
+                                       "head.",
+                                       prefix,
+                                       prefix + "lm_head.",
+                                       prefix + "head."});
+          lm_head_->load_state_dict(lm_head_state_dict);
+        }
       }
     }
   }
@@ -254,7 +263,11 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
-  virtual layer::LmHead get_lm_head() { return lm_head_; }
+  virtual layer::LmHead get_lm_head() {
+    CHECK(!lm_head_.is_empty())
+        << "lm_head is not initialized in embedding mode.";
+    return lm_head_;
+  }
 
   virtual void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
 
@@ -270,6 +283,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   // parameter members, must be registered
   LlmModelType model_{nullptr};
   bool tie_word_embeddings{false};
+  bool embedding_mode_{false};
   // test
   layer::LmHead lm_head_{nullptr};
 };

@@ -22,6 +22,7 @@ limitations under the License.
 
 #include "core/framework/state_dict/utils.h"
 #include "core/layers/common/add_matmul.h"
+#include "core/layers/common/rms_norm.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
 
@@ -321,11 +322,7 @@ class DiTParallelLinearImpl : public torch::nn::Module {
     params.b = tp_weight_;
     auto output = xllm::kernel::matmul(params);
 
-    auto orig_dtype = output.dtype();
-    auto output_fp32 = output.to(torch::kFloat32);
-    output =
-        parallel_state::reduce(output_fp32, tp.process_group).to(orig_dtype);
-
+    output = parallel_state::reduce(output, tp.process_group);
     if (has_bias_) {
       output = output + tp_bias_;
     }
@@ -380,5 +377,43 @@ class DiTParallelLinearImpl : public torch::nn::Module {
 };
 
 TORCH_MODULE(DiTParallelLinear);
+
+// TP-aware RMSNorm: performs RMSNorm on a TP-sharded tensor using only
+// scalar all-reduce communication, avoiding the all-gather + scatter
+// round-trip required by a naive RMSNorm on the full tensor.
+//
+// x:    [B, L, dim/tp] — TP-sharded Q or K
+// norm: RMSNorm module with full weight [dim]
+// pg:   TP process group
+//
+// Communication: allreduce(SUM) on scalar sum-of-squares per token (~6KB)
+//   vs. all-gather on full tensor (~16MB). ~2600x reduction.
+inline torch::Tensor tp_rms_norm(const torch::Tensor& x,
+                                 layer::RMSNorm& norm,
+                                 ProcessGroup* pg) {
+  int32_t tp_rank = pg->rank();
+  int32_t tp_size = pg->world_size();
+  int64_t local_dim = x.size(-1);
+  float inv_full_dim = 1.0f / static_cast<float>(local_dim * tp_size);
+
+  // Shard the norm weight: [full_dim] → [local_dim]
+  auto weight =
+      norm->weight().slice(0, tp_rank * local_dim, (tp_rank + 1) * local_dim);
+
+  // Local sum of squares
+  auto x_fp32 = x.to(torch::kFloat32);
+  auto local_sum_sq = x_fp32.pow(2).sum(/*dim=*/-1, /*keepdim=*/true);
+
+  // All-reduce sum of squares (scalar per token)
+  auto global_sum_sq = local_sum_sq.clone();
+  pg->allreduce(global_sum_sq);  // SUM
+
+  // Apply: x / sqrt(sum(x²)/N + eps) * w
+  auto output = x_fp32 *
+                torch::rsqrt(global_sum_sq * inv_full_dim + norm->eps()) *
+                weight.to(torch::kFloat32);
+
+  return output.to(x.dtype());
+}
 
 }  // namespace xllm::dit
