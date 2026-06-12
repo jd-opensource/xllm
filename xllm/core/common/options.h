@@ -169,8 +169,6 @@ class Options {
 
   PROPERTY(bool, enable_kvcache_store) = false;
 
-  PROPERTY(bool, enable_cache_upload) = false;
-
   PROPERTY(std::string, store_protocol) = "tcp";
 
   PROPERTY(std::string, store_master_server_address) = "";

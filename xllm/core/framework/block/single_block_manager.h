@@ -47,8 +47,6 @@ class SingleBlockManager final : public BlockManager {
              const MMData& mm_data = MMData()) override;
   void cache(const std::vector<Block>& blocks) override;
 
-  void get_merged_kvcache_event(KvCacheEvent* event) const override;
-
   size_t num_blocks_in_prefix_cache() const override;
   size_t num_free_blocks() const override;
   size_t num_used_blocks() const override;

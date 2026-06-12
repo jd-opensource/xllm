@@ -509,7 +509,6 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
               ? false
               : options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_cache_upload(options_.enable_cache_upload())
       .enable_kvcache_store(options_.enable_kvcache_store())
       .enable_xtensor(::xllm::KVCacheConfig::get_instance().enable_xtensor())
       .enable_host_blocks(options_.host_blocks_factor() > 1.0)

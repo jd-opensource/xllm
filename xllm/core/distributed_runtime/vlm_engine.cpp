@@ -311,7 +311,6 @@ bool VLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .enable_linear_state(has_linear_attention_layers(args_))
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_cache_upload(options_.enable_cache_upload())
       .hasher_type(BlockHasherType::MM)
       .max_concurrent_requests(
           ::xllm::ServiceConfig::get_instance().max_concurrent_requests());

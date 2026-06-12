@@ -74,9 +74,6 @@ class XTensorBlockManagerImpl : public BlockManager {
              const MMData& mm_data = MMData()) override;
   void cache(const std::vector<Block>& blocks) override;
 
-  // Get merged KV cache event
-  void get_merged_kvcache_event(KvCacheEvent* event) const override;
-
   // Get number of blocks in prefix cache (always 0, not supported)
   size_t num_blocks_in_prefix_cache() const override { return 0; }
 

@@ -46,7 +46,6 @@ class KVCacheStoreConfig final {
          "layers_wise_copy_batchs",
          "host_blocks_factor",
          "enable_kvcache_store",
-         "enable_cache_upload",
          "store_protocol",
          "store_master_server_address",
          "store_metadata_server",
@@ -64,8 +63,6 @@ class KVCacheStoreConfig final {
   PROPERTY(double, host_blocks_factor) = 0.0;
 
   PROPERTY(bool, enable_kvcache_store) = false;
-
-  PROPERTY(bool, enable_cache_upload) = false;
 
   PROPERTY(std::string, store_protocol) = "tcp";
 

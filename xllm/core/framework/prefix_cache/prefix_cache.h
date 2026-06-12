@@ -31,7 +31,6 @@ limitations under the License.
 #include "common/types.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "framework/block/block.h"
-#include "framework/kv_cache/kv_cache_event.h"
 #include "util/hash_util.h"
 #include "util/slice.h"
 #include "util/threadpool.h"
@@ -46,7 +45,6 @@ class PrefixCache {
  public:
   struct Options {
     PROPERTY(int32_t, block_size) = 128;
-    PROPERTY(bool, enable_cache_upload) = false;
     PROPERTY(BlockHasherType, hasher_type) = BlockHasherType::TEXT;
   };
 
@@ -104,8 +102,6 @@ class PrefixCache {
       return static_cast<float>(matched_blocks_.load()) / total_blocks_.load();
     }
   }
-
-  virtual KvCacheEvent* get_upload_kvcache_events() { return nullptr; }
 
   static uint32_t compute_hash_keys(const Slice<int32_t>& token_ids,
                                     std::vector<Block>& blocks,
