@@ -54,7 +54,7 @@ std::vector<Block> PrefixCache::match(const Slice<int32_t>& token_ids,
     if (iter == cached_blocks_.end()) {
       return false;
     }
-    blocks.push_back(iter->second->block);
+    blocks.emplace_back(iter->second->block);
     lru_lst_.remove_node(iter->second);
     node_list.push_front(iter->second);
     return true;
