@@ -106,6 +106,39 @@ TEST(GraphWarmupTest, FormatsCompletedWarmupProgress) {
             "bucket=64, latency=100.00 ms");
 }
 
+TEST(GraphWarmupTest, InjectsBootstrapEmbeddingWhenSpeculativeEnabled) {
+  Sequence sequence = make_sequence(/*index=*/0, /*tokens=*/{1, 2, 3});
+
+  prepare_warmup_decode_sequence(&sequence,
+                                 /*hidden_size=*/128,
+                                 /*num_speculative_tokens=*/3);
+
+  const torch::Tensor embedding = sequence.get_mtp_bootstrap_embedding();
+  ASSERT_TRUE(embedding.defined());
+  EXPECT_EQ(embedding.dim(), 2);
+  EXPECT_EQ(embedding.size(0), 1);
+  EXPECT_EQ(embedding.size(1), 128);
+}
+
+TEST(GraphWarmupTest, SkipsBootstrapEmbeddingWhenSpeculativeDisabled) {
+  Sequence sequence = make_sequence(/*index=*/0, /*tokens=*/{1, 2, 3});
+
+  prepare_warmup_decode_sequence(&sequence,
+                                 /*hidden_size=*/128,
+                                 /*num_speculative_tokens=*/0);
+
+  EXPECT_FALSE(sequence.get_mtp_bootstrap_embedding().defined());
+}
+
+TEST(GraphWarmupTest, ProducesUniqueWarmupRequestIds) {
+  const std::string first = next_warmup_request_id();
+  const std::string second = next_warmup_request_id();
+
+  EXPECT_FALSE(first.empty());
+  EXPECT_FALSE(second.empty());
+  EXPECT_NE(first, second);
+}
+
 TEST(GraphWarmupTest, PresetDpRankControlsBlockAllocation) {
   BlockManagerPool::Options options;
   options.num_blocks(/*num_blocks=*/8)

@@ -15,10 +15,15 @@ limitations under the License.
 
 #include "scheduler/profile/graph_warmup.h"
 
+#include <absl/strings/str_cat.h>
 #include <glog/logging.h>
+#include <torch/torch.h>
 
+#include <atomic>
 #include <iomanip>
 #include <sstream>
+
+#include "framework/request/sequence.h"
 
 namespace xllm {
 namespace {
@@ -97,6 +102,27 @@ std::string graph_warmup_progress(int32_t completed,
       << "%, bucket=" << bucket << ", latency=" << std::setprecision(2)
       << latency_ms << " ms";
   return oss.str();
+}
+
+std::string next_warmup_request_id() {
+  static std::atomic<int64_t> counter{0};
+  const int64_t id = counter.fetch_add(1, std::memory_order_relaxed);
+  return absl::StrCat("warmup_", id);
+}
+
+void prepare_warmup_decode_sequence(Sequence* sequence,
+                                    int64_t hidden_size,
+                                    int32_t num_speculative_tokens) {
+  CHECK(sequence != nullptr);
+  if (num_speculative_tokens <= 0) {
+    return;
+  }
+
+  CHECK_GT(hidden_size, 0);
+  // Placeholder bootstrap hidden states; the worker converts dtype/device and
+  // only the [1, hidden_size] shape matters for the batch input builder.
+  sequence->update_mtp_bootstrap_embedding(
+      torch::zeros({1, hidden_size}, torch::kFloat));
 }
 
 }  // namespace xllm

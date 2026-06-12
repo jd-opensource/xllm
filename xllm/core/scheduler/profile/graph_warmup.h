@@ -21,6 +21,8 @@ limitations under the License.
 
 namespace xllm {
 
+class Sequence;
+
 std::vector<int32_t> graph_warmup_buckets(int32_t max_seqs_per_batch);
 
 bool skip_graph_bucket(int32_t bucket, int32_t dp_size);
@@ -32,5 +34,22 @@ std::string graph_warmup_progress(int32_t completed,
                                   int32_t total,
                                   int32_t bucket,
                                   double latency_ms);
+
+// Returns a process-unique request id for synthetic profiling/warmup requests.
+// Distinct ids keep these requests separable from each other (and from real
+// requests) in the embedding cache, so stale decode state from a recycled
+// embedding block cannot be mistaken for a warmup request's own state.
+std::string next_warmup_request_id();
+
+// Prepares a synthetic decode sequence for graph warmup. When speculative
+// decoding is enabled (MTP), the worker's decode path requires a valid decode
+// state written through the MTP bootstrap channel before it validates the
+// per-token decode state. This injects a placeholder bootstrap embedding of
+// shape [1, hidden_size] so the bootstrap path runs during graph capture; the
+// embedding values are irrelevant because warmup only captures the graph.
+// Does nothing when speculative decoding is disabled.
+void prepare_warmup_decode_sequence(Sequence* sequence,
+                                    int64_t hidden_size,
+                                    int32_t num_speculative_tokens);
 
 }  // namespace xllm

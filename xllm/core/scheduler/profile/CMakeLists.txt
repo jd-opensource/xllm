@@ -17,5 +17,6 @@ cc_library(
     :request
     :runtime
     glog::glog
+    absl::strings
     absl::time
 )

@@ -602,7 +602,7 @@ std::shared_ptr<Request> ProfileManager::generate_single_request(
   RequestState req_state(token_ids);
   req_state.enable_schedule_overlap = options_.enable_schedule_overlap();
   auto request = std::make_shared<Request>(
-      /*request_id=*/"",
+      /*request_id=*/next_warmup_request_id(),
       /*x_request_id=*/"",
       /*x_request_time=*/"",
       req_state);
@@ -660,7 +660,7 @@ std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
   }
   req_state.seq_capacity = seq_capacity;
   auto request = std::make_shared<Request>(
-      /*request_id=*/"",
+      /*request_id=*/next_warmup_request_id(),
       /*x_request_id=*/"",
       /*x_request_time=*/"",
       req_state);
@@ -683,6 +683,14 @@ std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
   generated_token =
       generated_token == eos_token_id ? generated_token + 1 : generated_token;
   sequence->append_token(generated_token);
+
+  // With MTP speculative decoding the worker's decode path requires a valid
+  // decode state written via the MTP bootstrap channel before validating the
+  // per-token decode state. Inject a placeholder bootstrap embedding so the
+  // synthetic warmup/profile request takes the same bootstrap path as a real
+  // disagg PD decode request instead of reading stale recycled decode state.
+  prepare_warmup_decode_sequence(
+      sequence, model_args.hidden_size(), num_speculative_tokens);
 
   CHECK(sequence->stage() == SequenceStage::DECODE)
       << "Decode profiling request is not in DECODE stage. total_length: "
