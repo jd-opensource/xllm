@@ -143,6 +143,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
     }
 
     deepseek_v4_build_cache_specs(model_args_, caches_info_, group_infos_);
+    align_cache_specs_to_dsv4_managers();
 
     mtp_layers_.reserve(mtp_n_layers);
     for (int32_t i = 0; i < mtp_n_layers; ++i) {
@@ -209,30 +210,37 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
                       const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
 
-    const bool is_empty_dp_rank = !tokens.defined() || tokens.numel() == 0;
-    if (is_empty_dp_rank) {
+    const bool acl_graph_forward = deepseek_v4_uses_acl_graph(input_params);
+    const bool is_graph_empty_dp_rank =
+        acl_graph_forward && input_params.meta.actual_num_sequences == 0 &&
+        input_params.meta.num_sequences > 0;
+    const bool is_empty_dp_rank = input_params.meta.num_sequences == 0 ||
+                                  is_graph_empty_dp_rank || !tokens.defined() ||
+                                  tokens.numel() == 0;
+    if (is_empty_dp_rank && !acl_graph_forward) {
       tokens = torch::tensor(
           {0}, torch::TensorOptions().dtype(torch::kInt32).device(device_));
       positions = torch::tensor(
           {0}, torch::TensorOptions().dtype(torch::kInt32).device(device_));
     }
 
-    const torch::Device runtime_device = tokens.device();
-
-    auto modified_input_params = input_params;
-    if (is_empty_dp_rank) {
-      fill_empty_dp_rank_input_params(modified_input_params);
-    }
-
+    torch::Tensor hidden_states = embed_tokens_(tokens);
     torch::Tensor previous_hidden_states =
-        modified_input_params.embedding.input_embedding;
+        input_params.embedding.input_embedding;
+    if (!previous_hidden_states.defined() && is_empty_dp_rank) {
+      previous_hidden_states = hidden_states;
+    }
     CHECK(previous_hidden_states.defined())
         << "input_params.embedding.input_embedding must be defined for MTP "
            "model";
 
-    torch::Tensor hidden_states = embed_tokens_(tokens);
+    const torch::Device runtime_device = hidden_states.device();
 
-    const bool acl_graph_forward = deepseek_v4_uses_acl_graph(input_params);
+    auto modified_input_params = input_params;
+    if (is_empty_dp_rank && !acl_graph_forward) {
+      fill_empty_dp_rank_input_params(modified_input_params);
+    }
+
     if (acl_graph_forward) {
       CHECK(tokens.defined() && tokens.device() == runtime_device)
           << "[DeepseekV4Mtp] ACL graph requires tokens on the runtime device";
@@ -354,6 +362,47 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
   }
 
  private:
+  void align_cache_specs_to_dsv4_managers() {
+    // TODO: Remove this hardcoded DSV4 group_infos once the draft can
+    // share editable model args with the target through a standard path.
+    constexpr int32_t kBaseBlockSize = 128;
+    const int32_t window_size = static_cast<int32_t>(window_size_);
+    if (group_infos_.size() >= 3) {
+      return;
+    }
+
+    group_infos_ = {{DSACacheType::SLIDING_WINDOW, 1, window_size},
+                    {DSACacheType::TOKEN, 4, kBaseBlockSize},
+                    {DSACacheType::TOKEN, 128, kBaseBlockSize}};
+    caches_info_.assign(static_cast<size_t>(model_args_.n_layers()), {});
+    for (int32_t layer_id = 0; layer_id < model_args_.n_layers(); ++layer_id) {
+      const int32_t cr = deepseek_v4_normalize_compress_ratio(
+          layer_id < static_cast<int32_t>(model_args_.compress_ratios().size())
+              ? model_args_.compress_ratios()[static_cast<size_t>(layer_id)]
+              : 1);
+      if (cr == 4) {
+        caches_info_[static_cast<size_t>(layer_id)] = {
+            {1, DSACacheType::TOKEN, 4, kBaseBlockSize},
+            {1, DSACacheType::TOKEN, 4, kBaseBlockSize},
+            {0, DSACacheType::SLIDING_WINDOW, 1, window_size},
+            {0, DSACacheType::SLIDING_WINDOW, 1, window_size},
+            {0, DSACacheType::SLIDING_WINDOW, 1, window_size},
+            {0, DSACacheType::SLIDING_WINDOW, 1, window_size},
+            {0, DSACacheType::SLIDING_WINDOW, 1, window_size},
+            {1, DSACacheType::TOKEN, 4, kBaseBlockSize}};
+      } else if (cr == 128) {
+        caches_info_[static_cast<size_t>(layer_id)] = {
+            {2, DSACacheType::TOKEN, 128, kBaseBlockSize},
+            {0, DSACacheType::SLIDING_WINDOW, 1, window_size},
+            {0, DSACacheType::SLIDING_WINDOW, 1, window_size},
+            {0, DSACacheType::SLIDING_WINDOW, 1, window_size}};
+      } else {
+        caches_info_[static_cast<size_t>(layer_id)] = {
+            {0, DSACacheType::SLIDING_WINDOW, 1, window_size}};
+      }
+    }
+  }
+
   static std::optional<torch::Tensor> as_optional_tensor(
       const torch::Tensor& tensor) {
     if (tensor.defined() && tensor.numel() > 0) {

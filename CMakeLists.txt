@@ -29,7 +29,7 @@ if(USE_NPU)
   )
 
   if(DEFINED ENV{ASCEND_OPP_PATH} AND NOT "$ENV{ASCEND_OPP_PATH}" STREQUAL "")
-    set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_OPP_PATH}/vendors/custom_xllm_math/.xllm_ops_git_head")
+    set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_OPP_PATH}/vendors/xllm/.xllm_ops_git_head")
   else()
     message(FATAL_ERROR "ASCEND_OPP_PATH is not initialized for NPU build.")
   endif()
@@ -57,7 +57,9 @@ if(USE_NPU)
     endif()
 
     ## Adapt to the modification in DeekSeekV4 where the installation path of xllm_ops has been changed to custom_xllm_math
-    if(EXISTS "$ENV{NPU_HOME_PATH}/opp/vendors/custom_xllm_math/op_api/include/aclnnop")
+    ## Probe under ASCEND_OPP_PATH (the same root the marker is written to, and the
+    ## one scripts/build_support/utils.py reads) so the read and write paths cannot diverge.
+    if(EXISTS "$ENV{ASCEND_OPP_PATH}/vendors/custom_xllm_math/op_api/include/aclnnop")
       set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_OPP_PATH}/vendors/custom_xllm_math/.xllm_ops_git_head")
     endif()
     message(STATUS "XLLM_OPS_MARKER_PATH: ${XLLM_OPS_MARKER_PATH}")

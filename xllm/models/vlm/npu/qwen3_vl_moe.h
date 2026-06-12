@@ -161,6 +161,9 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
                                      const ModelInputParams& input_params) {
     const auto& mm_data = input_params.multimodal.mm_data;
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
+    if (!mm_data.valid()) {
+      return inputs_embeds;
+    }
     const size_t num_deepstacks =
         model_args_.mm_deepstack_visual_indexes().size();
     std::vector<torch::Tensor> deepstack_input_embeds;
