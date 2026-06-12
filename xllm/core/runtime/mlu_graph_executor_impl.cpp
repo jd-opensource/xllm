@@ -39,6 +39,7 @@ struct GraphPoolMemoryUsage {
   std::size_t reserved_bytes = 0;
   std::size_t allocated_bytes = 0;
   std::size_t active_bytes = 0;
+  std::size_t segment_count = 0;
 };
 
 std::size_t tensor_bytes(const torch::Tensor& tensor) {
@@ -83,6 +84,7 @@ GraphPoolMemoryUsage get_graph_pool_usage(
     usage.reserved_bytes += segment.total_size;
     usage.allocated_bytes += segment.allocated_size;
     usage.active_bytes += segment.active_size;
+    usage.segment_count += 1;
   }
   return usage;
 }
@@ -404,11 +406,12 @@ MluGraph::MluGraph(GraphPersistentParam* persistent_param,
 void MluGraph::capture(CausalLM* model,
                        std::vector<KVCache>& kv_cache,
                        const torch_mlu::MempoolId_t& pool,
+                       const torch_mlu::MLUStream& capture_stream,
                        const runtime::Options& options) {
   int32_t slice_dim = persistent_param_->use_mrope_ ? 1 : 0;
   torch_mlu::synchronize();
   auto prev_stream = torch_mlu::getCurrentMLUStream();
-  torch_mlu::mlu::MLUStreamGuard guard(torch_mlu::getStreamFromPool());
+  torch_mlu::mlu::MLUStreamGuard guard(capture_stream);
   graph_ = torch_mlu::MLUGraph();
   graph_.capture_begin(pool, cnrtQueueCaptureModeRelaxed);
   auto forward_result = model->forward(
@@ -520,6 +523,7 @@ void MluGraphExecutorImpl::log_memory_after_capture() {
   std::size_t reserved_bytes = 0;
   std::size_t allocated_bytes = 0;
   std::size_t active_bytes = 0;
+  std::size_t segment_count = 0;
 
   try {
     const GraphPoolMemoryUsage usage =
@@ -527,6 +531,7 @@ void MluGraphExecutorImpl::log_memory_after_capture() {
     reserved_bytes = usage.reserved_bytes;
     allocated_bytes = usage.allocated_bytes;
     active_bytes = usage.active_bytes;
+    segment_count = usage.segment_count;
   } catch (const std::exception& e) {
     VLOG(1) << "Skip MLU graph memory usage log: " << e.what();
   } catch (...) {
@@ -537,18 +542,29 @@ void MluGraphExecutorImpl::log_memory_after_capture() {
       persistent_param_ ? persistent_param_->get_persistent_tensor_bytes() : 0;
   const std::size_t executor_total_bytes =
       reserved_bytes + persistent_param_bytes;
-  if (executor_total_bytes <= last_logged_executor_total_bytes_) {
-    return;
-  }
-  last_logged_executor_total_bytes_ = executor_total_bytes;
+
+  // Per-capture delta of the shared graph pool. When scratch is being reused
+  // across buckets, this collapses to ~0 after the first (largest) capture;
+  // a steady positive delta means each bucket pins its own scratch instead.
+  const bool reserved_grew = reserved_bytes >= last_pool_reserved_bytes_;
+  const std::size_t reserved_delta =
+      reserved_grew ? reserved_bytes - last_pool_reserved_bytes_
+                    : last_pool_reserved_bytes_ - reserved_bytes;
+  last_pool_reserved_bytes_ = reserved_bytes;
+  peak_pool_reserved_bytes_ =
+      std::max(peak_pool_reserved_bytes_, reserved_bytes);
 
   LOG(INFO) << "MluGraphExecutorMemory Usage:"
             << " executor_total_memory="
             << format_memory_size(executor_total_bytes) << " persistent_param="
             << format_memory_size(persistent_param_bytes)
+            << " pool_reserved=" << format_memory_size(reserved_bytes)
+            << " pool_reserved_delta=" << (reserved_grew ? "+" : "-")
+            << format_memory_size(reserved_delta) << " pool_reserved_peak="
+            << format_memory_size(peak_pool_reserved_bytes_)
+            << " pool_segments=" << segment_count
             << " allocated_pool_memory=" << format_memory_size(allocated_bytes)
-            << " active_pool_memory=" << format_memory_size(active_bytes)
-            << " pool_high_water_mark=" << format_memory_size(allocated_bytes);
+            << " active_pool_memory=" << format_memory_size(active_bytes);
 }
 
 // Main execution method with graph optimization for decode phase
@@ -611,7 +627,12 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
   std::unique_ptr<MluGraph> graph =
       std::make_unique<MluGraph>(persistent_param_.get(), graph_tokens);
   graph->update_input_buffer(tokens, positions, graph_params, true);
-  graph->capture(model_, kv_caches, graph_pool_, options_);
+  if (!graph_capture_stream_.has_value()) {
+    graph_capture_stream_ =
+        torch_mlu::getStreamFromPool(/*isHighPriority=*/false, device_.index());
+  }
+  graph->capture(
+      model_, kv_caches, graph_pool_, *graph_capture_stream_, options_);
   log_memory_after_capture();
   graphs_[graph_tokens] = std::move(graph);
   // Return the output from capture
