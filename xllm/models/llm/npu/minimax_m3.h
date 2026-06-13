@@ -260,6 +260,7 @@ class MiniMaxM3ForCausalLMImpl final : public torch::nn::Module {
 };
 TORCH_MODULE(MiniMaxM3ForCausalLM);
 
+REGISTER_CAUSAL_MODEL(minimax_m3, MiniMaxM3ForCausalLM);
 REGISTER_CAUSAL_MODEL(minimax_m3_vl, MiniMaxM3ForCausalLM);
 
 REGISTER_MODEL_ARGS(minimax_m3_vl, [&] {
@@ -276,7 +277,7 @@ REGISTER_MODEL_ARGS(minimax_m3_vl, [&] {
   LOAD_ARG_OR(video_token_id, "video_token_index", 200026);
   LOAD_ARG_OR(head_dim, "text_config.head_dim", 128);
   LOAD_ARG_OR(rotary_dim, "text_config.rotary_dim", 64);
-  LOAD_ARG_OR(hidden_act, "text_config.hidden_act", "swiglu");
+  LOAD_ARG_OR(hidden_act, "text_config.hidden_act", "swigluoai");
   LOAD_ARG_OR(hidden_size, "text_config.hidden_size", 6144);
   LOAD_ARG_OR(intermediate_size, "text_config.dense_intermediate_size", 12288);
   LOAD_ARG_OR(
@@ -298,6 +299,7 @@ REGISTER_MODEL_ARGS(minimax_m3_vl, [&] {
   LOAD_ARG_OR(rms_norm_eps, "text_config.rms_norm_eps", 1e-6);
   LOAD_ARG_OR(rope_theta, "text_config.rope_theta", 5000000.0f);
   LOAD_ARG_OR(scoring_func, "text_config.scoring_func", "sigmoid");
+  LOAD_ARG_OR(swiglu_limit, "text_config.swiglu_limit", 7.0f);
   LOAD_ARG_OR(topk_group, "text_config.topk_group", 1);
   LOAD_ARG_OR(routed_scaling_factor, "text_config.routed_scaling_factor", 2.0f);
   LOAD_ARG_OR(router_aux_loss_coef, "text_config.router_aux_loss_coef", 0.0f);
@@ -374,5 +376,14 @@ REGISTER_MODEL_ARGS(minimax_m3_vl, [&] {
     SET_ARG(index_topk, args->sparse_topk_blocks());
   }
 });
+
+REGISTER_MODEL_ARGS_LOADER(minimax_m3,
+                           [](const JsonReader& json, ModelArgs* args) {
+                             const bool loaded =
+                                 ModelRegistry::get_model_args_loader(
+                                     "minimax_m3_vl")(json, args);
+                             SET_ARG(model_type, "minimax_m3");
+                             return loaded;
+                           });
 
 }  // namespace xllm::npu::model
