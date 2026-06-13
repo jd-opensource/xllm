@@ -57,6 +57,14 @@ void check_moe_gating_top_k_shape_and_dtype(
   }
 }
 
+c10::optional<at::Tensor> defined_tensor_or_nullopt(
+    const c10::optional<at::Tensor>& tensor) {
+  if (tensor.has_value() && tensor->defined()) {
+    return tensor.value();
+  }
+  return c10::nullopt;
+}
+
 at::Tensor construct_moe_gating_top_k_y_tensor(const at::Tensor& x, int64_t k) {
   return at::empty({x.size(0), k}, x.options().dtype(x.dtype()));
 }
@@ -83,14 +91,15 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> moe_gating_top_k(
     int64_t renorm,
     int64_t norm_type,
     bool out_flag) {
-  check_moe_gating_top_k_shape_and_dtype(x, bias, k);
+  const c10::optional<at::Tensor> bias_opt = defined_tensor_or_nullopt(bias);
+  check_moe_gating_top_k_shape_and_dtype(x, bias_opt, k);
   at::Tensor y = construct_moe_gating_top_k_y_tensor(x, k);
   at::Tensor expert_idx = construct_moe_gating_top_k_expert_idx_tensor(y);
   at::Tensor out = construct_moe_gating_top_k_out_tensor(x);
 
   EXEC_NPU_CMD(aclnnMoeGatingTopK,
                x,
-               bias,
+               bias_opt,
                k,
                k_group,
                group_count,

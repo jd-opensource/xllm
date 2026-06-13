@@ -502,8 +502,13 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
 #elif defined(USE_NPU)
   torch::Tensor topk_weights;
   torch::Tensor topk_ids;
+  std::optional<torch::Tensor> e_score_correction_bias = std::nullopt;
+  if (params.e_score_correction_bias.has_value() &&
+      params.e_score_correction_bias->defined()) {
+    e_score_correction_bias = params.e_score_correction_bias.value();
+  }
   const bool use_moe_gating_topk = params.scoring_func == "sigmoid" ||
-                                   params.e_score_correction_bias.has_value() ||
+                                   e_score_correction_bias.has_value() ||
                                    params.num_expert_group > 1 ||
                                    params.topk_group > 1;
   if (use_moe_gating_topk) {
@@ -514,7 +519,7 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
     std::tie(topk_weights, topk_ids, norm_out) =
         npu::moe_gating_top_k(params.input,
                               params.topk,
-                              params.e_score_correction_bias,
+                              e_score_correction_bias,
                               params.topk_group,
                               params.num_expert_group,
                               1.0,
