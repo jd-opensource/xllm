@@ -507,10 +507,9 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
       params.e_score_correction_bias->defined()) {
     e_score_correction_bias = params.e_score_correction_bias.value();
   }
-  const bool use_moe_gating_topk = params.scoring_func == "sigmoid" ||
-                                   e_score_correction_bias.has_value() ||
-                                   params.num_expert_group > 1 ||
-                                   params.topk_group > 1;
+  const bool use_moe_gating_topk =
+      params.scoring_func == "sigmoid" || e_score_correction_bias.has_value() ||
+      params.num_expert_group > 1 || params.topk_group > 1;
   if (use_moe_gating_topk) {
     CHECK(params.scoring_func == "softmax" || params.scoring_func == "sigmoid")
         << "Only softmax and sigmoid are supported for NPU MoeGatingTopK.";
