@@ -1269,19 +1269,139 @@ torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params) {
     CHECK(params.conv_state_indices.value().is_contiguous())
         << "causal_conv1d_update: conv_state_indices must be contiguous.";
   }
-  return npu::npu_causal_conv1d_update_v2(params.x,
-                                          params.conv_state,
-                                          params.weight,
-                                          params.activation,
-                                          params.bias,
-                                          params.conv_state_indices,
-                                          params.query_start_loc,
-                                          params.max_query_len,
-                                          params.pad_slot_id,
-                                          params.block_idx_last_scheduled_token,
-                                          params.initial_state_idx,
-                                          params.validate_data,
-                                          params.num_accepted_tokens);
+
+  const auto original_dtype = params.x.scalar_type();
+  const bool has_silu = params.activation;
+  const bool need_bf16_cast = (original_dtype == c10::ScalarType::Half);
+
+  auto x_work = params.x.contiguous();
+  auto weight_work = params.weight.contiguous();
+  auto conv_state_work = need_bf16_cast ? params.conv_state.contiguous().clone()
+                                        : params.conv_state.contiguous();
+
+  if (need_bf16_cast) {
+    x_work = x_work.to(torch::kBFloat16);
+    weight_work = weight_work.to(torch::kBFloat16);
+    conv_state_work = conv_state_work.to(torch::kBFloat16);
+  }
+
+  const int32_t dim = static_cast<int32_t>(x_work.size(1));
+
+  auto bias_work = params.bias.has_value() && params.bias.value().defined()
+                       ? params.bias.value().contiguous()
+                       : torch::zeros({dim}, x_work.options());
+  if (need_bf16_cast && bias_work.scalar_type() != c10::ScalarType::BFloat16) {
+    bias_work = bias_work.to(torch::kBFloat16);
+  }
+
+  auto conv_state_t = conv_state_work;
+  const int64_t weight_elems = weight_work.numel();
+  const int32_t weight_width =
+      static_cast<int32_t>(weight_elems / static_cast<int64_t>(dim));
+  auto weight_t = weight_work.reshape({weight_width, dim}).contiguous();
+
+  auto cu_seqlens =
+      params.query_start_loc.has_value()
+          ? params.query_start_loc.value().to(torch::kInt32).contiguous()
+          : torch::arange(0,
+                          x_work.size(0) + 1,
+                          std::max(params.max_query_len, int32_t{1}),
+                          torch::TensorOptions()
+                              .dtype(torch::kInt32)
+                              .device(x_work.device()));
+
+  int64_t batch = cu_seqlens.size(0) - 1;
+  if (batch <= 0) {
+    return x_work;
+  }
+
+  auto i32_opts =
+      torch::TensorOptions().dtype(torch::kInt32).device(x_work.device());
+
+  torch::Tensor init_indices;
+  torch::Tensor current_indices;
+  if (params.conv_state_indices.has_value()) {
+    auto ci = params.conv_state_indices.value().to(torch::kInt32).contiguous();
+    if (ci.dim() == 1) {
+      init_indices = ci;
+      current_indices = ci;
+    } else {
+      auto ci_0 = ci.select(1, 0);
+      auto ci_1 = ci.select(1, 1);
+      if (params.initial_state_idx.has_value()) {
+        auto isi =
+            params.initial_state_idx.value().to(torch::kInt32).contiguous();
+        init_indices = torch::where(isi == 0, ci_0, ci_1);
+      } else {
+        init_indices = ci_0;
+      }
+      if (params.block_idx_last_scheduled_token.has_value()) {
+        auto bilt = params.block_idx_last_scheduled_token.value()
+                        .to(torch::kInt32)
+                        .contiguous();
+        current_indices = torch::where(bilt == 0, ci_0, ci_1);
+      } else {
+        current_indices = ci_0;
+      }
+    }
+  } else {
+    init_indices = torch::arange(batch, i32_opts);
+    current_indices = init_indices;
+  }
+
+  torch::Tensor initial_state_mode;
+  if (params.initial_state_mode.has_value()) {
+    initial_state_mode =
+        params.initial_state_mode.value().to(torch::kInt32).contiguous();
+  } else {
+    initial_state_mode = torch::ones({batch}, i32_opts);
+  }
+
+  auto writeback_bf16 = [&](torch::Tensor& y) {
+    if (need_bf16_cast) {
+      params.conv_state.copy_(conv_state_t.to(original_dtype));
+      y = y.to(original_dtype);
+    }
+  };
+
+  const int64_t total_tokens = x_work.size(0);
+  if (total_tokens == batch) {
+    const bool is_3d = (x_work.dim() == 3);
+    auto x_flat = is_3d ? x_work.reshape({-1, dim}).contiguous() : x_work;
+
+    if (npu::tilelang::has_causal_conv1d_decode_specialization(batch, dim)) {
+      auto conv_state_t_nonconst = conv_state_t;
+      auto y_decode = npu::tilelang::causal_conv1d_decode(
+          /*conv_state=*/conv_state_t_nonconst,
+          /*x=*/x_flat,
+          /*weight=*/weight_t,
+          /*bias=*/bias_work,
+          /*init_indices=*/init_indices,
+          /*current_indices=*/current_indices,
+          /*initial_state_mode=*/initial_state_mode,
+          /*has_silu=*/has_silu);
+
+      auto y = is_3d ? y_decode.view(x_work.sizes()) : y_decode;
+      writeback_bf16(y);
+      return y;
+    }
+  }
+
+  auto y =
+      npu::npu_causal_conv1d_update_v2(params.x,
+                                       params.conv_state,
+                                       params.weight,
+                                       params.activation,
+                                       params.bias,
+                                       params.conv_state_indices,
+                                       params.query_start_loc,
+                                       params.max_query_len,
+                                       params.pad_slot_id,
+                                       params.block_idx_last_scheduled_token,
+                                       params.initial_state_idx,
+                                       params.validate_data,
+                                       params.num_accepted_tokens);
+  return y;
 
 #else
   NOT_IMPLEMENTED();

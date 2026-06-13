@@ -137,6 +137,11 @@ tilelang_register_runtime_kernel(
   WRAPPER_SRCS split_qkv_rmsnorm_mrope_wrapper.cpp
 )
 
+tilelang_register_runtime_kernel(
+  NAME causal_conv1d_decode
+  WRAPPER_SRCS causal_conv1d_decode_wrapper.cpp
+)
+
 cc_library(
   NAME
     tilelang_kernels

@@ -38,3 +38,17 @@ cc_test(
     glog::glog
     unified_dlog
 )
+
+cc_test(
+  NAME
+    causal_conv1d_decode_wrapper_test
+  SRCS
+    causal_conv1d_decode_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    torch_npu
+    GTest::gtest_main
+    glog::glog
+    unified_dlog
+)
