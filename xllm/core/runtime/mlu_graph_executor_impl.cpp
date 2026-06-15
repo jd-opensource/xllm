@@ -170,6 +170,23 @@ uint32_t get_tp_size(const xllm::runtime::Options& options) {
   return static_cast<uint32_t>(world_size / dp_size);
 }
 
+int64_t get_graph_token_capacity(const xllm::runtime::Options& options) {
+  int64_t capacity = options.max_seqs_per_batch();
+
+  if (options.enable_speculative_decode() && !options.is_draft_engine()) {
+    capacity *= options.num_decoding_tokens();
+  }
+
+  capacity = static_cast<int64_t>(get_bucket_num_tokens(
+      static_cast<uint32_t>(std::max<int64_t>(capacity, 1))));
+
+  const uint32_t tp_size = get_tp_size(options);
+  capacity = static_cast<int64_t>(align_tokens(
+      static_cast<uint32_t>(std::max<int64_t>(capacity, tp_size)), tp_size));
+
+  return capacity;
+}
+
 uint32_t get_graph_dp_tokens(uint32_t actual_tokens,
                              const xllm::ModelInputParams& params,
                              const xllm::runtime::Options& options) {
@@ -258,6 +275,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
                                            const runtime::Options& options)
     : num_decoding_tokens_(options.num_decoding_tokens()) {
   const int64_t max_tokens = options.max_tokens_per_batch();
+  const int64_t graph_tokens_capacity = get_graph_token_capacity(options);
   const int64_t max_seq_lens = get_seq_lens_capacity(options);
   const int64_t max_seq_len = args.max_position_embeddings();
   const uint32_t block_size = options.block_size();
@@ -280,8 +298,8 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   }
   tokens_ = torch::zeros({max_tokens}, int_tensor_options);
   new_cache_slots_ = torch::zeros({max_tokens}, int_tensor_options);
-  block_table_ =
-      torch::zeros({max_tokens, max_num_blocks_per_req}, int_tensor_options);
+  block_table_ = torch::zeros({graph_tokens_capacity, max_num_blocks_per_req},
+                              int_tensor_options);
   // MTP validate expands decode rows from N to N * (K + 1), where K is the
   // speculative token count. Draft-extend only doubles rows, so the same
   // bound covers both paths when speculative decode is enabled.
