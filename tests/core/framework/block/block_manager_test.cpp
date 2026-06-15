@@ -446,4 +446,29 @@ TEST(BlockManagerPoolTest, SequenceUpdateBlockHashes) {
             0);
 }
 
+// In-batch prefix cache publishes only the full blocks covered by the given
+// token budget. When the budget is overestimated, cache() must clamp to the
+// sequence's own tokens and register just the complete blocks.
+TEST(BlockManagerPoolTest,
+     CachePrefixClampsToSequenceTokensWhenBudgetIsOverestimated) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
+
+  BlockManagerPool::Options options;
+  options.num_blocks(16).host_num_blocks(0).block_size(4).enable_prefix_cache(
+      true);
+  // Leak the pool intentionally: with prefix cache enabled, the cached block
+  // stays referenced by the prefix-cache table at teardown, which would trip
+  // the free-list check in ~BlockManagerImpl.
+  auto* pool = new BlockManagerPool(options, /*dp_size=*/1);
+
+  Sequence seq = MakeSequence(0, /*prompt_tokens=*/{1, 2, 3, 4, 5, 6, 7});
+  ASSERT_TRUE(pool->allocate(&seq));
+
+  // num_tokens (8) is larger than the 7 real tokens. cache() must clamp to the
+  // sequence tokens, so only the single full block (tokens [0, 4)) is cached.
+  EXPECT_NO_FATAL_FAILURE(pool->cache(&seq, /*num_tokens=*/8));
+  EXPECT_EQ(pool->num_blocks_in_prefix_cache()[0], 1u);
+}
+
 }  // namespace xllm

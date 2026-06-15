@@ -81,6 +81,7 @@ class BlockManagerPool : public KVCacheManager {
 
   virtual void allocate_shared(Sequence* sequence) override;
   virtual void cache(Sequence* sequence) override;
+  virtual void cache(Sequence* sequence, size_t num_tokens) override;
 
   virtual std::vector<std::vector<BlockTransferInfo>>*
   get_swap_block_transfer_infos() override;

@@ -425,6 +425,46 @@ void BlockManagerPool::cache(Sequence* sequence) {
                                   sequence->block_hashes());
 }
 
+void BlockManagerPool::cache(Sequence* sequence, size_t num_tokens) {
+  CHECK(sequence != nullptr);
+  if (!options_.enable_prefix_cache()) {
+    return;
+  }
+  int32_t dp_rank = get_dp_rank(sequence);
+  if (block_managers_[dp_rank]->is_composite()) {
+    // Prefix cache is not supported for CompositeBlockManager yet.
+    return;
+  }
+
+  // Only publish the full blocks that are guaranteed to be computed: clamp the
+  // requested token budget to the blocks actually allocated and to the
+  // sequence's own tokens. The last partial block is dropped by the prefix
+  // cache insert (it aligns to block boundary).
+  const size_t block_size = static_cast<size_t>(options_.block_size());
+  const size_t available_tokens_num =
+      std::min({num_tokens,
+                sequence->kv_state().num_kv_blocks() * block_size,
+                sequence->tokens().size()});
+  const size_t existed_shared_blocks_num =
+      sequence->kv_state().shared_kv_blocks_num();
+  if (available_tokens_num <= existed_shared_blocks_num * block_size) {
+    return;
+  }
+
+  // Block hashes are already computed during allocate(); this is an idempotent
+  // no-op kept for safety so we do not depend on allocate() running first.
+  sequence->update_block_hashes(static_cast<uint32_t>(options_.block_size()),
+                                options_.hasher_type());
+  const auto token_ids = sequence->tokens().slice(0, available_tokens_num);
+  auto* blocks = sequence->kv_state().mutable_kv_blocks();
+  CHECK_GE(blocks->size(), existed_shared_blocks_num);
+  block_managers_[dp_rank]->cache(token_ids,
+                                  *blocks,
+                                  existed_shared_blocks_num,
+                                  sequence->mm_data(),
+                                  sequence->block_hashes());
+}
+
 void BlockManagerPool::get_merged_kvcache_event(KvCacheEvent* event) const {
   for (int32_t i = 0; i < block_managers_.size(); ++i) {
     block_managers_[i]->get_merged_kvcache_event(event);

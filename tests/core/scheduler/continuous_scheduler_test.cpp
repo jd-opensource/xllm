@@ -8,6 +8,7 @@
 #include <optional>
 
 #include "chunked_prefill_scheduler.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "distributed_runtime/engine.h"
@@ -1027,7 +1028,146 @@ TEST(ContinuousSchedulerTest, PauseAbortCancelsRunningRequests) {
   EXPECT_EQ(scheduler->get_waiting_requests_num(), 0);     // NOT requeued
 
   (void)engine.release();
+}
 
+// With in-batch prefix cache enabled, a request admitted earlier in the same
+// scheduling step publishes its full prompt blocks, so a later request with the
+// same prefix reuses them (shared_kv_blocks_num > 0). When disabled, the later
+// request shares nothing within the same batch.
+TEST(ContinuousSchedulerTest,
+     InBatchCachePrefillBlocksIncreaseSharedBlocksForLaterRequests) {
+  const auto run_with_in_batch_prefix_cache =
+      [](bool enable_in_batch_prefix_cache) -> size_t {
+    KVCacheConfig& kv_config = KVCacheConfig::get_instance();
+    const bool saved_prefix_cache = kv_config.enable_prefix_cache();
+    const bool saved_in_batch = kv_config.enable_in_batch_prefix_cache();
+    kv_config.enable_prefix_cache(true);
+    kv_config.enable_in_batch_prefix_cache(enable_in_batch_prefix_cache);
+
+    ContinuousScheduler::Options opt =
+        create_scheduler_options(1024, 16, 0, 1024, 1);
+    auto engine =
+        std::make_unique<FakeEngine>(32, 4, /*enable_prefix_cache=*/true);
+    auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+
+    auto first_request =
+        generate_request_with_prompt_tokens({1, 2, 3, 4, 5, 6, 7, 8}, 1, 30000);
+    auto second_request =
+        generate_request_with_prompt_tokens({1, 2, 3, 4, 5, 6, 7, 8}, 1, 30000);
+    scheduler->add_request(first_request);
+    scheduler->add_request(second_request);
+
+    auto batch = scheduler->prepare_batch_test();
+    EXPECT_EQ(batch.size(), 1);
+    EXPECT_EQ(batch[0].size(), 2);
+    EXPECT_EQ(first_request->sequences()[0]->kv_state().shared_kv_blocks_num(),
+              0u);
+    const size_t second_shared =
+        second_request->sequences()[0]->kv_state().shared_kv_blocks_num();
+
+    scheduler.reset();
+    // Leak the engine: cached blocks live in the prefix-cache table at
+    // teardown.
+    (void)engine.release();
+
+    kv_config.enable_prefix_cache(saved_prefix_cache);
+    kv_config.enable_in_batch_prefix_cache(saved_in_batch);
+    return second_shared;
+  };
+
+  const size_t shared_when_enabled = run_with_in_batch_prefix_cache(true);
+  const size_t shared_when_disabled = run_with_in_batch_prefix_cache(false);
+
+  EXPECT_GT(shared_when_enabled, shared_when_disabled);
+  EXPECT_GT(shared_when_enabled, 0u);
+  EXPECT_EQ(shared_when_disabled, 0u);
+}
+
+// End-to-end check through the real scheduler path (add_request ->
+// prepare_batch): two requests that share only the first 2 of 3 prompt blocks
+// are admitted in the same step. With in-batch prefix cache on, the first
+// request publishes its full blocks, so the second request reuses EXACTLY the 2
+// shared blocks (the 3rd differs and must be a miss). The prefix-cache table
+// also grows by the published blocks. With it off, nothing is shared in-batch.
+TEST(ContinuousSchedulerTest, InBatchCacheReusesPartialPrefixWithinSameBatch) {
+  // block_size = 4. 12 tokens => 3 full blocks per prompt.
+  const std::vector<int32_t> prompt_a = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  // Shares blocks [0,1] (tokens 0..7) with prompt_a, differs in block 2.
+  const std::vector<int32_t> prompt_b = {
+      1, 2, 3, 4, 5, 6, 7, 8, 99, 100, 101, 102};
+
+  struct Result {
+    size_t first_shared = 0;
+    size_t second_shared = 0;
+    size_t batch_count = 0;
+    size_t batch0_size = 0;
+    size_t prefix_cache_blocks = 0;
+  };
+
+  const auto run = [&](bool enable_in_batch_prefix_cache) -> Result {
+    KVCacheConfig& kv_config = KVCacheConfig::get_instance();
+    const bool saved_prefix_cache = kv_config.enable_prefix_cache();
+    const bool saved_in_batch = kv_config.enable_in_batch_prefix_cache();
+    kv_config.enable_prefix_cache(true);
+    kv_config.enable_in_batch_prefix_cache(enable_in_batch_prefix_cache);
+
+    ContinuousScheduler::Options opt =
+        create_scheduler_options(1024, 16, 0, 1024, 1);
+    auto engine =
+        std::make_unique<FakeEngine>(64, 4, /*enable_prefix_cache=*/true);
+    auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+
+    auto first_request =
+        generate_request_with_prompt_tokens(prompt_a, 1, 30000);
+    auto second_request =
+        generate_request_with_prompt_tokens(prompt_b, 1, 30000);
+    scheduler->add_request(first_request);
+    scheduler->add_request(second_request);
+
+    auto batch = scheduler->prepare_batch_test();
+
+    Result r;
+    r.batch_count = batch.size();
+    r.batch0_size = batch.empty() ? 0 : batch[0].size();
+    r.first_shared =
+        first_request->sequences()[0]->kv_state().shared_kv_blocks_num();
+    r.second_shared =
+        second_request->sequences()[0]->kv_state().shared_kv_blocks_num();
+    r.prefix_cache_blocks =
+        engine->block_manager_pool()->num_blocks_in_prefix_cache()[0];
+
+    scheduler.reset();
+    // Leak the engine: published blocks live in the prefix-cache table at
+    // teardown, which would otherwise trip the free-list check in dtor.
+    (void)engine.release();
+
+    kv_config.enable_prefix_cache(saved_prefix_cache);
+    kv_config.enable_in_batch_prefix_cache(saved_in_batch);
+    return r;
+  };
+
+  const Result enabled = run(true);
+  const Result disabled = run(false);
+
+  // Both requests must land in the same batch for in-batch reuse to apply.
+  EXPECT_EQ(enabled.batch_count, 1u);
+  EXPECT_EQ(enabled.batch0_size, 2u);
+
+  // The first request can never share within the same step (nothing published
+  // yet when it is admitted).
+  EXPECT_EQ(enabled.first_shared, 0u);
+
+  // The second request reuses exactly the 2 identical leading blocks.
+  EXPECT_EQ(enabled.second_shared, 2u);
+
+  // Prefix cache holds first request's 3 blocks plus the second request's one
+  // distinct trailing block => 4 unique blocks.
+  EXPECT_EQ(enabled.prefix_cache_blocks, 4u);
+
+  // With the feature disabled, no in-batch sharing happens.
+  EXPECT_EQ(disabled.first_shared, 0u);
+  EXPECT_EQ(disabled.second_shared, 0u);
+  EXPECT_GT(enabled.second_shared, disabled.second_shared);
 }
 
 }  // namespace xllm
