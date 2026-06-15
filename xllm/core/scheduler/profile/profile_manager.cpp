@@ -946,7 +946,7 @@ void ProfileManager::warmup_prefill_for_graph() {
 
   int32_t prefill_tokens =
       std::min(options_.max_tokens_per_batch(), max_context_len);
-  double prefill_latency = run_request(prefill_tokens, 0, 1);
+  double prefill_latency = run_request(prefill_tokens, /*prefix_length=*/0, /*batch_size=*/1);
   LOG(INFO) << "Prefill warmup completed: tokens=" << prefill_tokens
             << ", latency=" << prefill_latency << " ms";
 }
