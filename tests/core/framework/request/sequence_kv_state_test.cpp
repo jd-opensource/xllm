@@ -210,20 +210,20 @@ CacheGroupState make_group_with_blocks(CacheStateId state_id,
 
 }  // namespace
 
-// DSV4 composite state has no C1 group, so current_max_tokens_capacity() must
-// derive the linear token budget from the finest incremental compressed group
-// (C4). The SWA ring's windowed capacity is excluded -- it would falsely cap
-// token growth -- and C128 is only the fallback when C4 is absent.
+// DSV4 composite state has no C1 group, so current_max_tokens_capacity() is
+// min over the compressed incremental groups (C4/C128). The SWA ring's
+// windowed capacity is excluded -- it would falsely cap token growth.
 TEST(KVCacheStateTest, CurrentMaxTokensCapacityReadsC4GroupForDsv4) {
   KVCacheState state;
   std::vector<CacheGroupState>* groups = state.mutable_groups();
   // SWA ring of 5 narrow blocks: a window, not a linear capacity.
   groups->push_back(
       make_group_with_blocks(CacheStateId::SWA, /*block_size=*/kBlockSize, 5));
-  // C4 group: 3 blocks of kBlockSize*4 -> the capacity the budget must report.
+  // C4 group: 3 blocks of kBlockSize*4 = 12*kBlockSize tokens.
   groups->push_back(make_group_with_blocks(CacheStateId::C4,
                                            /*block_size=*/kBlockSize * 4, 3));
-  // C128 group present but coarser; must be ignored while C4 exists.
+  // C128 group: 2 blocks of kBlockSize*128 = 256*kBlockSize tokens -> the
+  // finer C4 group is the binding min.
   groups->push_back(make_group_with_blocks(CacheStateId::C128,
                                            /*block_size=*/kBlockSize * 128, 2));
 
@@ -231,8 +231,23 @@ TEST(KVCacheStateTest, CurrentMaxTokensCapacityReadsC4GroupForDsv4) {
   EXPECT_EQ(state.current_max_tokens_capacity(), 3u * kBlockSize * 4u);
 }
 
-// When a DSV4 sequence carries C128 but no C4 group, the capacity falls back to
-// the C128 group rather than the SWA ring.
+// min(C4, C128) is a true min: when the C128 group's token capacity is the
+// smaller one, it bounds the budget even though C4 is present.
+TEST(KVCacheStateTest, CurrentMaxTokensCapacityTakesMinOfCompressedGroups) {
+  KVCacheState state;
+  std::vector<CacheGroupState>* groups = state.mutable_groups();
+  // C4: 64 blocks * (kBlockSize*4) = 256*kBlockSize tokens.
+  groups->push_back(make_group_with_blocks(CacheStateId::C4,
+                                           /*block_size=*/kBlockSize * 4, 64));
+  // C128: 1 block * (kBlockSize*128) = 128*kBlockSize tokens -> the min.
+  groups->push_back(make_group_with_blocks(CacheStateId::C128,
+                                           /*block_size=*/kBlockSize * 128, 1));
+
+  EXPECT_EQ(state.current_max_tokens_capacity(), 1u * kBlockSize * 128u);
+}
+
+// When a DSV4 sequence carries C128 but no C4 group, the min ranges over the
+// only compressed group present, never the SWA ring.
 TEST(KVCacheStateTest, CurrentMaxTokensCapacityFallsBackToC128WhenNoC4) {
   KVCacheState state;
   std::vector<CacheGroupState>* groups = state.mutable_groups();

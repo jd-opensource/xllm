@@ -52,16 +52,18 @@ CompositeMatchResult IncrementalOnlyPrefixPolicy::match(
 
   CacheGroupState* state = context.kv_state->group_state(c1_.state_id);
   CHECK(state != nullptr) << "C1 group state must exist before match()";
+  // Match runs exactly once, on the sequence's first scheduling, before any
+  // allocation. There is no mid-stream re-match on the composite path: a
+  // re-match would have to replace blocks the sequence already computed,
+  // and that replacement semantics is deliberately unsupported.
+  CHECK(state->blocks.empty())
+      << "prefix match must run before the sequence holds any block";
 
   const MMData empty_mm;
   const MMData& mm_data = context.mm_data ? *context.mm_data : empty_mm;
 
-  // Shared blocks the sequence already holds for this group (chunked-prefill
-  // re-match); usually empty on the first prefill. match() prepends them.
-  const Slice<Block> existed =
-      Slice<Block>(state->blocks).slice(0, state->shared_blocks_num);
   std::vector<Block> matched =
-      c1_.cache->match(context.tokens, existed, mm_data);
+      c1_.cache->match(context.tokens, /*existed_shared_blocks=*/{}, mm_data);
 
   const size_t matched_tokens = matched.size() * c1_.block_size;
   state->shared_blocks_num = matched.size();

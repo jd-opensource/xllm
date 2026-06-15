@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <algorithm>
+#include <limits>
 #include <utility>
 
 #include "framework/block/block_manager_impl.h"
@@ -220,12 +222,28 @@ void GroupCompositeBlockManager::insert_committed_blocks(
 }
 
 size_t GroupCompositeBlockManager::num_free_blocks() const {
-  // Reads the leaf allocators' atomic counters; no composite lock needed.
-  size_t total = 0;
+  // Schedulable capacity in base-block units (reads the leaf allocators'
+  // atomic counters; no composite lock needed). A C1 group is the token-linear
+  // pool for normal/Qwen shapes and answers directly. The DSV4 shape has no
+  // C1; its token-linear constraint is the tighter of the compressed groups,
+  // each converted to base-block equivalents via its compress_ratio. SWA
+  // (windowed, occupancy decoupled from token count) and SINGLE_RES (one block
+  // per sequence) must not be folded into token-linear admission.
+  size_t compressed_min = std::numeric_limits<size_t>::max();
+  bool has_compressed = false;
   for (const CacheGroupRuntime& runtime : runtimes_) {
-    total += runtime.allocator->num_free_blocks();
+    if (runtime.spec.state_id == CacheStateId::C1) {
+      return runtime.allocator->num_free_blocks();
+    }
+    if (runtime.spec.policy_type == CachePolicyType::INCREMENTAL_APPEND &&
+        runtime.spec.compress_ratio > 1) {
+      has_compressed = true;
+      compressed_min = std::min<size_t>(
+          compressed_min,
+          runtime.allocator->num_free_blocks() * runtime.spec.compress_ratio);
+    }
   }
-  return total;
+  return has_compressed ? compressed_min : 0;
 }
 
 size_t GroupCompositeBlockManager::group_free_blocks(
@@ -239,17 +257,40 @@ size_t GroupCompositeBlockManager::group_free_blocks(
 }
 
 size_t GroupCompositeBlockManager::num_used_blocks() const {
+  // Mirror num_free_blocks()'s group selection so the accounting trio stays
+  // consistent: count only the schedulable token-linear KV pool. C1 is that
+  // pool for normal/Qwen and answers directly; DSV4 (no C1) sums its compressed
+  // incremental groups in base-block equivalents. SWA (windowed) and SINGLE_RES
+  // (one block per sequence) are never part of it -- folding them in would make
+  // used/total disagree with the C1-only free count and inflate utilization.
   size_t total = 0;
   for (const CacheGroupRuntime& runtime : runtimes_) {
-    total += runtime.allocator->num_used_blocks();
+    if (runtime.spec.state_id == CacheStateId::C1) {
+      return runtime.allocator->num_used_blocks();
+    }
+    if (runtime.spec.policy_type == CachePolicyType::INCREMENTAL_APPEND &&
+        runtime.spec.compress_ratio > 1) {
+      total +=
+          runtime.allocator->num_used_blocks() * runtime.spec.compress_ratio;
+    }
   }
   return total;
 }
 
 size_t GroupCompositeBlockManager::num_total_blocks() const {
+  // Same KV-pool selection as num_used_blocks()/num_free_blocks(): C1 for
+  // normal/Qwen, the compressed incremental groups (base-block equivalents) for
+  // DSV4, SWA and SINGLE_RES excluded.
   size_t total = 0;
   for (const CacheGroupRuntime& runtime : runtimes_) {
-    total += runtime.allocator->num_total_blocks();
+    if (runtime.spec.state_id == CacheStateId::C1) {
+      return runtime.allocator->num_total_blocks();
+    }
+    if (runtime.spec.policy_type == CachePolicyType::INCREMENTAL_APPEND &&
+        runtime.spec.compress_ratio > 1) {
+      total +=
+          runtime.allocator->num_total_blocks() * runtime.spec.compress_ratio;
+    }
   }
   return total;
 }
@@ -267,11 +308,16 @@ size_t GroupCompositeBlockManager::num_blocks_in_prefix_cache() const {
 }
 
 double GroupCompositeBlockManager::kv_cache_utilization() const {
-  const size_t total = num_total_blocks();
+  // Statically qualify these two accessors so a locking subclass
+  // (ConcurrentCompositeBlockManager) does not re-enter its own per-method
+  // lock through virtual dispatch -- that would deadlock its non-recursive
+  // mutex. This is the only spot where the base self-calls a public accessor.
+  const size_t total = GroupCompositeBlockManager::num_total_blocks();
   if (total == 0) {
     return 0.0;
   }
-  return static_cast<double>(num_used_blocks()) / static_cast<double>(total);
+  return static_cast<double>(GroupCompositeBlockManager::num_used_blocks()) /
+         static_cast<double>(total);
 }
 
 }  // namespace xllm

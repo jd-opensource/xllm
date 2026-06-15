@@ -82,6 +82,23 @@ TEST(CacheGroupSpecBuilderTest, SingleResIsUniversalAndNonCacheable) {
   EXPECT_EQ(single_res.export_targets[1], WorkerExportTarget::EMBEDDING_IDS);
 }
 
+// The engine-level prefix-cache switch gates C1 cacheability even for the
+// normal shape: with it off, no group is cacheable.
+TEST(CacheGroupSpecBuilderTest, EnginePrefixCacheSwitchDisablesC1Caching) {
+  ModelCacheGroupConfig config;
+  config.base_block_size = 16;
+  config.c1_num_blocks = 100;
+  config.single_res_num_blocks = 50;
+  config.enable_prefix_cache = false;
+
+  std::vector<CacheGroupSpec> specs = build_cache_group_specs(config);
+
+  const CacheGroupSpec* c1 = find_spec(specs, CacheStateId::C1);
+  ASSERT_NE(c1, nullptr);
+  EXPECT_FALSE(c1->prefix_cacheable);
+  EXPECT_EQ(c1->prefix_group, PrefixCacheGroup::INVALID);
+}
+
 // Qwen3.5+ hybrid: C1 is present but non-cacheable (linear state cannot be
 // restored from a prefix hit), and no group is cacheable.
 TEST(CacheGroupSpecBuilderTest, LinearStateModelDisablesPrefixCaching) {

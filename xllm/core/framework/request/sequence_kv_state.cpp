@@ -16,6 +16,7 @@ limitations under the License.
 #include "sequence_kv_state.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace xllm {
 
@@ -175,16 +176,22 @@ size_t KVCacheState::current_max_tokens_capacity() const {
     return c1->blocks.size() * c1->blocks[0].size();
   }
   if (!groups_.empty()) {
-    // Composite path with no C1 group (DSV4): the SWA ring's windowed capacity
-    // would falsely cap token growth, so derive the linear capacity from the
-    // finest incremental compressed group (C4, then C128).
+    // Composite path with no C1 group (DSV4): only the incremental compressed
+    // groups carry a token-linear capacity, and the binding constraint is the
+    // tighter of the two. The SWA ring's windowed capacity must not join the
+    // min -- committed tokens keep growing past N * block_size by replacement,
+    // so folding it in would fail the capacity CHECK on long sequences.
+    // SINGLE_RES (one block per sequence) is equally excluded.
+    size_t capacity = std::numeric_limits<size_t>::max();
+    bool has_compressed = false;
     for (const CacheStateId state_id : {CacheStateId::C4, CacheStateId::C128}) {
       const Slice<Block> blocks = group_blocks(state_id);
       if (!blocks.empty()) {
-        return blocks.size() * blocks[0].size();
+        has_compressed = true;
+        capacity = std::min(capacity, blocks.size() * blocks[0].size());
       }
     }
-    return 0;
+    return has_compressed ? capacity : 0;
   }
   if (!blocks_.empty()) {
     // all blocks have the same size
@@ -257,6 +264,14 @@ void KVCacheState::reset() {
   groups_.clear();
   transfer_kv_info_.reset();
   next_transfer_block_idx_ = 0;
+}
+
+void KVCacheState::reset_single_resource_group() {
+  if (CacheGroupState* group = group_state(CacheStateId::SINGLE_RES)) {
+    group->blocks.clear();
+    group->shared_blocks_num = 0;
+    group->prefix_cached_tokens = 0;
+  }
 }
 
 void KVCacheState::process_beam_search(std::optional<Block> new_block) {

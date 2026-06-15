@@ -100,6 +100,15 @@ class KVCacheState {
 
   void reset();
 
+  // Drop the per-sequence SINGLE_RES resource block while leaving every shared
+  // KV group (C1 / compressed) untouched. A forked sequence (the beam / best_of
+  // copy constructor) shares the prompt prefix by ref-counting those KV blocks,
+  // but its linear / embedding state is private -- it must allocate its own
+  // SINGLE_RES block on the next allocate rather than alias the source's. The
+  // group entry itself is kept (only its block payload is cleared) so the
+  // composite manager's per-group state vector still matches its runtime count.
+  void reset_single_resource_group();
+
   void process_beam_search(std::optional<Block> new_block = std::nullopt);
 
  private:

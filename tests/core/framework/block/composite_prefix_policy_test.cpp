@@ -192,6 +192,25 @@ TEST(CompositePrefixPolicyTest, MatchRestoresInsertedPrefix) {
   }
 }
 
+// match is only legal before the sequence holds any C1 block (first
+// scheduling); the composite path has no re-match/replacement semantics, so a
+// match against a populated group must CHECK-fail.
+TEST(CompositePrefixPolicyTest, MatchDiesIfSequenceAlreadyHoldsBlocks) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  auto allocator = make_leaf_allocator(/*num_blocks=*/16);
+  PrefixCache cache(kStride);
+  IncrementalOnlyPrefixPolicy policy(make_c1_entry(&cache));
+
+  const std::vector<int32_t> tokens = make_tokens(2 * kStride);
+  KVCacheState kv_state;
+  push_c1_group(&kv_state, allocator.get(), /*block_count=*/2);
+
+  PrefixCacheMatchContext match_ctx =
+      make_match_context(&kv_state, Slice<int32_t>(tokens));
+  EXPECT_DEATH(policy.match(match_ctx),
+               "prefix match must run before the sequence holds any block");
+}
+
 // insert_committed only commits whole blocks up to the committed-token
 // boundary: with 10 committed tokens and stride 4, only the first two blocks
 // (8 tokens) are inserted.

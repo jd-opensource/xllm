@@ -200,9 +200,18 @@ class Sequence final {
   void clear_mtp_bootstrap_embedding() {
     mtp_bootstrap_embedding_ = torch::Tensor();
   }
-  bool has_single_block_id() const { return single_block_.is_valid(); }
+  // The per-sequence resource block id exported as linear_state_ids /
+  // embedding_ids. On the composite path it lives in the SINGLE_RES cache
+  // group (PerSequenceOnce policy); the flat single_block_ member only backs
+  // the remaining legacy paths (xtensor, hierarchy host modes).
+  bool has_single_block_id() const { return get_single_block_id() >= 0; }
   int32_t get_single_block_id() const {
-    return has_single_block_id() ? single_block_.id() : -1;
+    const Slice<Block> single_res =
+        kv_state_.group_blocks(CacheStateId::SINGLE_RES);
+    if (!single_res.empty()) {
+      return single_res[0].id();
+    }
+    return single_block_.is_valid() ? single_block_.id() : -1;
   }
   void set_single_block(Block&& single_block) {
     single_block_ = std::move(single_block);

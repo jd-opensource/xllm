@@ -305,6 +305,12 @@ Sequence::Sequence(const Sequence& other)
       updated_since_last_beam_search_(other.updated_since_last_beam_search_),
       termination_flag_(std::make_shared<std::atomic<int32_t>>(INT32_MAX)) {
   logprob_state_ = std::make_unique<LogprobState>(*other.logprob_state_);
+  // The copied kv_state_ ref-count-shares the source's KV prefix groups (the
+  // intended fork behavior), but its SINGLE_RES group is a per-sequence
+  // resource: drop it so this fork allocates its own linear/embedding block
+  // instead of aliasing the source's. single_block_ is likewise left default
+  // (the legacy flat handle is never copied), keeping both fork paths private.
+  kv_state_.reset_single_resource_group();
 }
 
 // The first token will be only used in disagg pd mode.

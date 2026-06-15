@@ -91,7 +91,30 @@ TEST(GroupCompositeBlockManagerTest, ConstructsGroupsFromSpecs) {
   EXPECT_EQ(manager.group_free_blocks(CacheStateId::C1), 9u);
   EXPECT_EQ(manager.group_free_blocks(CacheStateId::SINGLE_RES), 3u);
   EXPECT_EQ(manager.group_free_blocks(CacheStateId::C128), 0u);
-  EXPECT_EQ(manager.num_free_blocks(), 12u);
+  // Schedulable capacity is the C1 pool alone; SINGLE_RES never joins it.
+  EXPECT_EQ(manager.num_free_blocks(), 9u);
+}
+
+// Admission capacity follows the simplified per-shape rule: with a C1 group it
+// is exactly the C1 free count; without one (DSV4) it is the min over the
+// compressed incremental groups in base-block equivalents. SWA and SINGLE_RES
+// never contribute.
+TEST(GroupCompositeBlockManagerTest, NumFreeBlocksUsesCompressedMinForDsv4) {
+  CacheGroupSpec c4 = make_c1_spec(/*num_blocks=*/9);
+  c4.state_id = CacheStateId::C4;
+  c4.compress_ratio = 4;
+  CacheGroupSpec c128 = make_c1_spec(/*num_blocks=*/2);
+  c128.state_id = CacheStateId::C128;
+  c128.compress_ratio = 128;
+
+  GroupCompositeBlockManager manager(
+      {make_swa_spec(/*window_blocks=*/4, /*num_blocks=*/12),
+       c4,
+       c128,
+       make_single_res_spec(/*num_blocks=*/4)});
+
+  // C4: 8 free * 4 = 32; C128: 1 free * 128 = 128 -> min is the C4 budget.
+  EXPECT_EQ(manager.num_free_blocks(), 32u);
 }
 
 TEST(GroupCompositeBlockManagerTest, AllocateGrowsEveryGroup) {
@@ -169,13 +192,15 @@ TEST(GroupCompositeBlockManagerTest, DeallocateReleasesAllGroups) {
   EXPECT_EQ(group_block_count(&kv_state, CacheStateId::C1), 3u);
   // SWA first allocate claims the full 4-block ring one-shot.
   EXPECT_EQ(group_block_count(&kv_state, CacheStateId::SWA), 4u);
-  EXPECT_LT(manager.num_free_blocks(), 9u + 11u);
+  // Schedulable capacity tracks the C1 pool only (SWA is windowed, not
+  // token-linear).
+  EXPECT_EQ(manager.num_free_blocks(), 6u);
 
   manager.deallocate(&context);
   EXPECT_TRUE(kv_state.groups().empty());
   EXPECT_EQ(manager.group_free_blocks(CacheStateId::C1), 9u);
   EXPECT_EQ(manager.group_free_blocks(CacheStateId::SWA), 11u);
-  EXPECT_EQ(manager.num_free_blocks(), 20u);
+  EXPECT_EQ(manager.num_free_blocks(), 9u);
 
   // deallocate is idempotent once the groups are gone.
   manager.deallocate(&context);
@@ -246,16 +271,22 @@ TEST(GroupCompositeBlockManagerTest, PrefixCacheRoundtripAcrossSequences) {
   EXPECT_EQ(b_state->prefix_cached_tokens, 3u * kBlockSize);
 }
 
-// num_used / num_total / kv_cache_utilization aggregate across every group
-// allocator; num_blocks_in_prefix_cache is recovered from the C1 prefix cache
-// because the leaf pools run with prefix caching disabled.
-TEST(GroupCompositeBlockManagerTest, AggregatesBlockAccountingAcrossGroups) {
+// num_used / num_total / kv_cache_utilization describe the schedulable KV pool
+// only -- the same C1 (normal) / compressed (DSV4) groups that num_free_blocks
+// reports, never the per-sequence SINGLE_RES resource. This keeps the trio
+// self-consistent and matches the scheduler, which multiplies num_used_blocks
+// by the KV block_size and compares its sum against the request's KV block
+// count (continuous_scheduler.cpp): a SINGLE_RES block (its own block_size,
+// often 1) folded into that count would corrupt both. num_blocks_in_prefix_cache
+// is recovered from the C1 prefix cache because the leaf pools run with prefix
+// caching disabled.
+TEST(GroupCompositeBlockManagerTest, AccountsOnlyTheSchedulableKvPool) {
   GroupCompositeBlockManager manager({make_cacheable_c1_spec(/*num_blocks=*/16),
                                       make_single_res_spec(/*num_blocks=*/4)});
 
-  // Post-construction each leaf reserves block 0 as padding (excluded from
-  // total and not counted as used): total = 15 + 3, used = 0.
-  EXPECT_EQ(manager.num_total_blocks(), 18u);
+  // The C1 leaf reserves block 0 as padding (excluded from total, never used),
+  // so total = 15 and used = 0. The SINGLE_RES pool is outside this count.
+  EXPECT_EQ(manager.num_total_blocks(), 15u);
   EXPECT_EQ(manager.num_used_blocks(), 0u);
   EXPECT_EQ(manager.num_blocks_in_prefix_cache(), 0u);
   EXPECT_EQ(manager.kv_cache_utilization(), 0.0);
@@ -267,11 +298,12 @@ TEST(GroupCompositeBlockManagerTest, AggregatesBlockAccountingAcrossGroups) {
   context.kv_state = &kv_state;
   context.tokens = Slice<int32_t>(tokens);
   context.hash_state = &hash_state;
-  // 3 C1 blocks + 1 SINGLE_RES block are charged to used.
+  // Only the 3 C1 blocks count as used; the SINGLE_RES block this sequence also
+  // claims is a per-sequence resource, not part of the schedulable KV pool.
   ASSERT_TRUE(manager.allocate(&context, /*num_tokens=*/3 * kBlockSize));
-  EXPECT_EQ(manager.num_used_blocks(), 4u);
-  EXPECT_EQ(manager.num_total_blocks(), 18u);
-  EXPECT_NEAR(manager.kv_cache_utilization(), 4.0 / 18.0, 1e-9);
+  EXPECT_EQ(manager.num_used_blocks(), 3u);
+  EXPECT_EQ(manager.num_total_blocks(), 15u);
+  EXPECT_NEAR(manager.kv_cache_utilization(), 3.0 / 15.0, 1e-9);
 
   // Once committed, the next allocate lazily inserts the three C1 blocks into
   // the group-local prefix cache; the non-cacheable SINGLE_RES group

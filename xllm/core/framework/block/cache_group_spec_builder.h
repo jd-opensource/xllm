@@ -54,6 +54,10 @@ struct ModelCacheGroupConfig {
   // a C1 prefix hit that skips prefill would strand the unrecoverable linear
   // recurrent state, corrupting output.
   bool has_linear_state = false;
+
+  // Engine-level prefix-cache switch. Even for the normal shape, C1 is only
+  // prefix-cacheable when this is set (and has_linear_state is not).
+  bool enable_prefix_cache = true;
 };
 
 // Build the ordered cache-group specs for a model in worker export order.

@@ -65,21 +65,14 @@ class BlockManagerPool : public KVCacheManager {
   ~BlockManagerPool() = default;
 
   virtual bool allocate(Sequence* sequence) override;
-  virtual bool allocate(std::vector<Sequence*>& sequences) override;
   virtual bool allocate(Sequence* sequence, size_t num_tokens) override;
   virtual bool allocate(Sequence* sequence,
                         size_t num_tokens,
                         size_t needed_copy_in_blocks_num) override;
 
-  // Try to allocate blocks with num_tokens,
-  // return {} if not enough blocks
-  virtual std::vector<Block> allocate(size_t num_tokens,
-                                      int32_t& dp_rank) override;
-
   virtual bool try_allocate(Sequence* sequence) override;
 
   virtual void deallocate(Request* request) override;
-  virtual void deallocate(std::vector<Sequence*>& sequences) override;
   virtual void deallocate(Sequence* sequence) override;
 
   void deallocate_without_cache(Sequence* sequence);
@@ -123,8 +116,15 @@ class BlockManagerPool : public KVCacheManager {
   // including the whole-prompt-hit back-off that leaves one block to recompute.
   void composite_match_shared(Sequence* sequence, int32_t dp_rank);
 
+  // True until the sequence has been handed any composite resource: prefix
+  // match is only legal on this first scheduling (no mid-stream re-match).
+  bool is_first_schedule(Sequence* sequence) const;
+
  private:
   std::vector<std::vector<BlockTransferInfo>> swap_block_transfer_infos_;
+  // Per-sequence resource ids for the non-composite islands only (xtensor,
+  // hierarchy host modes). On the composite path the same resource is the
+  // SINGLE_RES cache group inside each composite manager.
   std::vector<std::unique_ptr<SingleBlockManager>> single_block_managers_;
 
  protected:
@@ -133,14 +133,15 @@ class BlockManagerPool : public KVCacheManager {
   std::vector<std::unique_ptr<BlockManager>> block_managers_;
 
   // Cache-group composite path (block-manager refactor): when true,
-  // block_managers_ stays empty and each DP rank is served by a
-  // ConcurrentCompositeBlockManager. The normal model uses a single C1 group;
-  // DSV4 (selected by a non-empty manager_types) uses the SWA + compressed
-  // C4/C128 groups. The xtensor path and normal-model specialized modes
-  // (disagg-PD, kvcache-store, host blocks) keep using block_managers_.
+  // block_managers_ stays empty and each DP rank is served by a composite
+  // manager (the locked ConcurrentCompositeBlockManager subclass under
+  // disagg-PD, the lock-free base otherwise). The normal model uses
+  // C1 + SINGLE_RES groups; DSV4 (selected by a non-empty manager_types) uses
+  // SWA + compressed C4/C128 + SINGLE_RES. The only non-composite islands are
+  // xtensor and the hierarchy host modes (host blocks / kvcache store), which
+  // keep using block_managers_ until the hierarchy refactor lands.
   bool composite_ = false;
-  std::vector<std::unique_ptr<ConcurrentCompositeBlockManager>>
-      composite_managers_;
+  std::vector<std::unique_ptr<GroupCompositeBlockManager>> composite_managers_;
 };
 
 }  // namespace xllm

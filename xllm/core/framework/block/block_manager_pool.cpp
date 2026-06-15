@@ -34,28 +34,27 @@ limitations under the License.
 namespace xllm {
 namespace {
 
-// Single C1 cache group describing the normal-model composite manager: one
-// incremental attention pool sized from the pool options, prefix-cacheable only
-// when prefix caching is enabled. SINGLE_RES stays on the legacy
-// single_block_managers_ during phase 1, so it is intentionally absent here.
+// Normal / Qwen3.5+ composite layout: C1 + SINGLE_RES, built by the shared
+// spec builder so the linear-state gating applies on the live path -- a
+// linear-attention model (enable_linear_state) must never expose a cacheable
+// C1, because a prefix hit that skips prefill strands the unrecoverable
+// recurrent state. The builder CHECK-fails on any violation.
 std::vector<CacheGroupSpec> make_normal_composite_specs(
-    const BlockManagerPool::Options& options) {
-  CacheGroupSpec c1;
-  c1.state_id = CacheStateId::C1;
-  c1.policy_type = CachePolicyType::INCREMENTAL_APPEND;
-  c1.block_size = static_cast<uint32_t>(options.block_size());
-  c1.num_blocks = options.num_blocks();
-  c1.prefix_cacheable = options.enable_prefix_cache();
-  c1.prefix_group = options.enable_prefix_cache() ? PrefixCacheGroup::C1
-                                                  : PrefixCacheGroup::INVALID;
-  return {c1};
+    const BlockManagerPool::Options& options,
+    uint32_t single_res_num_blocks) {
+  ModelCacheGroupConfig config;
+  config.base_block_size = static_cast<uint32_t>(options.block_size());
+  config.c1_num_blocks = options.num_blocks();
+  config.single_res_num_blocks = single_res_num_blocks;
+  config.has_linear_state = options.enable_linear_state();
+  config.enable_prefix_cache = options.enable_prefix_cache();
+  return build_cache_group_specs(config);
 }
 
 // DeepSeek-V4 cache-group composite: a rolling-window SWA attention group
 // followed by one incremental compressed group per compress ratio (C4, C128),
-// in worker multi_block_tables export order. The trailing SINGLE_RES spec is
-// stripped -- DSV4's per-sequence resource block stays on the legacy
-// single_block_managers_ exactly like the normal path. Allocator sizing
+// in worker multi_block_tables export order, plus the trailing SINGLE_RES
+// per-sequence resource group every model shape carries. Allocator sizing
 // preserves the original DSV4 cache-state pool formula:
 //   - SWA shares a burst pool across the in-flight batch.
 //   - Each compressed pool shrinks by its ratio (one compressed block covers
@@ -64,7 +63,8 @@ std::vector<CacheGroupSpec> make_normal_composite_specs(
 // base the worker reads as semantic_cols = raw_bt.size(1)
 // (dsa_metadata_builder.cpp), so no worker change is needed.
 std::vector<CacheGroupSpec> make_dsv4_composite_specs(
-    const BlockManagerPool::Options& options) {
+    const BlockManagerPool::Options& options,
+    uint32_t single_res_num_blocks) {
   const uint32_t block_size = static_cast<uint32_t>(options.block_size());
   CHECK_GT(block_size, 0u) << "block_size must be positive for DSV4";
   const uint32_t swa_blocks_per_seq = options.swa_blocks_per_seq();
@@ -73,8 +73,8 @@ std::vector<CacheGroupSpec> make_dsv4_composite_specs(
 
   ModelCacheGroupConfig config;
   config.base_block_size = block_size;
-  // SINGLE_RES is stripped below, so its sizing here is irrelevant.
-  config.single_res_num_blocks = 0;
+  config.single_res_num_blocks = single_res_num_blocks;
+  config.enable_prefix_cache = options.enable_prefix_cache();
 
   const uint32_t max_seqs = std::max(options.max_seqs_per_batch(), 1u);
   const uint32_t burst_blocks =
@@ -94,11 +94,7 @@ std::vector<CacheGroupSpec> make_dsv4_composite_specs(
     config.compress_num_blocks.push_back(options.num_blocks() / ratio);
   }
 
-  std::vector<CacheGroupSpec> specs = build_cache_group_specs(config);
-  CHECK(!specs.empty() && specs.back().state_id == CacheStateId::SINGLE_RES)
-      << "build_cache_group_specs must append SINGLE_RES last";
-  specs.pop_back();
-  return specs;
+  return build_cache_group_specs(config);
 }
 
 // Bind a sequence's device KV state to one composite manager call. The normal
@@ -136,8 +132,6 @@ BlockManagerContext make_bare_device_context(Sequence* sequence,
 BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
     : options_(options) {
   CHECK(dp_size > 0) << "dp_size must be greater than 0";
-  block_managers_.reserve(dp_size);
-  single_block_managers_.reserve(dp_size);
 
   BlockManager::Options block_options;
   block_options.num_blocks(options_.num_blocks())
@@ -162,23 +156,48 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
       options_.num_single_blocks(), max_single_block_sequences + 2);
   CHECK_GT(num_single_blocks, 0u) << "num_single_blocks must be positive";
 
-  // DSV4 (SWA + compressed) is selected by a non-empty manager_types and always
-  // routes through the cache-group composite, in every mode. The normal LLM
-  // path routes through the composite only on the plain device role; its
-  // specialized modes (disagg-PD / kvcache-store / host blocks) stay on
-  // ConcurrentBlockManagerImpl. xtensor is handled separately and never
-  // composite.
+  // The cache-group composite is the only device-side allocation architecture.
+  // The remaining non-composite islands are xtensor (page-allocator semantics)
+  // and the hierarchy host modes (host blocks / kvcache store), which keep the
+  // monolithic managers until the hierarchy refactor (design doc steps 8-10)
+  // lands. DSV4 (selected by a non-empty manager_types) supports neither
+  // island.
   const bool is_dsv4 = !options_.manager_types().empty();
-  const bool normal_device_path =
-      !options_.enable_disagg_pd() && !options_.enable_kvcache_store() &&
-      !options_.enable_host_blocks() && options_.host_num_blocks() == 0;
-  composite_ =
-      !options_.enable_xtensor() && (is_dsv4 || normal_device_path);
+  const bool hierarchy_mode = options_.enable_host_blocks() ||
+                              options_.host_num_blocks() > 0 ||
+                              options_.enable_kvcache_store();
+  composite_ = !options_.enable_xtensor() && !hierarchy_mode;
+  CHECK(!is_dsv4 || composite_)
+      << "DSV4 requires the composite path: xtensor and hierarchy host modes "
+         "do not support SWA/compressed cache groups";
   if (composite_) {
     composite_managers_.reserve(dp_size);
+  } else {
+    block_managers_.reserve(dp_size);
+    // The per-sequence resource pool is a SINGLE_RES cache group inside each
+    // composite manager; only the non-composite islands still need the
+    // standalone SingleBlockManager.
+    single_block_managers_.reserve(dp_size);
   }
 
   for (int32_t i = 0; i < dp_size; ++i) {
+    if (composite_) {
+      // One composite manager per DP rank: DSV4 SWA/C4/C128 + SINGLE_RES, or
+      // the normal/Qwen C1 + SINGLE_RES. Only disagg-PD enters sequence-level
+      // calls from off-scheduler threads (prefill threadpool cache/deallocate,
+      // decode-side handlers), so only that mode pays for the locked subclass.
+      const std::vector<CacheGroupSpec> specs =
+          is_dsv4 ? make_dsv4_composite_specs(options_, num_single_blocks)
+                  : make_normal_composite_specs(options_, num_single_blocks);
+      if (options_.enable_disagg_pd()) {
+        composite_managers_.emplace_back(
+            std::make_unique<ConcurrentCompositeBlockManager>(specs));
+      } else {
+        composite_managers_.emplace_back(
+            std::make_unique<GroupCompositeBlockManager>(specs));
+      }
+      continue;
+    }
     if (options_.enable_xtensor()) {
       // Use XTensorBlockManagerImpl for xtensor mode.
       CHECK_GT(options_.num_layers(), 0)
@@ -198,15 +217,9 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
                                                     page_size,
                                                     /*dp_rank=*/i,
                                                     options_.model_id()));
-    } else if (composite_) {
-      // One composite manager per DP rank: the DSV4 SWA/C4/C128 groups, or the
-      // normal single-C1 group.
-      composite_managers_.emplace_back(
-          std::make_unique<ConcurrentCompositeBlockManager>(
-              is_dsv4 ? make_dsv4_composite_specs(options_)
-                      : make_normal_composite_specs(options_)));
     } else {
-      // Normal model in a specialized mode (disagg-PD / kvcache-store / host).
+      // Hierarchy host modes (host blocks / kvcache store) on the monolithic
+      // manager, until design doc steps 8-10 (composed device/host pools).
       block_managers_.emplace_back(
           std::make_unique<ConcurrentBlockManagerImpl>(block_options));
     }
@@ -223,8 +236,7 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
 }
 
 size_t BlockManagerPool::manager_count() const {
-  return composite_ ? composite_managers_.size()
-                           : block_managers_.size();
+  return composite_ ? composite_managers_.size() : block_managers_.size();
 }
 
 int32_t BlockManagerPool::get_manager_with_max_free_blocks() const {
@@ -235,7 +247,7 @@ int32_t BlockManagerPool::get_manager_with_max_free_blocks() const {
 
   auto free_blocks_at = [this](size_t i) -> size_t {
     return composite_ ? composite_managers_[i]->num_free_blocks()
-                             : block_managers_[i]->num_free_blocks();
+                      : block_managers_[i]->num_free_blocks();
   };
 
   size_t max_index = 0;
@@ -304,12 +316,6 @@ void BlockManagerPool::deallocate(Request* request) {
   }
 }
 
-void BlockManagerPool::deallocate(std::vector<Sequence*>& sequences) {
-  for (auto* sequence : sequences) {
-    deallocate(sequence);
-  }
-}
-
 void BlockManagerPool::deallocate(Sequence* sequence) {
   DCHECK(sequence != nullptr);
   int32_t dp_rank = get_dp_rank(sequence);
@@ -317,10 +323,9 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
   if (composite_) {
     // The composite inserts the final completed blocks into the prefix cache
     // from inside deallocate (the context carries the token view + hash chain),
-    // then releases every group.
+    // then releases every group -- SINGLE_RES included.
     BlockManagerContext context = make_device_context(sequence, dp_rank);
     composite_managers_[dp_rank]->deallocate(&context);
-    deallocate_single_block(sequence, dp_rank);
     sequence->reset();
     return;
   }
@@ -343,29 +348,23 @@ bool BlockManagerPool::allocate(Sequence* sequence) {
   return allocate(sequence, sequence->num_tokens());
 }
 
-bool BlockManagerPool::allocate(std::vector<Sequence*>& sequences) {
-  for (auto* sequence : sequences) {
-    DCHECK(sequence != nullptr);
-    if (!allocate(sequence, sequence->num_tokens())) {
-      // should we gurantee the atomicity of the allocation? all or nothing?
-      return false;
-    }
-  }
-  return true;
+// First scheduling of a sequence on the composite path: no per-group state has
+// been materialized and no legacy flat blocks exist. This is the only point
+// where a prefix match may run -- the composite has no mid-stream re-match
+// (and therefore no block replacement) semantics.
+bool BlockManagerPool::is_first_schedule(Sequence* sequence) const {
+  return sequence->kv_state().groups().empty() &&
+         sequence->kv_state().num_kv_blocks() == 0;
 }
 
 bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   AUTO_COUNTER(allocate_blocks_latency_seconds);
   DCHECK(sequence != nullptr);
   int32_t dp_rank = get_dp_rank(sequence);
-  const bool started_empty = sequence->kv_state().num_kv_blocks() == 0;
-  const bool needs_single_block = !sequence->has_single_block_id();
-  if (needs_single_block && !allocate_single_block(sequence, dp_rank)) {
-    return false;
-  }
 
   if (composite_) {
-    if (options_.enable_prefix_cache() && started_empty) {
+    const bool first_schedule = is_first_schedule(sequence);
+    if (options_.enable_prefix_cache() && first_schedule) {
       // First prefill: restore any cached prefix before growing; growth
       // appends on top of the matched C1 blocks. The lazy flush for subsequent
       // grows (decode / chunked prefill) now happens inside the composite's
@@ -376,16 +375,19 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
     if (!composite_managers_[dp_rank]->allocate(&context, num_tokens)) {
       // Only a fresh sequence is fully unwound; an in-flight decode keeps its
       // existing blocks for the scheduler to preempt (matches the legacy path).
-      if (started_empty) {
+      if (first_schedule) {
         composite_managers_[dp_rank]->deallocate(&context);
-        if (needs_single_block) {
-          deallocate_single_block(sequence, dp_rank);
-        }
         sequence->reset();
       }
       return false;
     }
     return true;
+  }
+
+  const bool started_empty = sequence->kv_state().num_kv_blocks() == 0;
+  const bool needs_single_block = !sequence->has_single_block_id();
+  if (needs_single_block && !allocate_single_block(sequence, dp_rank)) {
+    return false;
   }
 
   // first try to allocate shared blocks
@@ -433,38 +435,18 @@ bool BlockManagerPool::allocate(Sequence* sequence,
   return false;
 }
 
-std::vector<Block> BlockManagerPool::allocate(size_t num_tokens,
-                                              int32_t& dp_rank) {
-  // Raw block vectors have no per-sequence group state, so they have no meaning
-  // on the composite path. No caller hits this on the normal path today.
-  CHECK(!composite_)
-      << "raw allocate(num_tokens, dp_rank) is unsupported on the composite "
-         "path";
-  dp_rank = get_manager_with_max_free_blocks();
-  const size_t block_size = options_.block_size();
-  const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
-  return block_managers_[dp_rank]->allocate(num_blocks_needed);
-}
-
 bool BlockManagerPool::try_allocate(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
-  const bool needs_single_block = !sequence->has_single_block_id();
-  if (needs_single_block && !allocate_single_block(sequence, dp_rank)) {
-    return false;
-  }
 
   if (composite_) {
     BlockManagerContext context = make_device_context(sequence, dp_rank);
-    if (options_.enable_prefix_cache()) {
+    if (options_.enable_prefix_cache() && is_first_schedule(sequence)) {
       composite_managers_[dp_rank]->match_prefix_cache(
           &context, sequence->tokens(), &sequence->mm_data());
     }
     if (!composite_managers_[dp_rank]->allocate(&context,
                                                 sequence->tokens().size())) {
       composite_managers_[dp_rank]->deallocate(&context);
-      if (needs_single_block) {
-        deallocate_single_block(sequence, dp_rank);
-      }
       sequence->reset();
       return false;
     }
@@ -472,6 +454,11 @@ bool BlockManagerPool::try_allocate(Sequence* sequence) {
     // same end-state the legacy path reaches via incr_kv_cache_tokens_num.
     sequence->kv_state().set_kv_cache_tokens_num(sequence->tokens().size());
     return true;
+  }
+
+  const bool needs_single_block = !sequence->has_single_block_id();
+  if (needs_single_block && !allocate_single_block(sequence, dp_rank)) {
+    return false;
   }
 
   std::vector<Block> shared_blocks;
@@ -549,6 +536,13 @@ void BlockManagerPool::allocate_shared(Sequence* sequence) {
   }
   int32_t dp_rank = get_dp_rank(sequence);
   if (composite_) {
+    // Prefix match runs exactly once, on the sequence's first scheduling.
+    // A mid-stream re-match (e.g. the chunked-prefill scheduler's periodic
+    // allocate_shared) would have to replace blocks the sequence already
+    // computed; the composite path deliberately has no such semantics.
+    if (!is_first_schedule(sequence)) {
+      return;
+    }
     composite_match_shared(sequence, dp_rank);
     return;
   }
@@ -612,7 +606,7 @@ float BlockManagerPool::get_gpu_cache_usage_perc() const {
   float perc = 0.0;
   for (size_t i = 0; i < count; ++i) {
     perc += composite_ ? composite_managers_[i]->kv_cache_utilization()
-                              : block_managers_[i]->kv_cache_utilization();
+                       : block_managers_[i]->kv_cache_utilization();
   }
   return perc / count;
 }
@@ -643,7 +637,7 @@ std::vector<size_t> BlockManagerPool::num_free_blocks() const {
   for (size_t dp_rank = 0; dp_rank < manager_count(); ++dp_rank) {
     num_free_blocks[dp_rank] =
         composite_ ? composite_managers_[dp_rank]->num_free_blocks()
-                          : block_managers_[dp_rank]->num_free_blocks();
+                   : block_managers_[dp_rank]->num_free_blocks();
   }
   return num_free_blocks;
 }
@@ -653,7 +647,7 @@ std::vector<size_t> BlockManagerPool::num_used_blocks() const {
   for (size_t dp_rank = 0; dp_rank < manager_count(); ++dp_rank) {
     num_used_blocks[dp_rank] =
         composite_ ? composite_managers_[dp_rank]->num_used_blocks()
-                          : block_managers_[dp_rank]->num_used_blocks();
+                   : block_managers_[dp_rank]->num_used_blocks();
   }
   return num_used_blocks;
 }
@@ -676,7 +670,6 @@ void BlockManagerPool::deallocate_without_cache(Sequence* sequence) {
     // insert is skipped and uncomputed blocks are never cached.
     BlockManagerContext context = make_bare_device_context(sequence, dp_rank);
     composite_managers_[dp_rank]->deallocate(&context);
-    deallocate_single_block(sequence, dp_rank);
     sequence->reset();
     return;
   }

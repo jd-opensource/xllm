@@ -30,7 +30,6 @@ class KVCacheManager {
   virtual ~KVCacheManager() = default;
 
   virtual bool allocate(Sequence* sequence) = 0;
-  virtual bool allocate(std::vector<Sequence*>& sequences) = 0;
   virtual bool allocate(Sequence* sequence, size_t num_tokens) = 0;
   virtual bool try_allocate(Sequence* sequence) = 0;
 
@@ -44,13 +43,11 @@ class KVCacheManager {
     return true;
   };
 
-  virtual std::vector<Block> allocate(size_t num_tokens, int32_t& dp_rank) = 0;
   virtual bool allocate(Sequence* sequence,
                         size_t num_tokens,
                         size_t needed_copy_in_blocks_num) = 0;
 
   virtual void deallocate(Request* request) = 0;
-  virtual void deallocate(std::vector<Sequence*>& sequences) = 0;
   virtual void deallocate(Sequence* sequence) = 0;
 
   virtual void allocate_shared(Sequence* sequence) = 0;

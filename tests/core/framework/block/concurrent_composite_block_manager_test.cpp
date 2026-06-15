@@ -76,7 +76,8 @@ TEST(ConcurrentCompositeBlockManagerTest, ForwardsSequenceLevelCalls) {
   EXPECT_EQ(manager.num_groups(), 2u);
   EXPECT_EQ(manager.group_free_blocks(CacheStateId::C1), 9u);
   EXPECT_EQ(manager.group_free_blocks(CacheStateId::SINGLE_RES), 3u);
-  EXPECT_EQ(manager.num_free_blocks(), 12u);
+  // Schedulable capacity is the C1 pool alone; SINGLE_RES never joins it.
+  EXPECT_EQ(manager.num_free_blocks(), 9u);
 
   KVCacheState kv_state;
   BlockManagerContext context;
@@ -88,7 +89,7 @@ TEST(ConcurrentCompositeBlockManagerTest, ForwardsSequenceLevelCalls) {
 
   manager.deallocate(&context);
   EXPECT_TRUE(kv_state.groups().empty());
-  EXPECT_EQ(manager.num_free_blocks(), 12u);
+  EXPECT_EQ(manager.num_free_blocks(), 9u);
 }
 
 // The wrapper serializes allocate/deallocate (which insert internally) and
@@ -133,9 +134,10 @@ TEST(ConcurrentCompositeBlockManagerTest, ForwardsBlockAccounting) {
       {make_cacheable_c1_spec(/*num_blocks=*/16),
        make_single_res_spec(/*num_blocks=*/4)});
 
-  // Padding blocks excluded from total and uncounted as used; 15 + 3 usable,
-  // nothing cached yet.
-  EXPECT_EQ(manager.num_total_blocks(), 18u);
+  // num_total / num_used count the schedulable C1 pool only (its padding block
+  // excluded -> 15 usable), never the SINGLE_RES resource pool; nothing cached
+  // yet.
+  EXPECT_EQ(manager.num_total_blocks(), 15u);
   EXPECT_EQ(manager.num_used_blocks(), 0u);
   EXPECT_EQ(manager.num_blocks_in_prefix_cache(), 0u);
   EXPECT_EQ(manager.kv_cache_utilization(), 0.0);
@@ -147,8 +149,10 @@ TEST(ConcurrentCompositeBlockManagerTest, ForwardsBlockAccounting) {
   context.kv_state = &kv_state;
   context.tokens = Slice<int32_t>(tokens);
   context.hash_state = &hash_state;
+  // Only the 3 C1 blocks are charged to used; the per-sequence SINGLE_RES block
+  // is outside the schedulable KV accounting.
   ASSERT_TRUE(manager.allocate(&context, /*num_tokens=*/3 * kBlockSize));
-  EXPECT_EQ(manager.num_used_blocks(), 4u);
+  EXPECT_EQ(manager.num_used_blocks(), 3u);
 
   // The committed blocks reach the prefix cache via the next allocate's lazy
   // insert.
@@ -172,8 +176,9 @@ TEST(ConcurrentCompositeBlockManagerTest,
       {make_c1_spec(/*num_blocks=*/64),
        make_single_res_spec(/*num_blocks=*/32)});
 
+  // num_free_blocks reports the C1 pool only.
   const size_t baseline_free = manager.num_free_blocks();
-  ASSERT_EQ(baseline_free, 63u + 31u);
+  ASSERT_EQ(baseline_free, 63u);
 
   std::vector<std::thread> workers;
   workers.reserve(kThreads);

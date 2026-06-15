@@ -25,6 +25,7 @@ namespace {
 // cache. Appended last so it never disturbs the block_tables / multi_block_-
 // tables export order of the attention groups.
 CacheGroupSpec make_single_res_spec(uint32_t num_blocks) {
+  CHECK_GT(num_blocks, 0u) << "single_res_num_blocks must be positive";
   CacheGroupSpec spec;
   spec.state_id = CacheStateId::SINGLE_RES;
   spec.policy_type = CachePolicyType::PER_SEQUENCE_ONCE;
@@ -139,11 +140,13 @@ std::vector<CacheGroupSpec> build_cache_group_specs(
     }
   } else {
     // Normal and Qwen3.5+ share the C1 + SINGLE_RES shape; they differ only in
-    // whether C1 participates in prefix caching.
-    specs.push_back(
-        make_c1_spec(config.base_block_size,
-                     config.c1_num_blocks,
-                     /*prefix_cacheable=*/!config.has_linear_state));
+    // whether C1 participates in prefix caching. A linear-state model must
+    // never cache: a C1 hit that skips prefill strands the unrecoverable
+    // recurrent state.
+    specs.push_back(make_c1_spec(config.base_block_size,
+                                 config.c1_num_blocks,
+                                 /*prefix_cacheable=*/config.enable_prefix_cache &&
+                                     !config.has_linear_state));
   }
 
   specs.push_back(make_single_res_spec(config.single_res_num_blocks));

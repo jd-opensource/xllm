@@ -357,8 +357,9 @@ TEST(BlockManagerPoolTest, SequenceCopyDoesNotReuseSingleBlockSlot) {
 }
 
 // --- Composite-path BlockManagerPool (block-manager refactor) ---
-// The normal-model pool now routes through ConcurrentCompositeBlockManager (a
-// single C1 group) instead of the legacy BlockManagerImpl. These tests pin the
+// The normal-model pool now routes through GroupCompositeBlockManager (C1 +
+// SINGLE_RES groups; the locked ConcurrentCompositeBlockManager subclass only
+// under disagg-PD) instead of the legacy BlockManagerImpl. These tests pin the
 // integration the pool owns on top of the per-manager unit tests: path routing,
 // allocate/deallocate accounting (with the prefix-cache insert now internal to
 // the composite), and the cross-sequence prefix match plus whole-prompt
@@ -500,6 +501,35 @@ TEST(BlockManagerPoolCompositeTest,
   ASSERT_TRUE(pool.allocate(&seq, /*num_tokens=*/20));
   EXPECT_EQ(pool.num_used_blocks()[0], 5u);
   EXPECT_EQ(pool.num_blocks_in_prefix_cache()[0], 3u);
+}
+
+TEST(BlockManagerPoolCompositeTest, AllocateSharedOnlyMatchesOnFirstSchedule) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
+
+  BlockManagerPool pool(CompositeOptions(/*num_blocks=*/32), /*dp_size=*/1);
+
+  // Seed the prefix cache with the full prompt.
+  Sequence seq_a = MakeSequence(0, CompositePrompt());
+  ASSERT_TRUE(pool.allocate(&seq_a));
+  seq_a.kv_state().set_kv_cache_tokens_num(seq_a.num_tokens());
+  pool.deallocate(&seq_a);
+  ASSERT_EQ(pool.num_blocks_in_prefix_cache()[0], 3u);
+
+  // First scheduling: allocate_shared matches (with whole-prompt back-off).
+  Sequence seq_b = MakeSequence(1, CompositePrompt());
+  pool.allocate_shared(&seq_b);
+  ASSERT_EQ(seq_b.kv_state().kv_cache_tokens_num(), 8u);
+
+  // The sequence now holds blocks: a second allocate_shared (the chunked
+  // prefill scheduler issues these every round) must be a no-op rather than a
+  // re-match -- the composite path has no block-replacement semantics.
+  pool.allocate_shared(&seq_b);
+  EXPECT_EQ(seq_b.kv_state().kv_cache_tokens_num(), 8u);
+  CacheGroupState* c1 = seq_b.kv_state().group_state(CacheStateId::C1);
+  ASSERT_NE(c1, nullptr);
+  EXPECT_EQ(c1->shared_blocks_num, 2u);
+  EXPECT_EQ(c1->blocks.size(), 2u);
 }
 
 TEST(BlockManagerPoolCompositeTest, DeallocateWithoutCacheReleasesEverything) {

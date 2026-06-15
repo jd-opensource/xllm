@@ -61,57 +61,65 @@ struct CacheGroupRuntime {
 //
 // This class is NOT internally synchronized: the bare orchestrator is used on
 // the single-threaded scheduler path. Modes with concurrent sequence-level
-// entry (disagg PD, kvcache store, host) wrap it in ConcurrentCompositeBlock-
-// Manager. The leaf allocators are independently thread-safe, so the free path
-// (Block destructors -> allocator->free()) never needs this layer.
-class GroupCompositeBlockManager final {
+// entry (disagg PD) use the ConcurrentCompositeBlockManager subclass, which
+// overrides the sequence-level entries with a lock. The leaf allocators are
+// independently thread-safe, so the free path (Block destructors ->
+// allocator->free()) never needs this layer.
+class GroupCompositeBlockManager {
  public:
   explicit GroupCompositeBlockManager(const std::vector<CacheGroupSpec>& specs);
   // Out-of-line: the unique_ptr members hold forward-declared types whose full
   // definitions are only visible in the translation unit.
-  ~GroupCompositeBlockManager();
+  virtual ~GroupCompositeBlockManager();
 
   // Grow every group to cover `num_tokens` committed tokens for the sequence
   // bound by `context`. Returns false (and leaves all groups unchanged) when
   // any single group cannot satisfy the request. Concurrent calls must be
-  // serialized by the caller (see ConcurrentCompositeBlockManager).
-  bool allocate(BlockManagerContext* context, size_t num_tokens);
+  // serialized by the caller or by the concurrent subclass.
+  virtual bool allocate(BlockManagerContext* context, size_t num_tokens);
 
   // Release every group held by the sequence bound by `context`.
-  void deallocate(BlockManagerContext* context);
+  virtual void deallocate(BlockManagerContext* context);
 
   // Match `tokens` against the group-local prefix caches, attaching each
   // group's shared blocks to the sequence's per-group state and returning the
-  // common restorable prefix. Lazily materializes the per-group state vector so
-  // the policy always sees its cacheable groups. `tokens` is the full prompt;
-  // for text-only sequences `mm_data` is null.
-  CompositeMatchResult match_prefix_cache(BlockManagerContext* context,
-                                          const Slice<int32_t>& tokens,
-                                          const MMData* mm_data = nullptr);
+  // common restorable prefix. Must run on the sequence's FIRST scheduling,
+  // before any allocation: there is no mid-stream re-match/replacement on the
+  // composite path. Lazily materializes the per-group state vector so the
+  // policy always sees its cacheable groups. `tokens` is the full prompt; for
+  // text-only sequences `mm_data` is null.
+  virtual CompositeMatchResult match_prefix_cache(BlockManagerContext* context,
+                                                  const Slice<int32_t>& tokens,
+                                                  const MMData* mm_data =
+                                                      nullptr);
 
   size_t num_groups() const { return runtimes_.size(); }
 
-  // Total free blocks summed across all group allocators.
-  size_t num_free_blocks() const;
+  // Schedulable capacity in base-block units, following the capacity rules of
+  // the design doc: a C1 group contributes its own free blocks; otherwise
+  // (DSV4) the binding constraint is min over the compressed incremental
+  // groups of free_blocks * compress_ratio. SWA (windowed replacement) and
+  // SINGLE_RES (per-sequence once) never join token-linear admission.
+  virtual size_t num_free_blocks() const;
 
   // Free blocks of the allocator backing `state_id`; 0 when absent.
-  size_t group_free_blocks(CacheStateId state_id) const;
+  virtual size_t group_free_blocks(CacheStateId state_id) const;
 
   // Blocks currently held out of the free list, summed across all group
   // allocators -- the composite's contribution to pool-level memory accounting.
-  size_t num_used_blocks() const;
+  virtual size_t num_used_blocks() const;
 
   // Total blocks owned across all group allocators.
-  size_t num_total_blocks() const;
+  virtual size_t num_total_blocks() const;
 
   // Blocks currently retained by the group-local prefix caches. The leaf
   // allocators run with prefix cache disabled, so this cached-block metric is
   // recovered here from each cacheable group's PrefixCache (the C1 entry for
   // normal models). Scheduler update_metrics paths read it.
-  size_t num_blocks_in_prefix_cache() const;
+  virtual size_t num_blocks_in_prefix_cache() const;
 
   // Fraction of owned blocks currently in use, in [0, 1]; 0 when empty.
-  double kv_cache_utilization() const;
+  virtual double kv_cache_utilization() const;
 
  private:
   // Lazily size `kv_state`'s per-group state vector to match runtimes_,
