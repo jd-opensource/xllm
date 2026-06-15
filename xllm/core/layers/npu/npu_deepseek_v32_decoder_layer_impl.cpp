@@ -1050,7 +1050,15 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 30) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_index_cache());
 
-  if (input_params.attention.device.q_seq_lens.numel() != 0) {
+  const bool empty_eager_batch =
+      !input_params.enable_graph && input_params.meta.num_sequences == 0;
+  const bool empty_graph_batch =
+      input_params.enable_graph && input_params.meta.actual_num_sequences == 0;
+  const bool empty_batch = empty_eager_batch || empty_graph_batch;
+  const bool use_q_cu_seq_lens =
+      !empty_batch && input_params.attention.device.q_cu_seq_lens.defined() &&
+      input_params.attention.device.q_cu_seq_lens.numel() != 0;
+  if (use_q_cu_seq_lens) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 31) =
         atb_speed::Utils::AtTensor2Tensor(
             input_params.attention.device.q_cu_seq_lens);
