@@ -158,12 +158,12 @@ DcuGraphPersistentParam::DcuGraphPersistentParam(
       0, max_seqs_per_batch + 1, torch::dtype(torch::kInt32).device(device));
 }
 
-std::optional<ModelInputParams> DcuGraphPersistentParam::update(
+std::optional<ForwardInput> DcuGraphPersistentParam::update(
     const torch::Tensor& tokens,
     const torch::Tensor& positions,
-    const ModelInputParams& params,
+    const ForwardInput& params,
     uint32_t padded_num_tokens,
-    bool return_capture_params,
+    bool return_capture_input,
     uint32_t graph_max_seq_len) {
   const uint32_t actual_num_tokens =
       static_cast<uint32_t>(tokens.size(/*dim=*/0));
@@ -177,9 +177,9 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
 
   const uint32_t padding_needed = padded_num_tokens - actual_num_tokens;
 
-  std::optional<ModelInputParams> params_for_capture;
-  if (return_capture_params) {
-    params_for_capture = std::make_optional<ModelInputParams>(params);
+  std::optional<ForwardInput> input_for_capture;
+  if (return_capture_input) {
+    input_for_capture = std::make_optional<ForwardInput>(params);
   }
 
   std::shared_ptr<layer::AttentionMetadata> attn_metadata =
@@ -197,38 +197,38 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
   }
 
   const auto build_capture_params_if_needed =
-      [&]() -> std::optional<ModelInputParams> {
-    if (!return_capture_params) {
+      [&]() -> std::optional<ForwardInput> {
+    if (!return_capture_input) {
       return std::nullopt;
     }
 
-    CHECK(params_for_capture.has_value())
-        << "params_for_capture should exist when return_capture_params=true";
+    CHECK(input_for_capture.has_value())
+        << "input_for_capture should exist when return_capture_input=true";
 
-    params_for_capture->enable_graph = true;
-    params_for_capture->attn_metadata = attn_metadata;
+    input_for_capture->enable_graph = true;
+    input_for_capture->attn_metadata = attn_metadata;
 
-    params_for_capture->attention.device.q_seq_lens =
+    input_for_capture->attention.device.q_seq_lens =
         attn_metadata->q_cu_seq_lens;
-    params_for_capture->attention.device.kv_seq_lens =
+    input_for_capture->attention.device.kv_seq_lens =
         attn_metadata->kv_cu_seq_lens;
-    params_for_capture->attention.device.new_cache_slots =
+    input_for_capture->attention.device.new_cache_slots =
         attn_metadata->slot_mapping;
-    params_for_capture->attention.device.block_tables =
+    input_for_capture->attention.device.block_tables =
         attn_metadata->block_table;
-    params_for_capture->attention.device.paged_kv_indptr =
+    input_for_capture->attention.device.paged_kv_indptr =
         attn_metadata->paged_kv_indptr;
-    params_for_capture->attention.device.paged_kv_indices =
+    input_for_capture->attention.device.paged_kv_indices =
         attn_metadata->paged_kv_indices;
-    params_for_capture->attention.device.paged_kv_last_page_len =
+    input_for_capture->attention.device.paged_kv_last_page_len =
         attn_metadata->paged_kv_last_page_len;
 
     if (params.embedding.input_embedding.defined()) {
-      params_for_capture->embedding.input_embedding =
+      input_for_capture->embedding.input_embedding =
           input_embeds_.slice(0, 0, padded_num_tokens);
     }
 
-    return params_for_capture;
+    return input_for_capture;
   };
 
   tokens_.slice(0, 0, actual_num_tokens).copy_(tokens, /*non_blocking=*/true);
@@ -421,7 +421,7 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
 void DcuGraphPersistentParam::update_decode_input_buffer(
     const torch::Tensor& tokens,
     const torch::Tensor& positions,
-    const ModelInputParams& params,
+    const ForwardInput& params,
     uint32_t padded_num_tokens) {
   const uint32_t actual_num_tokens =
       static_cast<uint32_t>(tokens.size(/*dim=*/0));
@@ -547,15 +547,15 @@ void DcuGraphPersistentParam::update_decode_input_buffer(
   }
 }
 
-ModelInputParams DcuGraphPersistentParam::init_decode_params(
+ForwardInput DcuGraphPersistentParam::init_decode_params(
     const torch::Tensor& tokens,
     const torch::Tensor& positions,
-    const ModelInputParams& params,
+    const ForwardInput& params,
     uint32_t padded_num_tokens,
     uint32_t graph_max_seq_len) {
   update_decode_input_buffer(tokens, positions, params, padded_num_tokens);
 
-  ModelInputParams decode_params = params;
+  ForwardInput decode_params = params;
   decode_params.enable_graph = true;
   decode_params.attention.device.q_seq_lens = q_seq_lens(padded_num_tokens + 1);
   decode_params.attention.device.kv_seq_lens =
@@ -661,7 +661,7 @@ bool DcuGraph::capture(CausalLM* model,
                        const runtime::Options& options,
                        const torch::Tensor& tokens,
                        const torch::Tensor& positions,
-                       const ModelInputParams& params,
+                       const ForwardInput& params,
                        std::vector<KVCache>& kv_cache,
                        uint32_t bucket_num_tokens,
                        const at::hip::MempoolId_t& pool,
@@ -688,13 +688,13 @@ bool DcuGraph::capture(CausalLM* model,
   std::optional<c10::hip::HIPStreamGuard> stream_guard;
   stream_guard.emplace(capture_stream);
 
-  std::optional<ModelInputParams> graph_params_opt;
+  std::optional<ForwardInput> graph_params_opt;
   if (is_piecewise_) {
     graph_params_opt = persistent_param_.update(tokens,
                                                 positions,
                                                 params,
                                                 padded_num_tokens_,
-                                                /*return_capture_params=*/true,
+                                                /*return_capture_input=*/true,
                                                 graph_max_seq_len);
   } else {
     graph_params_opt = persistent_param_.init_decode_params(
@@ -702,8 +702,13 @@ bool DcuGraph::capture(CausalLM* model,
   }
 
   CHECK(graph_params_opt.has_value())
-      << "DcuGraphPersistentParam::update should return ModelInputParams "
+      << "DcuGraphPersistentParam::update should return ForwardInput "
          "during capture";
+  ForwardInput graph_input = graph_params_opt.value();
+  graph_input.token_ids =
+      persistent_param_.persistent_tokens(padded_num_tokens_);
+  graph_input.positions =
+      persistent_param_.persistent_positions(padded_num_tokens_);
 
   VLOG(1) << "DCU graph capture begin, bucket_num_tokens=" << bucket_num_tokens
           << ", actual_num_tokens=" << actual_num_tokens
@@ -713,20 +718,13 @@ bool DcuGraph::capture(CausalLM* model,
   if (is_piecewise_) {
     // Warmup: execute forward once without capture to initialize hipBLAS
     // handles and other HIP resources that cannot be created during capture.
-    model->forward(persistent_param_.persistent_tokens(padded_num_tokens_),
-                   persistent_param_.persistent_positions(padded_num_tokens_),
-                   kv_cache,
-                   graph_params_opt.value());
+    model->forward(graph_input, kv_cache);
 
     auto& capture = ::xllm::runtime::dcu::GlobalCaptureInstance::get_instance();
 
     capture.begin_capture(pool);
 
-    auto forward_result = model->forward(
-        persistent_param_.persistent_tokens(padded_num_tokens_),
-        persistent_param_.persistent_positions(padded_num_tokens_),
-        kv_cache,
-        graph_params_opt.value());
+    auto forward_result = model->forward(graph_input, kv_cache);
 
     persistent_param_.set_hidden_states(forward_result.hidden_states);
 
@@ -741,11 +739,7 @@ bool DcuGraph::capture(CausalLM* model,
   } else {
     graph_.capture_begin(pool, hipStreamCaptureModeThreadLocal);
 
-    auto forward_result = model->forward(
-        persistent_param_.persistent_tokens(padded_num_tokens_),
-        persistent_param_.persistent_positions(padded_num_tokens_),
-        kv_cache,
-        graph_params_opt.value());
+    auto forward_result = model->forward(graph_input, kv_cache);
 
     persistent_param_.set_hidden_states(forward_result.hidden_states);
 
@@ -769,7 +763,7 @@ bool DcuGraph::capture(CausalLM* model,
 ModelOutput DcuGraph::replay(const torch::Tensor& tokens,
                              const torch::Tensor& positions,
                              std::vector<KVCache>& kv_cache,
-                             const ModelInputParams& params) {
+                             const ForwardInput& params) {
   const uint32_t actual_num_tokens =
       static_cast<uint32_t>(tokens.size(/*dim=*/0));
 
@@ -782,13 +776,13 @@ ModelOutput DcuGraph::replay(const torch::Tensor& tokens,
                                  positions,
                                  params,
                                  padded_num_tokens_,
-                                 /*return_capture_params=*/true,
+                                 /*return_capture_input=*/true,
                                  graph_max_seq_len_);
 
     CHECK(piecewise_graph_ != nullptr)
         << "piecewise_graph_ should not be null for piecewise replay";
     CHECK(updated_params.has_value())
-        << "update() should return ModelInputParams for piecewise replay";
+        << "update() should return ForwardInput for piecewise replay";
     CHECK(updated_params->attn_metadata)
         << "attn_metadata is required for piecewise replay";
 
@@ -929,10 +923,11 @@ DcuStream DcuGraphExecutorImpl::get_capture_stream(
   return thread_capture_stream;
 }
 
-ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
-                                      const torch::Tensor& positions,
-                                      std::vector<KVCache>& kv_caches,
-                                      const ModelInputParams& params) {
+ModelOutput DcuGraphExecutorImpl::run(const ForwardInput& input,
+                                      std::vector<KVCache>& kv_caches) {
+  const torch::Tensor& tokens = input.token_ids;
+  const torch::Tensor& positions = input.positions;
+  const ForwardInput& params = input;
   const bool is_prefill = params.meta.batch_forward_type.is_prefill();
   const bool is_decode = params.meta.batch_forward_type.is_decode();
 
@@ -974,7 +969,7 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
               << " exceeds max_tokens_for_graph_mode ("
               << max_tokens_for_graph_mode_ << "), falling back to eager";
       COUNTER_INC(num_model_execution_total_eager);
-      return model_->forward(tokens, positions, kv_caches, params);
+      return model_->forward(input, kv_caches);
     }
     const uint32_t bucket_num_tokens = actual_num_tokens;
     const uint32_t local_actual_tokens =
@@ -1018,7 +1013,7 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
                    << "bucket_num_tokens=" << bucket_num_tokens
                    << ". Falling back to eager.";
       COUNTER_INC(num_model_execution_total_eager);
-      return model_->forward(tokens, positions, kv_caches, params);
+      return model_->forward(input, kv_caches);
     }
 
     prefill_graphs_[bucket_num_tokens] = std::move(graph);
@@ -1034,14 +1029,14 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
 
   if (!graph_mode || is_prefill) {
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(input, kv_caches);
   }
 
   if (params.has_llmrec_params()) {
     VLOG(1) << "DCU graph does not support LLMRec/xAttention yet; "
             << "falling back to eager.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(input, kv_caches);
   }
 
   const int64_t max_seq_len = args_.max_position_embeddings();
@@ -1051,7 +1046,7 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
                  << ", max_seq_len=" << max_seq_len
                  << ". Falling back to eager.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(input, kv_caches);
   }
 
   const uint32_t bucket_num_tokens = get_bucket_num_tokens(actual_num_tokens);
@@ -1097,7 +1092,7 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
     LOG(WARNING) << "Failed to capture DCU graph for bucket_num_tokens="
                  << bucket_num_tokens << ". Falling back to eager.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(input, kv_caches);
   }
 
   graphs_[graph_shape_id] = std::move(graph);

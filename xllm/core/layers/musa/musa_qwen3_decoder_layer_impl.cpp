@@ -18,6 +18,7 @@ limitations under the License.
 #include "attention.h"
 #include "layers/common/rotary_embedding.h"
 #include "musa_mlp.h"
+#include "runtime/forward_params.h"
 
 namespace xllm::layer {
 
@@ -53,13 +54,13 @@ torch::Tensor Qwen3DecoderLayerImpl::forward(
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
-    const ModelInputParams& input_params) {
+    const ForwardInput& input) {
   // torch::Tensor k_cache = kv_cache.get_k_cache();
   // k_cache = k_cache.view({-1, k_cache.size(1) * 8,  k_cache.size(2)});
   // torch::Tensor v_cache = kv_cache.get_v_cache();
   // v_cache = v_cache.view({-1, v_cache.size(1) * 8,  v_cache.size(2)});
 
-  ForwardParams f{positions, attn_metadata, kv_cache, input_params};
+  ForwardParams f{positions, attn_metadata, kv_cache, input.attention};
 
   for (auto&& mod : layers_) {
     x = mod->forward(x, f);

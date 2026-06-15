@@ -1100,13 +1100,13 @@ torch::Tensor FusedMoEImpl::forward_expert(
 }
 
 torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
-                                    const ModelInputParams& input_params) {
+                                    const ParallelInput& parallel_input) {
   auto input = hidden_states;
   bool need_slice = false;
   if (should_gather_dp_inputs_for_moe()) {
     input = parallel_state::gather(input,
                                    parallel_args_.dp_local_process_group_,
-                                   input_params.parallel.dp_global_token_nums);
+                                   parallel_input.dp_global_token_nums);
     need_slice = true;
   }
 
@@ -1127,7 +1127,7 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
   auto output = forward_expert(input, router_logits, shared_output);
 
   if (need_slice) {
-    const auto& dp_tokens = input_params.parallel.dp_global_token_nums;
+    const auto& dp_tokens = parallel_input.dp_global_token_nums;
     const int64_t dp_rank = parallel_args_.dp_local_process_group_->rank();
     auto start =
         std::accumulate(dp_tokens.begin(), dp_tokens.begin() + dp_rank, 0);
@@ -1142,7 +1142,7 @@ bool FusedMoEImpl::should_gather_dp_inputs_for_moe() const {
 }
 
 bool FusedMoEImpl::can_use_ep2_dispatch_combine(
-    const ModelInputParams& input_params,
+    const ForwardInput& input,
     const torch::Tensor& hidden_states) const {
   if (!enable_ep2_dispatch_combine_) {
     return false;
@@ -1163,7 +1163,7 @@ bool FusedMoEImpl::can_use_ep2_dispatch_combine(
   }
   const int32_t mode = fused_mc2_mode();
   if (mode == 1) {
-    if (input_params.enable_graph && !dispatch_ffn_combine_prepared_) {
+    if (input.enable_graph && !dispatch_ffn_combine_prepared_) {
       return false;
     }
     return is_w8a8_dynamic_quant_method(resolved_moe_quant_method_) &&
@@ -1171,11 +1171,11 @@ bool FusedMoEImpl::can_use_ep2_dispatch_combine(
            w2_is_loaded_ && w13_scale_is_loaded_ && w2_scale_is_loaded_ &&
            hidden_act_ == xllm::kernel::kActModeSilu && is_gated_;
   }
-  if (!all_dp_ranks_are_decode(input_params)) {
+  if (!all_dp_ranks_are_decode(input.parallel)) {
     return false;
   }
   if (mode == 2) {
-    if (input_params.enable_graph && !dispatch_gmm_combine_decode_prepared_) {
+    if (input.enable_graph && !dispatch_gmm_combine_decode_prepared_) {
       return false;
     }
     return is_w8a8_dynamic_quant_method(resolved_moe_quant_method_) &&
@@ -1371,7 +1371,7 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
     const torch::Tensor& hidden_states,
     const torch::Tensor& topk_weights,
     const torch::Tensor& topk_ids,
-    const ModelInputParams& input_params) {
+    const ForwardInput& input) {
   prepare_dispatch_ffn_combine_inputs();
   prepare_dispatch_gmm_combine_decode_inputs();
 
@@ -1392,7 +1392,7 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
   const auto ep_rank_id = parallel_args_.moe_ep_group_->rank();
   int64_t global_bs = input_2d.size(0) * ep_world_size;
   if (parallel_args_.dp_size() > 1 &&
-      !input_params.parallel.dp_global_token_nums.empty()) {
+      !input.parallel.dp_global_token_nums.empty()) {
     // The dispatch/combine operators accept 0 as auto global batch size.
     // Explicit sums are wrong for uneven DP batches such as graph warmup with
     // one active DP rank and one empty DP rank.
@@ -1572,18 +1572,18 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts(
     const torch::Tensor& hidden_states,
     const torch::Tensor& topk_weights,
     const torch::Tensor& topk_ids,
-    const ModelInputParams& input_params) {
-  torch::Tensor input = hidden_states;
+    const ForwardInput& input) {
+  torch::Tensor moe_input = hidden_states;
   torch::Tensor selected_topk_weights = topk_weights;
   torch::Tensor selected_topk_ids = topk_ids;
-  if (can_use_ep2_dispatch_combine(input_params, input)) {
+  if (can_use_ep2_dispatch_combine(input, moe_input)) {
     std::optional<torch::Tensor> shared_output = std::nullopt;
     if (n_shared_experts_ > 0) {
-      shared_output = shared_experts_(input);
+      shared_output = shared_experts_(moe_input);
       if (should_apply_shared_expert_gate(shared_expert_gate_,
                                           is_deepseek_v4_,
                                           shared_expert_gate_is_loaded_)) {
-        auto gate = torch::sigmoid(shared_expert_gate_->forward(input));
+        auto gate = torch::sigmoid(shared_expert_gate_->forward(moe_input));
         if (shared_output.has_value()) {
           torch::Tensor res = gate * shared_output.value();
           shared_output = res;
@@ -1591,7 +1591,7 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts(
       }
     }
     auto output = forward_with_selected_experts_ep2(
-        input, selected_topk_weights, selected_topk_ids, input_params);
+        moe_input, selected_topk_weights, selected_topk_ids, input);
     if (shared_output.has_value()) {
       output = output + shared_output.value();
     }
@@ -1600,21 +1600,21 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts(
 
   bool need_slice = false;
   if (should_gather_dp_inputs_for_moe()) {
-    input = parallel_state::gather(input,
-                                   parallel_args_.dp_local_process_group_,
-                                   input_params.parallel.dp_global_token_nums);
+    moe_input = parallel_state::gather(moe_input,
+                                       parallel_args_.dp_local_process_group_,
+                                       input.parallel.dp_global_token_nums);
     selected_topk_weights =
         parallel_state::gather(selected_topk_weights,
                                parallel_args_.dp_local_process_group_,
-                               input_params.parallel.dp_global_token_nums);
+                               input.parallel.dp_global_token_nums);
     selected_topk_ids =
         parallel_state::gather(selected_topk_ids,
                                parallel_args_.dp_local_process_group_,
-                               input_params.parallel.dp_global_token_nums);
+                               input.parallel.dp_global_token_nums);
     need_slice = true;
   }
 
-  int64_t hidden_rows = input.reshape({-1, input.size(-1)}).size(0);
+  int64_t hidden_rows = moe_input.reshape({-1, moe_input.size(-1)}).size(0);
   torch::Tensor weights_2d = selected_topk_weights.reshape({-1, topk_});
   torch::Tensor ids_2d = selected_topk_ids.reshape({-1, topk_});
   CHECK_EQ(weights_2d.size(0), hidden_rows)
@@ -1624,16 +1624,17 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts(
       << "topk_ids token count mismatch, expected " << hidden_rows << ", got "
       << ids_2d.size(0);
 
-  preselected_experts_ =
-      std::make_pair(weights_2d.to(input.dtype()), ids_2d.to(torch::kInt32));
+  preselected_experts_ = std::make_pair(weights_2d.to(moe_input.dtype()),
+                                        ids_2d.to(torch::kInt32));
 
   std::optional<torch::Tensor> shared_output = std::nullopt;
   if (n_shared_experts_ > 0) {
-    shared_output = shared_experts_(input);
+    shared_output = shared_experts_(moe_input);
     if (should_apply_shared_expert_gate(shared_expert_gate_,
                                         is_deepseek_v4_,
                                         shared_expert_gate_is_loaded_)) {
-      torch::Tensor gate = torch::sigmoid(shared_expert_gate_->forward(input));
+      torch::Tensor gate =
+          torch::sigmoid(shared_expert_gate_->forward(moe_input));
       if (shared_output.has_value()) {
         torch::Tensor res = gate * shared_output.value();
         shared_output = res;
@@ -1641,15 +1642,15 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts(
     }
   }
 
-  std::vector<int64_t> router_shape = input.sizes().vec();
+  std::vector<int64_t> router_shape = moe_input.sizes().vec();
   router_shape.back() = num_total_experts_;
-  torch::Tensor router_logits = torch::empty(router_shape, input.options());
-  torch::Tensor output = forward_expert(input, router_logits, shared_output);
+  torch::Tensor router_logits = torch::empty(router_shape, moe_input.options());
+  torch::Tensor output =
+      forward_expert(moe_input, router_logits, shared_output);
   preselected_experts_ = std::nullopt;
 
   if (need_slice) {
-    const std::vector<int32_t>& dp_tokens =
-        input_params.parallel.dp_global_token_nums;
+    const std::vector<int32_t>& dp_tokens = input.parallel.dp_global_token_nums;
     int64_t dp_rank = parallel_args_.dp_local_process_group_->rank();
     int64_t start = std::accumulate(
         dp_tokens.begin(), dp_tokens.begin() + dp_rank, int64_t{0});

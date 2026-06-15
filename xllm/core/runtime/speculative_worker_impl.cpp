@@ -101,12 +101,11 @@ bool SpeculativeWorkerImpl::allocate_kv_cache_with_transfer(
 
 std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
     const ForwardInput& input) {
-  if (input.input_params.meta.num_sequences == 0 ||
-      input.token_ids.numel() == 0) {
+  if (input.meta.num_sequences == 0 || input.token_ids.numel() == 0) {
     return step_empty(input);
   }
 
-  if (!input.input_params.meta.batch_forward_type.is_decode()) {
+  if (!input.meta.batch_forward_type.is_decode()) {
     return step_prefill(input);
   } else {
     return step_decode(input);
@@ -118,8 +117,8 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
   // only process decode batch, so prepare draft input here.
   ForwardInput& new_inputs = inputs;
 
-  auto& input_params = new_inputs.input_params;
-  const int32_t num_sequences = input_params.meta.num_sequences;
+  ForwardInput& input = new_inputs;
+  const int32_t num_sequences = input.meta.num_sequences;
   const int32_t block_size = options_.block_size();
 
   Slice<int32_t> token_ids = tensor_slice(inputs.token_ids_host);
@@ -164,12 +163,11 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
                              buf.out_positions,
                              inputs.token_ids.options(),
                              inputs.positions.options());
-  // update the input_params
-  input_params.meta.kv_max_seq_len = buf.meta.kv_max_seq_len;
-  input_params.attention.host.kv_seq_lens = std::move(buf.out_kv_seq_lens);
-  input_params.attention.host.new_cache_slots =
-      std::move(buf.out_new_cache_slots);
-  input_params.attention.rebuild_device_buffer(device_);
+  // update the input
+  input.meta.kv_max_seq_len = buf.meta.kv_max_seq_len;
+  input.attention.host.kv_seq_lens = std::move(buf.out_kv_seq_lens);
+  input.attention.host.new_cache_slots = std::move(buf.out_new_cache_slots);
+  input.attention.rebuild_device_buffer(device_);
   new_inputs.device_tensors_ready = true;
 
   return new_inputs;
@@ -207,21 +205,21 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
     ForwardInput& validate_input) {
   validate_input = input.to(device_, dtype_);
   validate_input.device_tensors_ready = false;
-  auto& input_params = validate_input.input_params;
+  ForwardInput& working_input = validate_input;
   torch::TensorOptions token_options = validate_input.token_ids.options();
   torch::TensorOptions position_options = validate_input.positions.options();
 
   const int32_t num_speculative_tokens = options_.num_speculative_tokens();
-  const int32_t num_sequences = input_params.meta.num_sequences;
+  const int32_t num_sequences = working_input.meta.num_sequences;
   const int32_t num_val_tokens = num_speculative_tokens + 1;
   const int32_t total_num_val_tokens = num_sequences * num_val_tokens;
   const int32_t block_size = options_.block_size();
   specBuilder::DecodeRowContext row_ctx =
-      specBuilder::make_decode_row_context(input);
+      specBuilder::make_decode_row_context(working_input);
 
-  Slice<int32_t> token_ids = tensor_slice(input.token_ids_host);
-  Slice<int32_t> positions = tensor_slice(input.positions_host);
-  Slice<int32_t> kv_seq_lens = input.input_params.attention.host.kv_seq_lens;
+  Slice<int32_t> token_ids = tensor_slice(working_input.token_ids_host);
+  Slice<int32_t> positions = tensor_slice(working_input.positions_host);
+  Slice<int32_t> kv_seq_lens = working_input.attention.host.kv_seq_lens;
   specBuilder::DecodeBuildBuffers buf;
   buf.out_token_ids.reserve(total_num_val_tokens);
   buf.out_positions.reserve(total_num_val_tokens);
@@ -283,41 +281,43 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
                              buf.out_positions,
                              token_options,
                              position_options);
-  // update the input_params
+  // update the input
   if (!::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
-    input_params.meta.num_sequences = total_num_val_tokens;
-    input_params.meta.q_max_seq_len = 1;
-    input_params.meta.batch_forward_type = BatchForwardType::DECODE;
+    working_input.meta.num_sequences = total_num_val_tokens;
+    working_input.meta.q_max_seq_len = 1;
+    working_input.meta.batch_forward_type = BatchForwardType::DECODE;
   } else {
-    input_params.meta.q_max_seq_len = num_val_tokens;
-    input_params.meta.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
+    working_input.meta.q_max_seq_len = num_val_tokens;
+    working_input.meta.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
   }
   if (::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
-    specBuilder::update_input_params(input_params,
-                                     buf,
-                                     num_val_tokens,
-                                     std::move(atb_q_seq_lens_vec),
-                                     std::move(atb_q_cu_seq_lens_vec),
-                                     atb_kv_max_seq_len,
-                                     std::move(atb_kv_seq_lens_vec));
+    specBuilder::update_input(working_input.meta,
+                              working_input.attention,
+                              buf,
+                              num_val_tokens,
+                              std::move(atb_q_seq_lens_vec),
+                              std::move(atb_q_cu_seq_lens_vec),
+                              atb_kv_max_seq_len,
+                              std::move(atb_kv_seq_lens_vec));
   } else {
-    specBuilder::update_input_params(input_params,
-                                     buf,
-                                     1,
-                                     std::move(buf.out_q_seq_lens),
-                                     std::move(buf.out_q_cu_seq_lens),
-                                     buf.meta.kv_max_seq_len,
-                                     std::move(buf.out_kv_seq_lens),
-                                     /*update_block_tables=*/true);
+    specBuilder::update_input(working_input.meta,
+                              working_input.attention,
+                              buf,
+                              1,
+                              std::move(buf.out_q_seq_lens),
+                              std::move(buf.out_q_cu_seq_lens),
+                              buf.meta.kv_max_seq_len,
+                              std::move(buf.out_kv_seq_lens),
+                              /*update_block_tables=*/true);
   }
-  input_params.attention.rebuild_device_buffer(device_);
+  working_input.attention.rebuild_device_buffer(device_);
 
   // update the sampling_params
   update_sampling_params(
       validate_input.sampling_params, num_val_tokens, total_num_val_tokens);
 
   // update dp_global_token_nums for dp/ep parallel
-  for (auto& it : input_params.parallel.dp_global_token_nums) {
+  for (auto& it : working_input.parallel.dp_global_token_nums) {
     it *= num_val_tokens;
   }
   validate_input.device_tensors_ready = true;

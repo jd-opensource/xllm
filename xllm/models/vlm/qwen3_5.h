@@ -24,6 +24,7 @@ limitations under the License.
 #include "processors/qwen2_vl_image_processor.h"
 #include "processors/qwen3_vl_prompt_processor.h"
 #include "processors/qwen3_vl_video_processor.h"
+#include "runtime/forward_params.h"
 
 #if defined(USE_NPU)
 #include "models/llm/qwen3_5.h"
@@ -118,43 +119,42 @@ class Qwen3_5ModelImpl final
     return std::make_pair(cos_pos, sin_pos);
   }
 
-  virtual ModelOutput forward(torch::Tensor tokens,
-                              torch::Tensor positions,
-                              std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) {
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
+  virtual ModelOutput forward(const ForwardInput& input,
+                              std::vector<KVCache>& kv_caches) {
+    ForwardInput input_new = input;
     std::vector<torch::Tensor> deep_stacks;
 
     if (dp_size_ > 1) {
-      if (tokens.numel() == 0) {
-        tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
-        positions = torch::tensor({1}).to(torch::kInt32).to(positions.device());
+      if (input_new.token_ids.numel() == 0) {
+        input_new.token_ids =
+            torch::tensor({1}).to(torch::kInt32).to(input.token_ids.device());
+        input_new.positions =
+            torch::tensor({1}).to(torch::kInt32).to(input.positions.device());
       }
-      auto& dp_token_nums = input_params_new.parallel.dp_global_token_nums;
+      auto& dp_token_nums = input_new.parallel.dp_global_token_nums;
       std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     }
 
-    auto inputs_embeds = input_params.embedding.input_embedding;
+    auto inputs_embeds = input_new.embedding.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
     } else {
-      h = embed_tokens_(tokens);
+      h = embed_tokens_(input_new.token_ids);
     }
 
-    if (!input_params_new.attn_metadata) {
-      input_params_new.attn_metadata =
-          std::make_shared<layer::AttentionMetadata>(
-              get_attention_metadata(input_params_new, h));
+    if (!input_new.attn_metadata) {
+      input_new.attn_metadata = std::make_shared<layer::AttentionMetadata>(
+          get_attention_metadata(input_new));
     }
 
-    auto& attn_metadata = *(input_params_new.attn_metadata);
+    auto& attn_metadata = *(input_new.attn_metadata);
     bool only_prefill =
         (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
-    if (positions.dim() == 2 && only_prefill && !mrope_section_.empty()) {
+    if (input_new.positions.dim() == 2 && only_prefill &&
+        !mrope_section_.empty()) {
       std::tie(attn_metadata.mrope_cos, attn_metadata.mrope_sin) =
-          apply_mrope(positions);
+          apply_mrope(input_new.positions);
     }
 
     std::optional<torch::Tensor> residual;
@@ -162,10 +162,10 @@ class Qwen3_5ModelImpl final
       auto& layer = layers_[i];
       h = layer(h,
                 residual,
-                positions,
+                input_new.positions,
                 attn_metadata,
                 kv_caches[i],
-                input_params_new);
+                input_new);
     }
     if (residual.has_value()) {
       h = h + residual.value();
@@ -177,10 +177,14 @@ class Qwen3_5ModelImpl final
  private:
   int32_t dp_size_ = 1;
   layer::Qwen3NextRMSNorm rms_norm_{nullptr};
-  layer::AttentionMetadata get_attention_metadata(
-      const ModelInputParams& params,
-      const torch::Tensor& h) {
-    auto attn_metadata = layer::AttentionMetadataBuilder::build(params, false);
+  layer::AttentionMetadata get_attention_metadata(const ForwardInput& params) {
+    auto attn_metadata =
+        layer::AttentionMetadataBuilder::build(params.meta,
+                                               params.attention,
+                                               params.graph,
+                                               params.llmrec_params(),
+                                               params.enable_cuda_graph,
+                                               /*enable_mla=*/false);
     // TODO: support linear attention
     return attn_metadata;
   }

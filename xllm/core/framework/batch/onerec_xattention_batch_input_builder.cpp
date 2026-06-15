@@ -40,14 +40,13 @@ ForwardInput OneRecXAttentionBatchInputBuilder::build_rec_forward_input(
     uint32_t min_decoding_batch_size) {
   auto input = OneRecBatchInputBuilder::build_rec_forward_input(
       num_decoding_tokens, min_decoding_batch_size);
-  if (const auto* onerec = input.input_params.onerec_params()) {
-    OneRecModelInputParams legacy_params = *onerec;
-    auto& xattn_params = input.input_params.mutable_onerec_xattention_params();
-    static_cast<OneRecModelInputParams&>(xattn_params) =
-        std::move(legacy_params);
+  if (const auto* onerec = input.onerec_params()) {
+    OneRecInput legacy_params = *onerec;
+    auto& xattn_params = input.mutable_onerec_xattention_params();
+    static_cast<OneRecInput&>(xattn_params) = std::move(legacy_params);
   }
 
-  input.input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
+  input.meta.batch_forward_type = BatchForwardType::PREFILL;
 
   if (sequence_groups_.empty()) {
     return input;
@@ -151,13 +150,12 @@ ForwardInput OneRecXAttentionBatchInputBuilder::build_rec_forward_input(
 
   if (!block_tables_vec.empty()) {
     util::pad_2d_vector(block_tables_vec, /*pad_value=*/0);
-    input.input_params.attention.device.block_tables =
+    input.attention.device.block_tables =
         create_2d_tensor(block_tables_vec, torch::kInt);
-    input.input_params.attention.host.block_tables =
-        input.input_params.attention.device.block_tables;
+    input.attention.host.block_tables = input.attention.device.block_tables;
   }
   if (!new_cache_slots_vec.empty()) {
-    input.input_params.attention.device.new_cache_slots =
+    input.attention.device.new_cache_slots =
         torch::tensor(new_cache_slots_vec, torch::kInt);
   }
 

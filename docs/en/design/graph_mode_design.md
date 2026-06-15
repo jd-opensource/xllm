@@ -93,7 +93,7 @@ The required model adaptations mainly include:
 Tensor a;
 Tensor b = a * 0.5;  // the scalar is implicitly transferred to the tensor's device, causing a synchronized H2D
 
-torch::Tensor max_of_seq = torch::max(input_params.kv_seq_lens);
+torch::Tensor max_of_seq = torch::max(input.kv_seq_lens);
 max_seq_len_ = std::max(max_of_seq.item<int>(), max_seq_len_);  // host reads tensor data
 ```
 

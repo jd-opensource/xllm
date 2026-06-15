@@ -94,7 +94,7 @@ xLLM 在运行时侧需要完成的基础工作，主要包括：
 Tensor a;
 Tensor b = a * 0.5;  // 标量会被隐式传到 tensor 所在设备，产生同步 h2d
 
-torch::Tensor max_of_seq = torch::max(input_params.kv_seq_lens);
+torch::Tensor max_of_seq = torch::max(input.kv_seq_lens);
 max_seq_len_ = std::max(max_of_seq.item<int>(), max_seq_len_);  // host 读取 tensor
 ```
 

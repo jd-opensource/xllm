@@ -25,7 +25,7 @@ limitations under the License.
 #include <utility>
 
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
@@ -257,17 +257,17 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PlanExecEnablesAll2AllOnlyForDecode) {
   auto block = create_block();
   DeepseekV2SparseMoEBlockTestPeer::set_enable_deep_ep(*block, true);
 
-  ModelInputParams decode_params;
-  decode_params.parallel.dp_global_token_nums = {1, 1};
-  decode_params.parallel.dp_is_decode = {1, 1};
-  auto decode_cfg = block->plan_exec(decode_params);
+  ParallelInput decode_input;
+  decode_input.dp_global_token_nums = {1, 1};
+  decode_input.dp_is_decode = {1, 1};
+  auto decode_cfg = block->plan_exec(decode_input);
   EXPECT_TRUE(decode_cfg.enable_all2all);
   EXPECT_FALSE(decode_cfg.need_dp_gather);
 
-  ModelInputParams mixed_params;
-  mixed_params.parallel.dp_global_token_nums = {2, 1};
-  mixed_params.parallel.dp_is_decode = {0, 1};
-  auto mixed_cfg = block->plan_exec(mixed_params);
+  ParallelInput mixed_input;
+  mixed_input.dp_global_token_nums = {2, 1};
+  mixed_input.dp_is_decode = {0, 1};
+  auto mixed_cfg = block->plan_exec(mixed_input);
   EXPECT_FALSE(mixed_cfg.enable_all2all);
   EXPECT_FALSE(mixed_cfg.need_dp_gather);
 }
@@ -276,11 +276,11 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PlanExecSetsDpGatherWhenAll2AllOff) {
   set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
   auto block = create_block();
 
-  ModelInputParams input_params;
-  input_params.parallel.dp_global_token_nums = {3, 1};
-  input_params.parallel.dp_is_decode = {0, 0};
+  ParallelInput parallel_input;
+  parallel_input.dp_global_token_nums = {3, 1};
+  parallel_input.dp_is_decode = {0, 0};
 
-  auto cfg = block->plan_exec(input_params);
+  auto cfg = block->plan_exec(parallel_input);
   EXPECT_FALSE(cfg.enable_all2all);
   EXPECT_TRUE(cfg.need_dp_gather);
 }
@@ -289,8 +289,8 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PrepInDpGatherBuildsLocalSkip) {
   set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
   auto block = create_block();
 
-  ModelInputParams input_params;
-  input_params.parallel.dp_global_token_nums = {3, 1};
+  ParallelInput parallel_input;
+  parallel_input.dp_global_token_nums = {3, 1};
   auto attn_out =
       mat(/*rows=*/4, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f});
   auto residual =
@@ -302,8 +302,8 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PrepInDpGatherBuildsLocalSkip) {
 
   auto prep = block->prep_in(attn_out,
                              residual,
-                             input_params,
-                             block->plan_exec(input_params),
+                             parallel_input,
+                             block->plan_exec(parallel_input),
                              DeepseekV2AttentionImpl::PostAttnLayout::kTpShard);
 
   EXPECT_TRUE(prep.need_dp_gather);
@@ -319,8 +319,8 @@ TEST_F(DeepseekV2SparseMoEBlockTest, GatherInDpGatherRebuildsGlobalTokens) {
   set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
   auto block = create_block();
 
-  ModelInputParams input_params;
-  input_params.parallel.dp_global_token_nums = {3, 1};
+  ParallelInput parallel_input;
+  parallel_input.dp_global_token_nums = {3, 1};
   DeepseekV2SparseMoEBlockImpl::PrepOut prep;
   prep.ffn_in = mat(/*rows=*/2, {11.0f, 22.0f, 33.0f, 44.0f});
   prep.need_dp_gather = true;
@@ -329,7 +329,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, GatherInDpGatherRebuildsGlobalTokens) {
   auto dp1_tp1 = torch::zeros_like(dp1_tp0);
   global_pg_->set_allgather_outputs({prep.ffn_in, dp0_tp1, dp1_tp0, dp1_tp1});
 
-  auto gathered = block->gather_in(prep, input_params);
+  auto gathered = block->gather_in(prep, parallel_input);
 
   test::verify_tensor_close(
       gathered,
@@ -342,16 +342,16 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PrepInAll2AllPadsTpShardInput) {
   auto block = create_block();
   DeepseekV2SparseMoEBlockTestPeer::set_enable_deep_ep(*block, true);
 
-  ModelInputParams input_params;
-  input_params.parallel.dp_global_token_nums = {1, 1};
-  input_params.parallel.dp_is_decode = {1, 1};
+  ParallelInput parallel_input;
+  parallel_input.dp_global_token_nums = {1, 1};
+  parallel_input.dp_is_decode = {1, 1};
   auto attn_out = mat(/*rows=*/3, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
   auto residual = mat(/*rows=*/3, {10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f});
 
   auto prep = block->prep_in(attn_out,
                              residual,
-                             input_params,
-                             block->plan_exec(input_params),
+                             parallel_input,
+                             block->plan_exec(parallel_input),
                              DeepseekV2AttentionImpl::PostAttnLayout::kTpShard);
 
   EXPECT_FALSE(prep.need_dp_gather);
@@ -368,10 +368,10 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PrepInUsesProvidedExecCfg) {
   set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
   auto block = create_block();
 
-  ModelInputParams input_params;
-  input_params.parallel.dp_global_token_nums = {3, 1};
-  input_params.parallel.dp_is_decode = {0, 0};
-  auto planned_cfg = block->plan_exec(input_params);
+  ParallelInput parallel_input;
+  parallel_input.dp_global_token_nums = {3, 1};
+  parallel_input.dp_is_decode = {0, 0};
+  auto planned_cfg = block->plan_exec(parallel_input);
   EXPECT_FALSE(planned_cfg.enable_all2all);
   EXPECT_TRUE(planned_cfg.need_dp_gather);
 
@@ -383,7 +383,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PrepInUsesProvidedExecCfg) {
 
   auto prep = block->prep_in(attn_out,
                              residual,
-                             input_params,
+                             parallel_input,
                              forced_cfg,
                              DeepseekV2AttentionImpl::PostAttnLayout::kTpShard);
 
@@ -397,7 +397,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, MergeOutTpPadGathersAndUnpads) {
   set_tp_ctx(/*world_size=*/2, /*ep_size=*/2);
   auto block = create_block();
 
-  ModelInputParams input_params;
+  ParallelInput parallel_input;
   DeepseekV2SparseMoEBlockImpl::PrepOut prep;
   prep.need_tp_pad = true;
   prep.pad_info = {.original_tokens = 3, .padded_tokens = 4, .active = true};
@@ -406,7 +406,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, MergeOutTpPadGathersAndUnpads) {
   prep.skip_local = shard0;
   tp_pg_->set_allgather_outputs({shard0, shard1});
 
-  auto merged = block->merge_out(shard0, prep, input_params);
+  auto merged = block->merge_out(shard0, prep, parallel_input);
 
   test::verify_tensor_close(
       merged, mat(/*rows=*/3, {2.0f, 4.0f, 6.0f, 8.0f, 10.0f, 12.0f}));
@@ -416,8 +416,8 @@ TEST_F(DeepseekV2SparseMoEBlockTest, MergeOutDpGatherSlicesLocalTokens) {
   set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
   auto block = create_block();
 
-  ModelInputParams input_params;
-  input_params.parallel.dp_global_token_nums = {3, 1};
+  ParallelInput parallel_input;
+  parallel_input.dp_global_token_nums = {3, 1};
   DeepseekV2SparseMoEBlockImpl::PrepOut prep;
   prep.skip_local = mat(/*rows=*/3, {11.0f, 22.0f, 33.0f, 44.0f, 55.0f, 66.0f});
   prep.need_dp_gather = true;
@@ -425,7 +425,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, MergeOutDpGatherSlicesLocalTokens) {
       mat(/*rows=*/4,
           {101.0f, 102.0f, 103.0f, 104.0f, 105.0f, 106.0f, 107.0f, 108.0f});
 
-  auto merged = block->merge_out(ffn_out, prep, input_params);
+  auto merged = block->merge_out(ffn_out, prep, parallel_input);
 
   test::verify_tensor_close(
       merged,

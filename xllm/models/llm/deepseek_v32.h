@@ -23,6 +23,7 @@ limitations under the License.
 #include "deepseek_v2.h"
 #include "layers/common/attention_metadata_builder.h"
 #include "layers/mlu/deepseek_v32_sp_context.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -57,22 +58,21 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
   ModelOutput forward(const torch::Tensor& tokens,
                       const torch::Tensor& positions,
                       std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    ModelInputParams modified_input_params = input_params;
-    if (!modified_input_params.attn_metadata) {
-      modified_input_params.attn_metadata =
-          std::make_shared<layer::AttentionMetadata>(
-              layer::AttentionMetadataBuilder::build(modified_input_params,
-                                                     model_args_.enable_mla(),
-                                                     /*compute_dtype=*/"half",
-                                                     /*attn_mask=*/std::nullopt,
-                                                     /*device=*/device_));
+                      const ForwardInput& input) {
+    ForwardInput modified_input = input;
+    if (!modified_input.attn_metadata) {
+      modified_input.attn_metadata = std::make_shared<layer::AttentionMetadata>(
+          layer::AttentionMetadataBuilder::build(modified_input,
+                                                 model_args_.enable_mla(),
+                                                 /*compute_dtype=*/"half",
+                                                 /*attn_mask=*/std::nullopt,
+                                                 /*device=*/device_));
     }
-    auto& attn_metadata = *modified_input_params.attn_metadata;
+    auto& attn_metadata = *modified_input.attn_metadata;
     std::optional<layer::v32_sp::DeepseekV32SPContext> sp_ctx;
     const bool requested_sequence_parallel =
         ::xllm::ParallelConfig::get_instance().enable_prefill_sp() &&
-        input_params.meta.batch_forward_type.no_decode();
+        input.meta.batch_forward_type.no_decode();
     if (requested_sequence_parallel) {
       if (sequence_parallel_group_ == nullptr) {
         CHECK_EQ(parallel_world_size_, 1)
@@ -80,7 +80,7 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
       } else if (sequence_parallel_group_->world_size() > 1) {
         sp_ctx = layer::v32_sp::build_deepseek_v32_sp_context(
             attn_metadata,
-            input_params.meta.batch_forward_type,
+            input.meta.batch_forward_type,
             tokens,
             sequence_parallel_group_,
             sequence_parallel_group_->rank(),
@@ -92,7 +92,7 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
       // prefill batch cannot be split across all SP ranks.
       active_sequence_parallel_context_ = nullptr;
       return DeepseekV2ModelImpl::forward(
-          tokens, positions, kv_caches, modified_input_params);
+          tokens, positions, kv_caches, modified_input);
     }
 
     active_sequence_parallel_context_ = &sp_ctx.value();
@@ -113,9 +113,9 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
                             positions_local,
                             attn_metadata,
                             kv_caches[i],
-                            modified_input_params);
-      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
-                                              hidden_states.device())) {
+                            modified_input);
+      if (!modified_input.record_layer(static_cast<uint32_t>(i),
+                                       hidden_states.device())) {
         active_sequence_parallel_context_ = nullptr;
         return ModelOutput();
       }

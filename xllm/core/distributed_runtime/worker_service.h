@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <string>
 
+#include "runtime/forward_params.h"
 #include "runtime/forward_shared_memory_manager.h"
 #include "runtime/worker.h"
 #include "worker.pb.h"

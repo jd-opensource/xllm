@@ -18,6 +18,7 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_deepseek_v32_decoder_layer_impl.h"
 #include "llm_model_base.h"
+#include "runtime/forward_params.h"
 
 // DeepSeek v32 compatible with huggingface weights
 // ref to:
@@ -41,17 +42,11 @@ class DeepseekV32DecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor& sin_pos,
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params,
+                        const ForwardInput& input,
                         aclrtEvent* event,
                         std::atomic<bool>* event_flag) {
-    return decoder_layer_(x,
-                          cos_pos,
-                          sin_pos,
-                          attn_mask,
-                          kv_cache,
-                          input_params,
-                          event,
-                          event_flag);
+    return decoder_layer_(
+        x, cos_pos, sin_pos, attn_mask, kv_cache, input, event, event_flag);
   }
 
   torch::Tensor forward_with_topk(torch::Tensor& x,
@@ -59,7 +54,7 @@ class DeepseekV32DecoderLayerImpl : public torch::nn::Module {
                                   torch::Tensor& sin_pos,
                                   torch::Tensor& attn_mask,
                                   KVCache& kv_cache,
-                                  const ModelInputParams& input_params,
+                                  const ForwardInput& input,
                                   const torch::Tensor& shared_topk_indices,
                                   torch::Tensor* output_topk_indices,
                                   aclrtEvent* event,
@@ -69,7 +64,7 @@ class DeepseekV32DecoderLayerImpl : public torch::nn::Module {
                                              sin_pos,
                                              attn_mask,
                                              kv_cache,
-                                             input_params,
+                                             input,
                                              shared_topk_indices,
                                              output_topk_indices,
                                              event,
@@ -81,7 +76,7 @@ class DeepseekV32DecoderLayerImpl : public torch::nn::Module {
                              torch::Tensor& sin_pos,
                              torch::Tensor& attn_mask,
                              KVCache& kv_cache,
-                             const ModelInputParams& input_params,
+                             const ForwardInput& input,
                              torch::Tensor& topk_indices,
                              int32_t index_topk,
                              const torch::Device& device,
@@ -120,20 +115,14 @@ class DeepseekV32DecoderLayerImpl : public torch::nn::Module {
                         sin_pos,
                         attn_mask,
                         kv_cache,
-                        input_params,
+                        input,
                         shared_topk_indices,
                         output_topk_indices,
                         event,
                         event_flag);
     } else {
-      forward(x,
-              cos_pos,
-              sin_pos,
-              attn_mask,
-              kv_cache,
-              input_params,
-              event,
-              event_flag);
+      forward(
+          x, cos_pos, sin_pos, attn_mask, kv_cache, input, event, event_flag);
     }
     if (should_output_topk) {
       topk_indices = current_topk_indices;
@@ -246,10 +235,10 @@ class DeepseekV32ModelImpl : public torch::nn::Module {
     }
   }
 
-  ModelOutput forward(torch::Tensor tokens,
-                      torch::Tensor positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
+  ModelOutput forward(const ForwardInput& input,
+                      std::vector<KVCache>& kv_caches) {
+    torch::Tensor tokens = input.token_ids;
+    torch::Tensor positions = input.positions;
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
@@ -265,7 +254,7 @@ class DeepseekV32ModelImpl : public torch::nn::Module {
 
     torch::Tensor attn_mask;
     if (num_speculative_tokens_ == 0 ||
-        input_params.meta.batch_forward_type.is_prefill()) {
+        input.meta.batch_forward_type.is_prefill()) {
       attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
     } else {
       attn_mask = attn_mask_.gen_free_mask(
@@ -277,12 +266,11 @@ class DeepseekV32ModelImpl : public torch::nn::Module {
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.parallel.layer_synchronizer != nullptr) {
-        event = input_params.parallel.layer_synchronizer->get_event(i);
-        event_flag =
-            input_params.parallel.layer_synchronizer->get_event_flag(i);
+      if (input.parallel.layer_synchronizer != nullptr) {
+        event = input.parallel.layer_synchronizer->get_event(i);
+        event_flag = input.parallel.layer_synchronizer->get_event_flag(i);
       }
-      if (!input_params.synchronize_layer(i)) {
+      if (!input.synchronize_layer(i)) {
         return ModelOutput();
       }
 
@@ -321,7 +309,7 @@ class DeepseekV32ModelImpl : public torch::nn::Module {
                                  sin_pos,
                                  attn_mask,
                                  kv_caches[i],
-                                 input_params,
+                                 input,
                                  shared_topk_indices,
                                  output_topk_indices,
                                  event,
@@ -332,7 +320,7 @@ class DeepseekV32ModelImpl : public torch::nn::Module {
               sin_pos,
               attn_mask,
               kv_caches[i],
-              input_params,
+              input,
               event,
               event_flag);
       }

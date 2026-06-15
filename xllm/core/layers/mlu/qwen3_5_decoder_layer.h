@@ -22,7 +22,7 @@ limitations under the License.
 
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/state_dict/state_dict.h"
@@ -30,8 +30,11 @@ limitations under the License.
 #include "layers/common/qwen3_next_rms_norm.h"
 #include "layers/mlu/qwen3_5_attention.h"
 #include "layers/mlu/qwen3_5_fused_moe.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
+struct ForwardInput;
+
 namespace layer {
 
 class Qwen3_5DecoderLayerImpl final : public torch::nn::Module {
@@ -45,7 +48,7 @@ class Qwen3_5DecoderLayerImpl final : public torch::nn::Module {
                         torch::Tensor& positions,
                         const AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params);
+                        const ForwardInput& input);
 
  private:
   std::tuple<torch::Tensor, std::optional<torch::Tensor>> apply_norm(
@@ -53,7 +56,7 @@ class Qwen3_5DecoderLayerImpl final : public torch::nn::Module {
       torch::Tensor& input,
       std::optional<torch::Tensor>& residual);
 
-  torch::Tensor run_moe(torch::Tensor x, const ModelInputParams& input_params);
+  torch::Tensor run_moe(torch::Tensor x, const ForwardInput& input);
 
   std::string layer_type_;
   Qwen3_5Attention full_attention_{nullptr};

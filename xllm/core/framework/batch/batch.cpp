@@ -31,7 +31,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "core/util/rec_model_utils.h"
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
 #include "rec_batch_input_builder.h"

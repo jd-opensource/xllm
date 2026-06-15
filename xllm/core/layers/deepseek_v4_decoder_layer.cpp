@@ -134,7 +134,7 @@ torch::Tensor DeepseekV4DecoderLayerImpl::forward(
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
-    const ModelInputParams& input_params,
+    const ForwardInput& input,
     const std::optional<torch::Tensor>& input_ids) {
   (void)positions;
 
@@ -195,7 +195,7 @@ torch::Tensor DeepseekV4DecoderLayerImpl::forward(
   }
   auto [topk_weights, topk_ids] = gate_->forward(ffn_input_2d, gate_input_ids);
   ffn_input = moe_mlp_->forward_with_selected_experts(
-      ffn_input, topk_weights, topk_ids, input_params);
+      ffn_input, topk_weights, topk_ids, input);
   x = hc_post(ffn_input, residual_ffn, post_ffn, comb_ffn);
 
   return x;

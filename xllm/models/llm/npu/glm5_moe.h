@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "core/layers/npu/npu_deepseek_v32_decoder_layer_impl.h"
 #include "deepseek_v32.h"
+#include "runtime/forward_params.h"
 
 namespace xllm::npu::model {
 
@@ -73,10 +74,10 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
     }
   }
 
-  ModelOutput forward(torch::Tensor tokens,
-                      torch::Tensor positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
+  ModelOutput forward(const ForwardInput& input,
+                      std::vector<KVCache>& kv_caches) {
+    torch::Tensor tokens = input.token_ids;
+    torch::Tensor positions = input.positions;
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
@@ -92,7 +93,7 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
 
     torch::Tensor attn_mask;
     if (num_speculative_tokens_ == 0 ||
-        input_params.meta.batch_forward_type.is_prefill()) {
+        input.meta.batch_forward_type.is_prefill()) {
       attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
     } else {
       attn_mask = attn_mask_.gen_free_mask(
@@ -104,12 +105,11 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.parallel.layer_synchronizer != nullptr) {
-        event = input_params.parallel.layer_synchronizer->get_event(i);
-        event_flag =
-            input_params.parallel.layer_synchronizer->get_event_flag(i);
+      if (input.parallel.layer_synchronizer != nullptr) {
+        event = input.parallel.layer_synchronizer->get_event(i);
+        event_flag = input.parallel.layer_synchronizer->get_event_flag(i);
       }
-      if (!input_params.synchronize_layer(i)) {
+      if (!input.synchronize_layer(i)) {
         return ModelOutput();
       }
 
@@ -148,7 +148,7 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
                                  sin_pos,
                                  attn_mask,
                                  kv_caches[i],
-                                 input_params,
+                                 input,
                                  shared_topk_indices,
                                  output_topk_indices,
                                  event,
@@ -159,7 +159,7 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
               sin_pos,
               attn_mask,
               kv_caches[i],
-              input_params,
+              input,
               event,
               event_flag);
       }

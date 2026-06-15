@@ -20,14 +20,15 @@ limitations under the License.
 #include "attention_metadata.h"
 #include "attention_metadata_builder.h"
 #include "dsa_metadata.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
+#include "runtime/forward_params.h"
 #include "util/tensor_helper.h"
 
 namespace xllm::layer {
 
 namespace {
 
-torch::Device infer_metadata_device(const ModelInputParams& params,
+torch::Device infer_metadata_device(const ForwardInput& params,
                                     const torch::Tensor& positions) {
   if (positions.defined()) {
     return positions.device();
@@ -76,7 +77,7 @@ torch::Tensor pad_block_table(const torch::Tensor& block_table,
 }  // namespace
 
 AttentionMetadata DSAMetadataBuilder::build(
-    const ModelInputParams& params,
+    const ForwardInput& params,
     const torch::Tensor& positions,
     const torch::Tensor& dsa_cos_sin,
     const std::vector<std::vector<DSACacheInfo>>& caches_info,
@@ -120,7 +121,7 @@ AttentionMetadata DSAMetadataBuilder::build(
 }
 
 void DSAMetadataBuilder::build_dsa_fields(
-    const ModelInputParams& params,
+    const ForwardInput& params,
     const torch::Tensor& positions,
     const torch::Tensor& dsa_cos_sin,
     const torch::Tensor& dsa_c4_cos_sin,
@@ -571,7 +572,7 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
   out_bt = new_bt;
 }
 
-void DSAMetadataBuilder::build_seq_lengths(const ModelInputParams& params,
+void DSAMetadataBuilder::build_seq_lengths(const ForwardInput& params,
                                            const torch::Device& target_device,
                                            int32_t batch_size,
                                            DSAMetadata& dsa_metadata) {
@@ -600,7 +601,7 @@ void DSAMetadataBuilder::build_seq_lengths(const ModelInputParams& params,
   q_lens = params.attention.device.q_seq_lens;
   if (static_cast<int32_t>(params.attention.host.q_seq_lens.size()) ==
       batch_size) {
-    // Prefer explicit per-sequence query lengths from ModelInputParams.
+    // Prefer explicit per-sequence query lengths from ForwardInput.
     // This is accurate for prefill/decode/chunked/mixed batches.
     if (target_device.is_cpu()) {
       q_lens = torch::tensor(
@@ -660,7 +661,7 @@ void DSAMetadataBuilder::build_seq_lengths(const ModelInputParams& params,
                         vector_max_or_zero(params.attention.host.kv_seq_lens));
 }
 
-void DSAMetadataBuilder::build_positions(const ModelInputParams& params,
+void DSAMetadataBuilder::build_positions(const ForwardInput& params,
                                          int32_t batch_size,
                                          DSAMetadata& dsa_metadata) {
   if (!dsa_metadata.input_positions.defined()) return;

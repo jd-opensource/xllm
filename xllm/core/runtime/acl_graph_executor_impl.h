@@ -27,8 +27,8 @@ limitations under the License.
 #include "core/common/macros.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/causal_lm.h"
-#include "core/framework/model/model_input_params.h"
 #include "core/runtime/acl_graph_persistent_param.h"
+#include "core/runtime/forward_params.h"
 #include "executor_impl.h"
 #include "executor_impl_factory.h"
 #include "options.h"
@@ -62,18 +62,15 @@ class AclGraph {
   // Capture computation graph for given bucket num_tokens
   bool capture(CausalLM* model,
                const runtime::Options& options,
-               const torch::Tensor& tokens,
-               const torch::Tensor& positions,
-               const ModelInputParams& params,
+               const ForwardInput& input,
                std::vector<KVCache>& kv_cache,
                uint32_t bucket_num_tokens);
 
   // Replay captured graph with new input data
   ModelOutput replay(CausalLM* model,
-                     const torch::Tensor& tokens,
-                     const torch::Tensor& positions,
+                     const ForwardInput& input,
                      std::vector<KVCache>& kv_cache,
-                     const ModelInputParams& params);
+                     bool requires_graph_metadata);
 
   // Get the hidden states from the last capture
   torch::Tensor get_hidden_states(uint32_t actual_num_tokens = 0) const {
@@ -89,7 +86,7 @@ class AclGraph {
   void make_current_stream_wait_for_graph(aclrtStream current_stream);
   void prepare_model_graph_metadata(CausalLM* model,
                                     const torch::Tensor& positions,
-                                    ModelInputParams& params);
+                                    ForwardInput& input);
 
   // NPUGraph with mempool for managing temporary tensors during forward pass
   c10_npu::NPUGraph graph_;
@@ -121,10 +118,8 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   ForwardInput prepare_inputs(Batch& batch) override;
 
   // Execute model with graph optimization for decode phase
-  ModelOutput run(const torch::Tensor& tokens,
-                  const torch::Tensor& positions,
-                  std::vector<KVCache>& kv_caches,
-                  const ModelInputParams& params) override;
+  ModelOutput run(const ForwardInput& input,
+                  std::vector<KVCache>& kv_caches) override;
 
  private:
   // not own
@@ -146,7 +141,7 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   uint32_t get_bucket_num_tokens(uint32_t num_tokens) const;
 
   uint64_t get_graph_key(uint32_t bucket_num_tokens,
-                         const ModelInputParams& params) const;
+                         const ForwardInput& input) const;
 };
 REGISTER_EXECUTOR("npu", AclGraphExecutorImpl);
 }  // namespace xllm::npu

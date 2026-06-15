@@ -43,14 +43,10 @@ class DummyRecCausalLM final : public RecCausalLM {
   explicit DummyRecCausalLM(const torch::TensorOptions& options)
       : options_(options) {}
 
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& parameters) override {
-    UNUSED_PARAMETER(tokens);
-    UNUSED_PARAMETER(positions);
+  ModelOutput forward(const ForwardInput& input,
+                      std::vector<KVCache>& kv_caches) override {
+    UNUSED_PARAMETER(input);
     UNUSED_PARAMETER(kv_caches);
-    UNUSED_PARAMETER(parameters);
     return ModelOutput();
   }
 

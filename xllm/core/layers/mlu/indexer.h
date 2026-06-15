@@ -22,7 +22,7 @@ limitations under the License.
 #include <tuple>
 
 #include "attention.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/process_group.h"
 #include "framework/quant_args.h"

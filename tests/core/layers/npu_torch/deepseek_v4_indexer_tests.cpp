@@ -16,10 +16,11 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/quant_args.h"
 #include "layers/common/dsa_metadata_builder.h"
 #include "layers/npu_torch/deepseek_v4_indexer.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 namespace layer {
@@ -70,7 +71,7 @@ TEST_F(DeepseekV4IndexerTest, ConstructorAndMetadataWorks) {
 }
 
 TEST_F(DeepseekV4IndexerTest, DsaTokenSlotsTrackCurrentDecodeStep) {
-  ModelInputParams params;
+  ForwardInput params;
   params.meta.batch_forward_type = BatchForwardType::DECODE;
   params.meta.num_sequences = 2;
   params.attention.host.kv_seq_lens = {5, 8};
@@ -108,7 +109,7 @@ TEST_F(DeepseekV4IndexerTest, DsaTokenSlotsTrackCurrentDecodeStep) {
 }
 
 TEST_F(DeepseekV4IndexerTest, DsaSwaBlockTableUsesLogicalColumnsWithoutWrap) {
-  ModelInputParams params;
+  ForwardInput params;
   params.meta.batch_forward_type = BatchForwardType::DECODE;
   params.meta.num_sequences = 1;
   params.attention.host.kv_seq_lens = {1537};
@@ -149,7 +150,7 @@ TEST_F(DeepseekV4IndexerTest, DsaSwaBlockTableUsesLogicalColumnsWithoutWrap) {
 }
 
 TEST_F(DeepseekV4IndexerTest, DsaDummyAttentionUsesPositionDevice) {
-  ModelInputParams params;
+  ForwardInput params;
   params.meta.batch_forward_type = BatchForwardType::DECODE;
   params.meta.num_sequences = 1;
   params.meta.q_max_seq_len = 0;

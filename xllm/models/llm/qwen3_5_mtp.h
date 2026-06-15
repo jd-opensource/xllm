@@ -22,10 +22,11 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/layers/common/linear.h"
 #include "models/model_registry.h"
 #include "qwen3_5.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -103,7 +104,7 @@ class Qwen3_5MtpModelImpl : public Qwen3HybridModelImplBase {
   ModelOutput forward(torch::Tensor tokens,
                       torch::Tensor positions,
                       std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) override {
+                      const ForwardInput& input) override {
     torch::NoGradGuard no_grad;
 
     if (dp_size_ > 1 && tokens.sizes() == 0) {
@@ -112,12 +113,10 @@ class Qwen3_5MtpModelImpl : public Qwen3HybridModelImplBase {
     }
 
     auto attn_metadata = layer::AttentionMetadataBuilder::build(
-        input_params,
-        model_args_.enable_mla(),
-        build_attention_mask(input_params));
+        input, model_args_.enable_mla(), build_attention_mask(input));
 
     torch::Tensor embedding = embed_tokens_(tokens);
-    torch::Tensor hidden = input_params.embedding.input_embedding;
+    torch::Tensor hidden = input.embedding.input_embedding;
     if (hidden.defined() == false) {
       hidden = embedding;
     }
@@ -142,7 +141,7 @@ class Qwen3_5MtpModelImpl : public Qwen3HybridModelImplBase {
                                        positions,
                                        attn_metadata,
                                        kv_caches[i],
-                                       input_params,
+                                       input,
                                        mrope_cos_sin);
     }
     auto [new_mtp_hidden, new_res] = norm_->forward(mtp_hidden, residual);

@@ -101,11 +101,11 @@ void ensure_cpu_for_cp_partition(ForwardInput& input) {
   to_cpu_if_needed("token_ids", input.token_ids);
   to_cpu_if_needed("positions", input.positions);
   to_cpu_if_needed("mtp_shifted_token_ids",
-                   input.input_params.embedding.mtp_shifted_token_ids);
+                   input.embedding.mtp_shifted_token_ids);
   to_cpu_if_needed("selected_token_idxes",
                    input.sampling_params.selected_token_idxes);
 
-  auto& attn_dev = input.input_params.attention.device;
+  auto& attn_dev = input.attention.device;
   to_cpu_if_needed("attention.device.q_seq_lens", attn_dev.q_seq_lens);
   to_cpu_if_needed("attention.device.kv_seq_lens", attn_dev.kv_seq_lens);
   to_cpu_if_needed("attention.device.q_cu_seq_lens", attn_dev.q_cu_seq_lens);
@@ -125,10 +125,10 @@ void cp_partition_inplace(ForwardInput& input,
   }
   // MIXED (chunked prefill + decode) still runs the prefill ATB node and needs
   // per-CP-rank token slices; only pure DECODE batches skip partition.
-  if (input.input_params.meta.batch_forward_type.is_decode()) {
+  if (input.meta.batch_forward_type.is_decode()) {
     return;
   }
-  const int32_t num_sequences = input.input_params.meta.num_sequences;
+  const int32_t num_sequences = input.meta.num_sequences;
   if (num_sequences <= 0) {
     return;
   }
@@ -156,8 +156,7 @@ void cp_partition_inplace(ForwardInput& input,
   const int64_t token_num = input.token_ids.numel();
   const int32_t num_chunks = cp_size * 2;
 
-  auto& input_params = input.input_params;
-  auto& attention = input_params.attention;
+  auto& attention = input.attention;
 
   const std::vector<int32_t> input_lens =
       !attention.host.q_seq_lens.empty()
@@ -239,8 +238,8 @@ void cp_partition_inplace(ForwardInput& input,
       gather_token_level_tensor(input.positions, gather_indices, token_num);
   input.token_ids_host = input.token_ids;
   input.positions_host = input.positions;
-  input_params.embedding.mtp_shifted_token_ids = gather_token_level_tensor(
-      input_params.embedding.mtp_shifted_token_ids, gather_indices, token_num);
+  input.embedding.mtp_shifted_token_ids = gather_token_level_tensor(
+      input.embedding.mtp_shifted_token_ids, gather_indices, token_num);
 
   const std::vector<int32_t> new_q_lens =
       build_seq_lens(attention.host.q_seq_lens, cp_q_lens, num_sequences);
@@ -259,8 +258,8 @@ void cp_partition_inplace(ForwardInput& input,
   attention.host.q_cu_seq_lens = cu;
   attention.device.q_cu_seq_lens = torch::tensor(cu, cpu_int32_options());
 
-  input_params.meta.q_max_seq_len = cp_global_max_seq_len;
-  input_params.meta.kv_max_seq_len = cp_global_max_seq_len;
+  input.meta.q_max_seq_len = cp_global_max_seq_len;
+  input.meta.kv_max_seq_len = cp_global_max_seq_len;
 
   auto& selected = input.sampling_params.selected_token_idxes;
   if (selected.defined() && selected.numel() > 0) {

@@ -1085,7 +1085,7 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
     batched_inputs.emplace_back(std::move(batch[dp_rank].prepare_forward_input(
         args_, threadpool_.get(), cp_size_)));
     const BatchForwardType& current_batch_forward_type =
-        batched_inputs[dp_rank].input_params.meta.batch_forward_type;
+        batched_inputs[dp_rank].meta.batch_forward_type;
     dp_global_token_nums[dp_rank] =
         static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
     if (util::is_deepseek_v4_model_type(args_.model_type())) {
@@ -1102,19 +1102,16 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
              "load, or check chunked-prefill padding. Details: dp_rank="
           << dp_rank << ", actual_scheduled_tokens=" << actual_scheduled_tokens
           << ", max_tokens_per_batch=" << max_tokens_per_batch
-          << ", q_max_seq_len="
-          << batched_inputs[dp_rank].input_params.meta.q_max_seq_len
-          << ", kv_max_seq_len="
-          << batched_inputs[dp_rank].input_params.meta.kv_max_seq_len
+          << ", q_max_seq_len=" << batched_inputs[dp_rank].meta.q_max_seq_len
+          << ", kv_max_seq_len=" << batched_inputs[dp_rank].meta.kv_max_seq_len
           << ", batch_forward_type=" << current_batch_forward_type.to_string();
     }
     if (batch_forward_type.is_empty() &&
         !current_batch_forward_type.is_empty()) {
       batch_forward_type = current_batch_forward_type;
     }
-    dp_is_decode[dp_rank] =
-        current_batch_forward_type.is_decode() &&
-        batched_inputs[dp_rank].input_params.meta.q_max_seq_len == 1;
+    dp_is_decode[dp_rank] = current_batch_forward_type.is_decode() &&
+                            batched_inputs[dp_rank].meta.q_max_seq_len == 1;
   }
 
   // eplb related
@@ -1127,8 +1124,7 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
   if (::xllm::ExecutionConfig::get_instance().enable_graph() &&
       batch_forward_type.is_decode()) {
     for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-      if (batched_inputs[dp_rank]
-              .input_params.meta.batch_forward_type.is_empty() &&
+      if (batched_inputs[dp_rank].meta.batch_forward_type.is_empty() &&
           dp_global_token_nums[dp_rank] == 0) {
         dp_is_decode[dp_rank] = 1;
       }
@@ -1137,16 +1133,14 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
 
   // update dp_global_token_nums and batch_forward_type
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs[dp_rank].input_params.parallel.dp_global_token_nums =
+    batched_inputs[dp_rank].parallel.dp_global_token_nums =
         dp_global_token_nums;
-    batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
+    batched_inputs[dp_rank].parallel.dp_is_decode = dp_is_decode;
     if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
-      batched_inputs[dp_rank].input_params.expert.eplb_info = eplb_info;
+      batched_inputs[dp_rank].expert.eplb_info = eplb_info;
     }
-    if (batched_inputs[dp_rank]
-            .input_params.meta.batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].input_params.meta.batch_forward_type =
-          batch_forward_type;
+    if (batched_inputs[dp_rank].meta.batch_forward_type.is_empty()) {
+      batched_inputs[dp_rank].meta.batch_forward_type = batch_forward_type;
     }
   }
 

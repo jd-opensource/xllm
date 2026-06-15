@@ -29,7 +29,7 @@ limitations under the License.
 #include "core/common/interruption_bus.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model/model_output.h"
 #include "core/framework/model/model_traits.h"
 #include "core/framework/model_context.h"
@@ -42,6 +42,7 @@ limitations under the License.
 #include "core/layers/npu/npu_pos_embedding_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/npu/npu_word_embedding_impl.h"
+#include "core/runtime/forward_params.h"
 #include "models/model_registry.h"
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
 
@@ -65,15 +66,15 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
                                 torch::Tensor& sin_pos,
                                 torch::Tensor& attn_mask,
                                 KVCache& kv_cache,
-                                ModelInputParams& input_params,
+                                ForwardInput& input,
                                 aclrtEvent* event,
                                 std::atomic<bool>* event_flag) {
-    if (input_params.block_copy.src_block_indices.numel() > 0) {
+    if (input.block_copy.src_block_indices.numel() > 0) {
       block_copy_(kv_cache.get_k_cache(),
                   kv_cache.get_v_cache(),
-                  input_params.block_copy.src_block_indices,
-                  input_params.block_copy.dst_block_indices,
-                  input_params.block_copy.cum_sum,
+                  input.block_copy.src_block_indices,
+                  input.block_copy.dst_block_indices,
+                  input.block_copy.cum_sum,
                   0);
     }
 
@@ -82,7 +83,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
                           sin_pos,
                           attn_mask,
                           kv_cache,
-                          input_params,
+                          input,
                           event,
                           event_flag,
                           layer_id_);
@@ -151,15 +152,16 @@ class LlmModelImplBase : public torch::nn::Module {
 
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
-  virtual ModelOutput forward(torch::Tensor tokens,
-                              torch::Tensor positions,
-                              std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) {
+  virtual ModelOutput forward(const ForwardInput& input,
+                              std::vector<KVCache>& kv_caches) {
+    torch::Tensor tokens = input.token_ids;
+    torch::Tensor positions = input.positions;
+    ForwardInput modified_input = input;
     if (tokens.numel() == 0) {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
       positions = torch::tensor({0}).to(torch::kInt32).to(tokens.device());
     }
-    auto inputs_embeds = input_params.embedding.input_embedding;
+    auto inputs_embeds = input.embedding.input_embedding;
     // test
     torch::Tensor h;
     if (inputs_embeds.defined()) {
@@ -194,30 +196,28 @@ class LlmModelImplBase : public torch::nn::Module {
           {positions.sizes().front(), -1, sin_pos.sizes().back()}));
     }
 
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
     torch::Tensor attn_mask;
     max_seq_len_ =
         ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()
-            ? std::max(input_params.meta.kv_max_seq_len, max_seq_len_)
+            ? std::max(input.meta.kv_max_seq_len, max_seq_len_)
             : 128;
     if (model_type_ == "qwen2") {
       attn_mask = attn_mask_.get_attn_mask(
           max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
     } else {
       if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-        int num_sequences = input_params.meta.num_sequences;
+        int num_sequences = input.meta.num_sequences;
         if (num_sequences > 0) {
           std::vector<torch::Tensor> req_mask_vec;
           req_mask_vec.reserve(num_sequences);
 
           for (int j = 0; j < num_sequences; j++) {
-            auto mask = attn_mask_.gen_append_mask(
-                input_params.attention.host.q_seq_lens[j],
-                input_params.attention.host.kv_seq_lens[j],
-                max_seq_len_,
-                cos_pos.dtype().toScalarType(),
-                cos_pos.device());
+            auto mask =
+                attn_mask_.gen_append_mask(input.attention.host.q_seq_lens[j],
+                                           input.attention.host.kv_seq_lens[j],
+                                           max_seq_len_,
+                                           cos_pos.dtype().toScalarType(),
+                                           cos_pos.device());
             req_mask_vec.emplace_back(mask);
           }
           attn_mask = torch::cat(req_mask_vec, 0);
@@ -233,12 +233,12 @@ class LlmModelImplBase : public torch::nn::Module {
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.parallel.layer_synchronizer != nullptr) {
-        event = input_params.parallel.layer_synchronizer->get_event(i);
+      if (modified_input.parallel.layer_synchronizer != nullptr) {
+        event = modified_input.parallel.layer_synchronizer->get_event(i);
         event_flag =
-            input_params.parallel.layer_synchronizer->get_event_flag(i);
+            modified_input.parallel.layer_synchronizer->get_event_flag(i);
       }
-      if (!input_params.synchronize_layer(i)) {
+      if (!modified_input.synchronize_layer(i)) {
         return ModelOutput();
       }
 
@@ -256,7 +256,7 @@ class LlmModelImplBase : public torch::nn::Module {
             sin_pos,
             attn_mask,
             kv_caches[i],
-            input_params_new,
+            modified_input,
             event,
             event_flag);
 
@@ -265,6 +265,16 @@ class LlmModelImplBase : public torch::nn::Module {
 
     auto hidden_states = norm_(h, 0);
     return ModelOutput(hidden_states);
+  }
+
+  virtual ModelOutput forward(torch::Tensor tokens,
+                              torch::Tensor positions,
+                              std::vector<KVCache>& kv_caches,
+                              const ForwardInput& input) {
+    ForwardInput modified_input = input;
+    modified_input.token_ids = tokens;
+    modified_input.positions = positions;
+    return forward(modified_input, kv_caches);
   }
 
   // load the weight from the checkpoint
@@ -424,11 +434,49 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   // returns: [num_tokens, hidden_size]
-  virtual ModelOutput forward(const torch::Tensor& tokens,
-                              const torch::Tensor& positions,
+  virtual ModelOutput forward(const ForwardInput& input,
+                              std::vector<KVCache>& kv_caches) {
+    using ModelImplType = typename LlmModelType::ContainedType;
+    if constexpr (requires(ModelImplType* model,
+                           const ForwardInput& forward_input,
+                           std::vector<KVCache>& caches) {
+                    model->forward(forward_input, caches);
+                  }) {
+      return model_->forward(input, kv_caches);
+    } else if constexpr (requires(ModelImplType* model,
+                                  torch::Tensor tokens,
+                                  torch::Tensor positions,
+                                  std::vector<KVCache>& caches,
+                                  const ForwardInput& params) {
+                           model->forward(tokens, positions, caches, params);
+                         }) {
+      return model_->forward(
+          input.token_ids, input.positions, kv_caches, input);
+    } else {
+      static_assert(sizeof(ModelImplType) == 0,
+                    "Model must implement a supported forward interface");
+    }
+  }
+
+  virtual ModelOutput forward(torch::Tensor tokens,
+                              torch::Tensor positions,
                               std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) {
-    return model_(tokens, positions, kv_caches, input_params);
+                              const ForwardInput& input) {
+    ForwardInput modified_input = input;
+    modified_input.token_ids = tokens;
+    modified_input.positions = positions;
+    using ModelImplType = typename LlmModelType::ContainedType;
+    if constexpr (requires(ModelImplType* model,
+                           torch::Tensor token_ids,
+                           torch::Tensor pos,
+                           std::vector<KVCache>& caches,
+                           const ForwardInput& params) {
+                    model->forward(token_ids, pos, caches, params);
+                  }) {
+      return model_->forward(tokens, positions, kv_caches, modified_input);
+    } else {
+      return forward(modified_input, kv_caches);
+    }
   }
 
   // hidden_states: [num_tokens, hidden_size]

@@ -9,7 +9,7 @@ cc_library(
     causal_vlm.h
     dit_model.h
     model_args.h
-    model_input_params.h
+    model_input_types.h
   SRCS
   DEPS
     :common

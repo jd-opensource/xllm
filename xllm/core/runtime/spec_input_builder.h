@@ -21,11 +21,12 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "framework/model/model_input_types.h"
+#include "runtime/forward_params.h"
 #include "util/slice.h"
 
 namespace xllm {
 
-struct ModelInputParams;
 struct ForwardInput;
 
 namespace specBuilder {
@@ -137,22 +138,24 @@ void update_kv_seq_lens_and_max(std::vector<int32_t>& kv_seq_lens_vec,
                                 int32_t kv_len,
                                 int32_t& kv_max_seq_len);
 
-// Builds q_cu_seq_lens tensor from upstream-provided host values.
-// When include_leading_zero is true, returns query_start_loc-style
-// [0, cumsum...].
-torch::Tensor build_q_cu_seq_lens_tensor(const ModelInputParams& params,
+// Builds q_cu_seq_lens tensor from upstream-provided host values. When
+// include_leading_zero is true, returns query_start_loc-style [0, cumsum...].
+torch::Tensor build_q_cu_seq_lens_tensor(const ForwardInput& params,
                                          torch::Device device = torch::kCPU,
                                          bool include_leading_zero = false);
+torch::Tensor build_q_cu_seq_lens_tensor(const AttentionHostInput& attention,
+                                         torch::Device device = torch::kCPU);
 
-// Updates common decode-side ModelInputParams fields from built buffers.
-void update_input_params(ModelInputParams& input_params,
-                         DecodeBuildBuffers& buf,
-                         int32_t q_max_seq_len,
-                         std::vector<int32_t> q_seq_lens_vec,
-                         std::vector<int32_t> q_cu_seq_lens_vec,
-                         int32_t kv_max_seq_len,
-                         std::vector<int32_t> kv_seq_lens_vec,
-                         bool update_block_tables = false);
+// Updates common decode-side model input fields from built buffers.
+void update_input(BatchInputMeta& meta,
+                  AttentionInput& attention,
+                  DecodeBuildBuffers& buf,
+                  int32_t q_max_seq_len,
+                  std::vector<int32_t> q_seq_lens_vec,
+                  std::vector<int32_t> q_cu_seq_lens_vec,
+                  int32_t kv_max_seq_len,
+                  std::vector<int32_t> kv_seq_lens_vec,
+                  bool update_block_tables = false);
 
 namespace draftProbs {
 

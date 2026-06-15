@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <tuple>
 
+#include "runtime/forward_params.h"
 #include "xllm/core/kernels/ops_api.h"
 
 namespace xllm {
@@ -350,13 +351,10 @@ torch::Tensor run_spec_verify_conv(const torch::Tensor& mixed_qkv,
   conv1d_params.query_start_loc = q_cu_seq_lens;
   conv1d_params.max_query_len = static_cast<int32_t>(seq_len);
 
-  torch::Tensor conv_output =
-      xllm::kernel::causal_conv1d_update(conv1d_params)
-          .view({batch_size, seq_len, mixed_qkv.size(1)})
-          .transpose(1, 2)
-          .contiguous();
-
-  return conv_output;
+  return xllm::kernel::causal_conv1d_update(conv1d_params)
+      .view({batch_size, seq_len, mixed_qkv.size(1)})
+      .transpose(1, 2)
+      .contiguous();
 }
 
 torch::Tensor run_spec_verify_gated_delta_rule(
@@ -410,7 +408,6 @@ torch::Tensor run_spec_verify_gated_delta_rule(
   return output_and_state.first.view(
       {batch_size, seq_len, value.size(-2), value.size(-1)});
 }
-
 }  // namespace
 
 Qwen3GatedDeltaNetBaseImpl::Qwen3GatedDeltaNetBaseImpl(
@@ -492,23 +489,11 @@ void Qwen3GatedDeltaNetBaseImpl::verify_common_loaded_weights(
                           << prefix << "A_log";
 }
 
-std::pair<torch::Tensor, torch::Tensor>
-Qwen3GatedDeltaNetBaseImpl::project_padded_inputs(
-    const torch::Tensor& hidden_states,
-    const AttentionMetadata& attn_metadata) {
-  if (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill) {
-    auto [qkvz_flat, ba_flat] = project_flat_inputs(hidden_states);
-    return {reshape_qkvz_with_pad(attn_metadata, qkvz_flat),
-            reshape_qkvz_with_pad(attn_metadata, ba_flat)};
-  }
-  return project_decode_inputs(hidden_states);
-}
-
 torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     const torch::Tensor& hidden_states,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
-    const ModelInputParams& input_params) {
+    const ForwardInput& input) {
   // Save original hidden_states size for potential padding later
   const int64_t original_num_tokens = hidden_states.size(0);
   auto [qkvz_padded, ba_padded] =
@@ -542,29 +527,29 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   torch::Device device = mixed_qkv.device();
   torch::Tensor conv_weight = conv1d_->weight();
   torch::Tensor logical_state_indices =
-      get_linear_state_indices(input_params, device);
+      get_linear_state_indices(input.embedding, device);
   const int64_t checkpoint_stride =
       get_checkpoint_stride(conv_cache, ssm_cache);
   torch::Tensor linear_state_base_indices =
       build_linear_state_base_indices(logical_state_indices, checkpoint_stride);
-  const bool use_spec_verify = input_params.is_spec_verify;
+  const bool use_spec_verify = input.is_spec_verify;
   const bool is_any_prefill =
       attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
 
   if (!use_spec_verify && is_any_prefill) {
     torch::IntArrayRef num_accepted_tokens_opt;
     std::vector<int64_t> linear_state_indices_vec(
-        input_params.embedding.linear_state_ids.begin(),
-        input_params.embedding.linear_state_ids.end());
+        input.embedding.linear_state_ids.begin(),
+        input.embedding.linear_state_ids.end());
     torch::Tensor conv_input = reshape_qkvz_unpad(attn_metadata, mixed_qkv);
     mixed_qkv = xllm::kernel::causal_conv1d(
         conv_input,
         conv_weight,
         conv_cache,
         std::optional<torch::Tensor>(),  // bias (no bias for qwen3)
-        torch::IntArrayRef(input_params.parallel.query_start_loc),
+        torch::IntArrayRef(input.parallel.query_start_loc),
         torch::IntArrayRef(linear_state_indices_vec),
-        torch::IntArrayRef(input_params.parallel.has_initial_state),
+        torch::IntArrayRef(input.parallel.has_initial_state),
         num_accepted_tokens_opt,
         1,   // activation_mode
         -1,  // pad_slot_id
@@ -574,19 +559,18 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     mixed_qkv = reshape_qkvz_with_pad(attn_metadata, mixed_qkv);
     mixed_qkv = mixed_qkv.transpose(1, 2);
   } else if (use_spec_verify) {
-    CHECK(input_params.num_accepted_tokens.defined())
+    CHECK(input.num_accepted_tokens.defined())
         << "num_accepted_tokens must be populated for Qwen3.5 spec verify";
     torch::Tensor conv_weight_for_update =
         conv_weight.transpose(0, 1).contiguous();
     torch::Tensor pre_conv_mixed_qkv = mixed_qkv.transpose(1, 2);
-    mixed_qkv =
-        run_spec_verify_conv(pre_conv_mixed_qkv,
-                             conv_cache,
-                             logical_state_indices,
-                             input_params.num_accepted_tokens.to(device),
-                             attn_metadata.q_cu_seq_lens,
-                             conv_weight_for_update,
-                             conv_kernel_size_);
+    mixed_qkv = run_spec_verify_conv(pre_conv_mixed_qkv,
+                                     conv_cache,
+                                     logical_state_indices,
+                                     input.num_accepted_tokens.to(device),
+                                     attn_metadata.q_cu_seq_lens,
+                                     conv_weight_for_update,
+                                     conv_kernel_size_);
   } else {
     torch::Tensor conv_weight_for_update =
         conv_weight.transpose(0, 1).contiguous();
@@ -651,7 +635,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   // Apply chunked or recurrent gated-delta attention and update caches.
   if (use_spec_verify) {
     torch::Tensor spec_num_accepted_tokens = expand_sequence_tensor_to_batch(
-        input_params.num_accepted_tokens.to(device, torch::kInt32),
+        input.num_accepted_tokens.to(device, torch::kInt32),
         batch_size,
         "num_accepted_tokens");
     torch::Tensor spec_linear_state_base_indices =
@@ -720,12 +704,11 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     // Shape: [batch_size, num_heads, head_k_dim, head_v_dim]
     torch::Tensor initial_state_tensor =
         torch::index_select(ssm_cache, 0, linear_state_base_indices);
-    CHECK_EQ(input_params.parallel.has_initial_state.size(),
-             input_params.embedding.linear_state_ids.size())
+    CHECK_EQ(input.parallel.has_initial_state.size(),
+             input.embedding.linear_state_ids.size())
         << "has_initial_state must be sequence-scoped.";
-    for (size_t i = 0; i < input_params.parallel.has_initial_state.size();
-         ++i) {
-      if (input_params.parallel.has_initial_state[i] == 0) {
+    for (size_t i = 0; i < input.parallel.has_initial_state.size(); ++i) {
+      if (input.parallel.has_initial_state[i] == 0) {
         initial_state_tensor.select(0, static_cast<int64_t>(i)).fill_(0.0);
       }
     }
@@ -816,6 +799,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
                           .contiguous();
     }
   }
+
   auto z_reshaped = z.view({-1, z.size(-1)});
   auto core_attn_out_reshaped =
       core_attn_out.view({-1, core_attn_out.size(-1)});
@@ -870,12 +854,12 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::reshape_qkvz_unpad(
 }
 
 torch::Tensor Qwen3GatedDeltaNetBaseImpl::get_linear_state_indices(
-    const ModelInputParams& input_params,
+    const ModelEmbeddingInput& embedding_input,
     const torch::Device& device) const {
-  CHECK(!input_params.embedding.linear_state_ids.empty())
+  CHECK(!embedding_input.linear_state_ids.empty())
       << "linear_state_ids must be populated for gated delta net";
-  if (input_params.embedding.linear_state_indices.defined()) {
-    auto indices = input_params.embedding.linear_state_indices;
+  if (embedding_input.linear_state_indices.defined()) {
+    auto indices = embedding_input.linear_state_indices;
     if (indices.device() != device || indices.scalar_type() != torch::kInt) {
       indices =
           indices.to(torch::TensorOptions().dtype(torch::kInt).device(device),
@@ -885,7 +869,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::get_linear_state_indices(
     return indices.contiguous();
   }
   return torch::tensor(
-      input_params.embedding.linear_state_ids,
+      embedding_input.linear_state_ids,
       torch::TensorOptions().dtype(torch::kInt).device(device));
 }
 

@@ -14,10 +14,12 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/rotary_embedding_util.h"
 #include "llm_model_base.h"
 #include "qwen3.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -28,17 +30,16 @@ class OxygenModelImpl : public QWen3ModelImpl {
   virtual ModelOutput forward(torch::Tensor tokens,
                               torch::Tensor positions,
                               std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) {
-    bool use_deepstack = input_params.multimodal.deep_stacks.size() > 0;
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
+                              const ForwardInput& input) {
+    bool use_deepstack = input.multimodal.deep_stacks.size() > 0;
+    ForwardInput& input_new = const_cast<ForwardInput&>(input);
     std::vector<torch::Tensor> deep_stacks;
 
     if (tokens.numel() == 0) {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
       positions = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
     }
-    auto inputs_embeds = input_params.embedding.input_embedding;
+    auto inputs_embeds = input.embedding.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
@@ -47,18 +48,17 @@ class OxygenModelImpl : public QWen3ModelImpl {
     }
     if (use_deepstack) {
       deep_stacks =
-          input_params.multimodal.deep_stacks;  // [num_deepstack, hidden_size]
+          input.multimodal.deep_stacks;  // [num_deepstack, hidden_size]
     }
 
-    auto& dp_token_nums = input_params_new.parallel.dp_global_token_nums;
+    auto& dp_token_nums = input_new.parallel.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
-    if (!input_params_new.attn_metadata) {
-      input_params_new.attn_metadata =
-          std::make_shared<layer::AttentionMetadata>(
-              get_attention_metadata(input_params_new, h));
+    if (!input_new.attn_metadata) {
+      input_new.attn_metadata = std::make_shared<layer::AttentionMetadata>(
+          get_attention_metadata(input_new, h));
     }
 
-    auto& attn_metadata = *(input_params_new.attn_metadata);
+    auto& attn_metadata = *(input_new.attn_metadata);
     bool only_prefill =
         (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
     if (positions.dim() == 2 && only_prefill && !mrope_section_.empty()) {
@@ -68,22 +68,16 @@ class OxygenModelImpl : public QWen3ModelImpl {
 
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
-      if (is_rec_multi_round_mode() && input_params_new.has_llmrec_params()) {
-        const auto& llmrec_params = input_params_new.llmrec_params();
+      if (is_rec_multi_round_mode() && input_new.has_llmrec_params()) {
+        const auto& llmrec_params = input_new.llmrec_params();
         attn_metadata.full_k_cache = llmrec_params->full_k_caches[i];
         attn_metadata.full_v_cache = llmrec_params->full_v_caches[i];
         attn_metadata.unshared_k_cache = llmrec_params->unshared_k_caches[i];
         attn_metadata.unshared_v_cache = llmrec_params->unshared_v_caches[i];
       }
       auto& layer = layers_[i];
-      h = layer(h,
-                residual,
-                positions,
-                attn_metadata,
-                kv_caches[i],
-                input_params_new);
-      if (!input_params_new.record_layer(static_cast<uint32_t>(i),
-                                         h.device())) {
+      h = layer(h, residual, positions, attn_metadata, kv_caches[i], input_new);
+      if (!input_new.record_layer(static_cast<uint32_t>(i), h.device())) {
         return ModelOutput();
       }
 

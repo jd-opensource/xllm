@@ -24,7 +24,7 @@ limitations under the License.
 #include <unordered_map>
 
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
@@ -36,6 +36,7 @@ limitations under the License.
 #include "models/vlm/utils/multimodal_utils.h"
 #include "processors/glm4v_image_processor.h"
 #include "processors/glm4v_video_processor.h"
+#include "runtime/forward_params.h"
 
 namespace xllm::npu::model {
 
@@ -55,10 +56,10 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
         register_module("language_model", Glm4MoeForCausalLM(context));
   }
 
-  void prepare_encoder_input(const ModelInputParams& input_params,
+  void prepare_encoder_input(const ForwardInput& input,
                              std::optional<Glm4VImageInputs>& image_inputs,
                              std::optional<Glm4VVideoInputs>& video_inputs) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+    const auto& mm_data = input.multimodal.mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
       pixel_values = res.value();
@@ -82,10 +83,10 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
       video_inputs = Glm4VVideoInputs{pixel_values_videos, video_grid_thw};
   }
 
-  MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
+  MMDict get_multimodal_embeddings(const ForwardInput& input) {
     std::optional<Glm4VImageInputs> image_input;
     std::optional<Glm4VVideoInputs> video_input;
-    prepare_encoder_input(input_params, image_input, video_input);
+    prepare_encoder_input(input, image_input, video_input);
 
     MMDict multimodal_embeds;
     if (image_input) {
@@ -93,7 +94,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
       torch::Tensor image_grid =
           image_input->image_grid_thw.to(options_.device());
       std::vector<int32_t> image_token_nums =
-          get_mm_token_nums(input_params.multimodal.mm_data, MMType::IMAGE);
+          get_mm_token_nums(input.multimodal.mm_data, MMType::IMAGE);
       if (!use_encoder_dp_) {
         auto image_embeds = visual_(image_pixels, image_grid);
         multimodal_embeds["image|embedding"] =
@@ -125,7 +126,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
           video_input->pixel_values_videos.to(options_);
       auto video_embeds = visual_(video_pixels, flatten_video_grid_thw);
       std::vector<int32_t> video_token_nums =
-          get_mm_token_nums(input_params.multimodal.mm_data, MMType::VIDEO);
+          get_mm_token_nums(input.multimodal.mm_data, MMType::VIDEO);
       multimodal_embeds["video|embedding"] =
           split_by_token_nums(video_embeds, video_token_nums);
     }
@@ -141,8 +142,8 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
   }
 
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
-                                     const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+                                     const ForwardInput& input) {
+    const auto& mm_data = input.multimodal.mm_data;
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
     auto merge_modality = [&](const std::string& embed_key,
                               const std::string& mask_key) {
@@ -163,8 +164,8 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
   ModelOutput forward(const torch::Tensor& tokens,
                       const torch::Tensor& positions,
                       std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    return language_model_(tokens, positions, kv_caches, input_params);
+                      const ForwardInput& input) {
+    return language_model_->forward(tokens, positions, kv_caches, input);
   }
 
   torch::Tensor logits(const torch::Tensor& hidden_states,

@@ -28,7 +28,7 @@ limitations under the License.
 #include <functional>
 
 #include "atb/atb_infer.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "loader/column_parallel_linear_loader.h"

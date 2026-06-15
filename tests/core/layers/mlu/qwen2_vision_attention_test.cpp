@@ -20,7 +20,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/mlu/tests_utils.h"

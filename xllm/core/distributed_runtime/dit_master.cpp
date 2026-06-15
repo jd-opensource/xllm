@@ -91,7 +91,7 @@ void DiTMaster::handle_request(DiTRequestParams params,
       return;
     }
     DiTRequestState dit_state = DiTRequestState(
-        params.input_params, params.generation_params, callback, nullptr, call);
+        params.input, params.generation_params, callback, nullptr, call);
     auto request = std::make_shared<DiTRequest>(params.request_id,
                                                 params.x_request_id,
                                                 params.x_request_time,

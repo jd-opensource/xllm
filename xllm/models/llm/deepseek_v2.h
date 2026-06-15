@@ -24,6 +24,7 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "core/layers/mlu/deepseek_v2_decoder_layer_impl.h"
 #include "llm_model_base.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -69,27 +70,26 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   ModelOutput forward_native(torch::Tensor tokens,
                              torch::Tensor positions,
                              std::vector<KVCache>& kv_caches,
-                             const ModelInputParams& input_params) {
+                             const ForwardInput& input) {
     // for dp, if tokens is empty, set tokens to 1 and positions to 0
-    ModelInputParams modified_input_params = input_params;
+    ForwardInput modified_input = input;
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
         positions = torch::tensor({1}).to(torch::kInt32).to(device_);
       }
-      auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;
+      auto& dp_token_nums = modified_input.parallel.dp_global_token_nums;
       std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     }
-    if (!modified_input_params.attn_metadata) {
-      modified_input_params.attn_metadata =
-          std::make_shared<layer::AttentionMetadata>(
-              layer::AttentionMetadataBuilder::build(modified_input_params,
-                                                     model_args_.enable_mla(),
-                                                     /*compute_dtype=*/"half",
-                                                     /*attn_mask=*/std::nullopt,
-                                                     /*device=*/device_));
+    if (!modified_input.attn_metadata) {
+      modified_input.attn_metadata = std::make_shared<layer::AttentionMetadata>(
+          layer::AttentionMetadataBuilder::build(modified_input,
+                                                 model_args_.enable_mla(),
+                                                 /*compute_dtype=*/"half",
+                                                 /*attn_mask=*/std::nullopt,
+                                                 /*device=*/device_));
     }
-    auto& attn_metadata = *(modified_input_params.attn_metadata);
+    auto& attn_metadata = *(modified_input.attn_metadata);
     torch::Tensor hidden_states = embed_tokens_(tokens);
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
@@ -105,9 +105,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
                             positions,
                             attn_metadata,
                             kv_caches[i],
-                            modified_input_params);
-      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
-                                              hidden_states.device())) {
+                            modified_input);
+      if (!modified_input.record_layer(static_cast<uint32_t>(i),
+                                       hidden_states.device())) {
         return ModelOutput();
       }
     }
@@ -119,8 +119,8 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   ModelOutput forward(const torch::Tensor& tokens,
                       const torch::Tensor& positions,
                       std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    return forward_native(tokens, positions, kv_caches, input_params);
+                      const ForwardInput& input) {
+    return forward_native(tokens, positions, kv_caches, input);
   }
 
   // load the weight from the checkpoint

@@ -41,6 +41,7 @@
 #include "models/vlm/qwen2_5_vl.h"
 #include "processors/qwen2_vl_image_processor.h"
 #include "processors/transforms.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -542,10 +543,9 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     mm_data.set(MMType::IMAGE, std::move(mm_items));
     std::vector<MMData> mm_data_list(static_cast<size_t>(batch_size), mm_data);
     MMBatchData mm_batch(std::move(mm_data_list));
-    ModelInputParams input_params = build_longcat_input_params(
+    ForwardInput input = build_longcat_input(
         tokens_flat, positions_2d, attention_mask, mm_batch);
-    auto model_output = text_encoder_->forward(
-        tokens_flat, positions_2d, kv_caches, input_params);
+    auto model_output = text_encoder_->forward(input, kv_caches);
     torch::Tensor hidden_states_flat = model_output.hidden_states;
 
     int64_t hidden_size = hidden_states_flat.size(-1);
@@ -671,7 +671,7 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     return {latents, image_latents, latents_ids, image_latents_ids};
   }
 
-  // Build ModelInputParams for LongCat-Image text encoding (reuse from
+  // Build ForwardInput for LongCat-Image text encoding (reuse from
   // T2I pipeline). When mm_data_opt is provided (e.g. pixel_values +
   // image_grid_thw), the text encoder will use vision embeddings.
   torch::Tensor build_qwen2_5_vl_mrope_positions(
@@ -793,12 +793,14 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     return position_ids.reshape({3, -1}).contiguous();
   }
 
-  ModelInputParams build_longcat_input_params(
+  ForwardInput build_longcat_input(
       const torch::Tensor& tokens,
       const torch::Tensor& positions,
       const torch::Tensor& attention_mask,
       std::optional<MMBatchData> mm_data_opt = std::nullopt) {
-    ModelInputParams params;
+    ForwardInput params;
+    params.token_ids = tokens;
+    params.positions = positions;
 
     int64_t actual_seq_len;
     if (positions.dim() == 2) {
@@ -830,10 +832,15 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     // (may be needed by multimodal processing)
     params.attn_metadata = std::make_shared<layer::AttentionMetadata>(
         layer::AttentionMetadataBuilder::build(
-            params, context_.get_model_args("text_encoder").enable_mla()));
+            params.meta,
+            params.attention,
+            params.graph,
+            params.llmrec_params(),
+            params.enable_cuda_graph,
+            context_.get_model_args("text_encoder").enable_mla()));
     params.attn_metadata->is_causal = true;
     params.embedding.input_embedding =
-        text_encoder_->get_input_embeddings(tokens, params);
+        text_encoder_->get_input_embeddings(tokens, params.multimodal);
     if (attention_mask.defined() && attention_mask.size(0) > 0) {
       params.graph.attn_mask = attention_mask.view({-1}).to(torch::kFloat32);
     }

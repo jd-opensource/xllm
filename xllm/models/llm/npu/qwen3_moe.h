@@ -23,6 +23,7 @@ limitations under the License.
 #include "core/framework/parallel_state/npu_dp_ep_padding.h"
 #include "core/layers/npu/npu_qwen3_moe_decoder_layer_impl.h"
 #include "llm_model_base.h"
+#include "runtime/forward_params.h"
 
 namespace xllm::npu::model {
 
@@ -43,7 +44,7 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor sin_pos,
                         torch::Tensor attn_mask,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params,
+                        const ForwardInput& input,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr) {
     return decoder_layer_(x,
@@ -52,7 +53,7 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
                           sin_pos,
                           attn_mask,
                           kv_cache,
-                          input_params,
+                          input,
                           event,
                           event_flag);
   }
@@ -216,14 +217,14 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   ModelOutput forward(torch::Tensor tokens,
                       torch::Tensor positions,
                       std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
+                      const ForwardInput& input) {
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
         positions = torch::tensor({0}).to(torch::kInt32).to(device_);
       }
     }
-    auto inputs_embeds = input_params.embedding.input_embedding;
+    auto inputs_embeds = input.embedding.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
@@ -271,35 +272,35 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 
     torch::Tensor attn_mask;
     // for chunked prefill, generate the attn mask.
-    if (!input_params.meta.batch_forward_type.is_decode()) {
+    if (!input.meta.batch_forward_type.is_decode()) {
       max_seq_len_ =
           ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()
-              ? std::max(input_params.meta.kv_max_seq_len, max_seq_len_)
+              ? std::max(input.meta.kv_max_seq_len, max_seq_len_)
               : 128;
       if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
         attn_mask = attn_mask_.get_attn_mask(
             max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
-        int batch_size = input_params.attention.host.q_seq_lens.size();
+        int batch_size = input.attention.host.q_seq_lens.size();
         if (batch_size > 0) {
           std::vector<torch::Tensor> req_mask_vec;
           req_mask_vec.reserve(batch_size);
 
           for (int j = 0; j < batch_size; j++) {
-            int start = input_params.attention.host.kv_seq_lens[j] -
-                        input_params.attention.host.q_seq_lens[j];
-            int end = input_params.attention.host.kv_seq_lens[j];
+            int start = input.attention.host.kv_seq_lens[j] -
+                        input.attention.host.q_seq_lens[j];
+            int end = input.attention.host.kv_seq_lens[j];
 
             auto req_mask_slice = attn_mask.slice(0, start, end);
             req_mask_vec.emplace_back(req_mask_slice);
           }
           attn_mask = torch::cat(req_mask_vec, 0);
         }
-      } else if (input_params.meta.batch_forward_type.is_prefill()) {
+      } else if (input.meta.batch_forward_type.is_prefill()) {
         attn_mask = attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
       }
     }
-    auto deep_stacks = input_params.multimodal.deep_stacks;
+    auto deep_stacks = input.multimodal.deep_stacks;
     int deep_stack_size = deep_stacks.size();
 
     int64_t input_length = h.size(0);
@@ -307,9 +308,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         0,
         input_length * num_experts_per_tok_,
         torch::TensorOptions().dtype(torch::kInt32).device(tokens.device()));
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
-    input_params_new.expert.expert_array = expert_array;
+    ForwardInput& input_new = const_cast<ForwardInput&>(input);
+    input_new.expert.expert_array = expert_array;
 
     RollingLayerGuard rolling_guard(rolling_mgr_);
 
@@ -323,12 +323,11 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.parallel.layer_synchronizer != nullptr) {
-        event = input_params.parallel.layer_synchronizer->get_event(i);
-        event_flag =
-            input_params.parallel.layer_synchronizer->get_event_flag(i);
+      if (input.parallel.layer_synchronizer != nullptr) {
+        event = input.parallel.layer_synchronizer->get_event(i);
+        event_flag = input.parallel.layer_synchronizer->get_event_flag(i);
       }
-      if (!input_params.synchronize_layer(i)) {
+      if (!input.synchronize_layer(i)) {
         return ModelOutput();
       }
 
@@ -356,7 +355,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
             sin_pos,
             attn_mask,
             kv_caches[i],
-            input_params,
+            input,
             event,
             event_flag);
       rolling_guard.after_layer(layer_index);

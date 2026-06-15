@@ -27,7 +27,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/dit_model_loader.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"
 #include "framework/model_context.h"

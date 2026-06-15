@@ -35,9 +35,9 @@ limitations under the License.
 #include "core/common/macros.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/causal_lm.h"
-#include "core/framework/model/model_input_params.h"
 #include "core/kernels/cuda/llm_decode_metadata_update.h"
 #include "core/kernels/cuda/piecewise_graphs.h"
+#include "core/runtime/forward_params.h"
 #include "executor_impl.h"
 #include "executor_impl_factory.h"
 #include "options.h"
@@ -62,18 +62,16 @@ class CudaGraphPersistentParam {
   ~CudaGraphPersistentParam() = default;
 
   // Update persistent tensors with new input data
-  // If return_capture_params is true, returns a ModelInputParams with
+  // If return_capture_input is true, returns a ForwardInput with
   // persistent buffer references. padded_num_tokens must be > 0 when
-  // return_capture_params is true, used for build new ModelInputParams for
-  // capture. If return_capture_params is false, only updates persistent buffers
+  // return_capture_input is true, used for building new ForwardInput for
+  // capture. If return_capture_input is false, only updates persistent buffers
   // and returns std::nullopt.
-  std::optional<ModelInputParams> update(const torch::Tensor& tokens,
-                                         const torch::Tensor& k_cache,
-                                         const torch::Tensor& v_cache,
-                                         const torch::Tensor& positions,
-                                         const ModelInputParams& params,
-                                         uint32_t padded_num_tokens = 0,
-                                         bool return_capture_params = false);
+  std::optional<ForwardInput> update(const ForwardInput& input,
+                                     const torch::Tensor& k_cache,
+                                     const torch::Tensor& v_cache,
+                                     uint32_t padded_num_tokens = 0,
+                                     bool return_capture_input = false);
 
   // Getter methods for persistent tensors
   torch::Tensor persistent_tokens(uint32_t actual_tokens) const {
@@ -198,12 +196,8 @@ class CudaGraphPersistentParam {
   }
 
  private:
-  bool can_use_llm_decode_fast_path(const torch::Tensor& tokens,
-                                    const torch::Tensor& positions,
-                                    const ModelInputParams& params) const;
-  void update_llm_decode_metadata_fast_path(const torch::Tensor& tokens,
-                                            const torch::Tensor& positions,
-                                            const ModelInputParams& params,
+  bool can_use_llm_decode_fast_path(const ForwardInput& input) const;
+  void update_llm_decode_metadata_fast_path(const ForwardInput& input,
                                             uint32_t padded_num_tokens,
                                             int64_t actual_batch_size,
                                             int64_t actual_num_tokens);
@@ -253,19 +247,14 @@ class CudaGraph {
   bool capture(CausalLM* model,
                const ModelArgs& args,
                const runtime::Options& options,
-               const torch::Tensor& tokens,
-               const torch::Tensor& positions,
-               const ModelInputParams& params,
+               const ForwardInput& input,
                std::vector<KVCache>& kv_cache,
                uint32_t bucket_num_tokens,
                const at::cuda::MempoolId_t& pool,
                TorchMemPool* pool_ptr = nullptr);
 
   // Replay captured graph with new input data
-  ModelOutput replay(const torch::Tensor& tokens,
-                     const torch::Tensor& positions,
-                     std::vector<KVCache>& kv_cache,
-                     const ModelInputParams& params);
+  ModelOutput replay(const ForwardInput& input, std::vector<KVCache>& kv_cache);
 
   // Get the hidden states from the last capture
   torch::Tensor get_hidden_states(uint32_t actual_num_tokens) const {
@@ -307,10 +296,8 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
   ForwardInput prepare_inputs(Batch& batch) override;
 
   // Execute model with graph optimization for decode phase
-  ModelOutput run(const torch::Tensor& tokens,
-                  const torch::Tensor& positions,
-                  std::vector<KVCache>& kv_caches,
-                  const ModelInputParams& params) override;
+  ModelOutput run(const ForwardInput& input,
+                  std::vector<KVCache>& kv_caches) override;
 
   // Return current graph executor memory usage in bytes (including persistent
   // parameters). Exposed for tests and diagnostics.

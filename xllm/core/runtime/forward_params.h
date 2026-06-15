@@ -32,13 +32,17 @@ limitations under the License.
 #include "core/framework/multimodal/mm_batch_data.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "framework/config/execution_config.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"
 #include "runtime/dit_forward_params.h"
 
 namespace xllm {
+
+namespace layer {
+struct AttentionMetadata;
+}  // namespace layer
 
 struct ForwardInput;
 
@@ -206,15 +210,15 @@ inline torch::Tensor normalize_positions_for_device(
   return positions;
 }
 
-inline bool has_contiguous_input_buffer_exclusions(
-    const ModelInputParams& params) {
+template <typename Input>
+inline bool has_contiguous_input_buffer_exclusions(const Input& params) {
   return params.multimodal.mm_data.valid() || params.has_onerec_params() ||
          params.has_llmrec_params() || params.dit_forward_input.valid() ||
          !params.multimodal.deep_stacks.empty();
 }
 
-inline void clear_contiguous_input_buffer_tensor_targets(
-    ModelInputParams& params) {
+template <typename Input>
+inline void clear_contiguous_input_buffer_tensor_targets(Input& params) {
   params.embedding.input_embedding = torch::Tensor();
   params.embedding.linear_state_indices = torch::Tensor();
   params.embedding.mtp_bootstrap_embeddings = torch::Tensor();
@@ -223,6 +227,7 @@ inline void clear_contiguous_input_buffer_tensor_targets(
   params.block_copy.cum_sum = torch::Tensor();
   params.graph.attn_mask = torch::Tensor();
   params.graph.tiling_data = torch::Tensor();
+  params.dsa_topk_indices = torch::Tensor();
 }
 
 inline bool add_attention_to_plan(const AttentionInput& source,
@@ -256,8 +261,9 @@ inline bool add_attention_to_plan(const AttentionInput& source,
                   &target.device.ring_cache_seqlen);
 }
 
-inline bool add_model_tensors_to_plan(const ModelInputParams& source,
-                                      ModelInputParams& target,
+template <typename Input>
+inline bool add_model_tensors_to_plan(const Input& source,
+                                      Input& target,
                                       ForwardInputBufferPlan& plan) {
   return plan.add(source.embedding.input_embedding,
                   &target.embedding.input_embedding) &&
@@ -271,7 +277,8 @@ inline bool add_model_tensors_to_plan(const ModelInputParams& source,
                   &target.block_copy.dst_block_indices) &&
          plan.add(source.block_copy.cum_sum, &target.block_copy.cum_sum) &&
          plan.add(source.graph.attn_mask, &target.graph.attn_mask) &&
-         plan.add(source.graph.tiling_data, &target.graph.tiling_data);
+         plan.add(source.graph.tiling_data, &target.graph.tiling_data) &&
+         plan.add(source.dsa_topk_indices, &target.dsa_topk_indices);
 }
 
 inline torch::Tensor gather_tensor_by_indices(
@@ -455,7 +462,7 @@ struct ForwardInput {
     inputs.token_ids = safe_to(source_token_ids, device, true);
     inputs.positions = detail::normalize_positions_for_device(
         safe_to(source_positions, device, true));
-    inputs.input_params = input_params.to(device);
+    copy_model_inputs_to_device(device, inputs);
     inputs.sampling_params = sampling_params.to(device, dtype);
     inputs.decoder_sampling_params = decoder_sampling_params.to(device, dtype);
     copy_metadata_to(inputs);
@@ -472,14 +479,13 @@ struct ForwardInput {
     copy_metadata_to(inputs);
     set_host_views(inputs);
 
-    const ModelInputParams& source_params = input_params;
     if (missing_required_host_views(inputs) ||
-        detail::has_contiguous_input_buffer_exclusions(source_params)) {
+        detail::has_contiguous_input_buffer_exclusions(*this)) {
       return false;
     }
 
-    inputs.input_params = source_params;
-    detail::clear_contiguous_input_buffer_tensor_targets(inputs.input_params);
+    copy_model_inputs_to(inputs);
+    detail::clear_contiguous_input_buffer_tensor_targets(inputs);
 
     inputs.sampling_params = sampling_params;
     inputs.decoder_sampling_params = decoder_sampling_params;
@@ -493,10 +499,8 @@ struct ForwardInput {
       return false;
     }
 
-    if (!detail::add_attention_to_plan(
-            source_params.attention, inputs.input_params.attention, plan) ||
-        !detail::add_model_tensors_to_plan(
-            source_params, inputs.input_params, plan)) {
+    if (!detail::add_attention_to_plan(attention, inputs.attention, plan) ||
+        !detail::add_model_tensors_to_plan(*this, inputs, plan)) {
       return false;
     }
 
@@ -529,6 +533,57 @@ struct ForwardInput {
     inputs.cp_partitioned = cp_partitioned;
   }
 
+  void copy_model_inputs_to(ForwardInput& inputs) const {
+    inputs.meta = meta;
+    inputs.attention = attention;
+    inputs.embedding = embedding;
+    inputs.parallel = parallel;
+    inputs.block_copy = block_copy;
+    inputs.multimodal = multimodal;
+    inputs.expert = expert;
+    inputs.graph = graph;
+    inputs.rec_params = rec_params;
+    inputs.dit_forward_input = dit_forward_input;
+    inputs.attn_metadata = attn_metadata;
+    inputs.enable_cuda_graph = enable_cuda_graph;
+    inputs.enable_graph = enable_graph;
+    inputs.multi_block_tables = multi_block_tables;
+    inputs.mtp_shifted_token_ids = mtp_shifted_token_ids;
+    inputs.dsa_topk_indices = dsa_topk_indices;
+    inputs.is_spec_verify = is_spec_verify;
+    inputs.num_accepted_tokens = num_accepted_tokens;
+  }
+
+  void copy_model_inputs_to_device(const torch::Device& device,
+                                   ForwardInput& inputs) const {
+    inputs.meta = meta;
+    inputs.attention = attention.to(device);
+    inputs.embedding = embedding.to(device);
+    inputs.block_copy = block_copy.to(device);
+    inputs.multimodal = multimodal.to(device);
+    inputs.parallel = parallel.to(device);
+    inputs.expert = expert.to(device);
+    inputs.graph = graph.to(device);
+    inputs.dit_forward_input = dit_forward_input.to(device);
+    inputs.is_spec_verify = is_spec_verify;
+    inputs.num_accepted_tokens = safe_to(num_accepted_tokens, device, true);
+    inputs.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
+    inputs.dsa_topk_indices = safe_to(dsa_topk_indices, device, true);
+    for (const auto& table : multi_block_tables) {
+      inputs.multi_block_tables.push_back(
+          safe_to(table, table.options().device(torch::kCPU), true));
+    }
+
+    // rec_params device conversion for both OneRec and LLM-Rec variants
+    if (const auto* onerec_xattn = onerec_xattention_params()) {
+      inputs.rec_params = onerec_xattn->to(device);
+    } else if (const auto* onerec = onerec_params()) {
+      inputs.rec_params = onerec->to(device);
+    } else if (const auto* llmrec = llmrec_params()) {
+      inputs.rec_params = llmrec->to(device);
+    }
+  }
+
   void set_host_views(ForwardInput& inputs) const {
     inputs.token_ids_host =
         token_ids_host.defined() ? token_ids_host : cpu_view(token_ids);
@@ -559,7 +614,37 @@ struct ForwardInput {
   void print() const {
     LOG(INFO) << "  token_ids: " << token_ids << std::endl;
     LOG(INFO) << "  positions: " << positions << std::endl;
-    input_params.print();
+    LOG(INFO) << "ForwardInput: batch_forward_type is "
+              << meta.batch_forward_type.to_string() << " , num_sequences is "
+              << meta.num_sequences << " , kv_max_seq_len is "
+              << meta.kv_max_seq_len << " , q_max_seq_len is "
+              << meta.q_max_seq_len;
+    LOG(INFO) << "ForwardInput: attention.host.kv_seq_lens is "
+              << attention.host.kv_seq_lens;
+    LOG(INFO) << "ForwardInput: attention.host.q_seq_lens is "
+              << attention.host.q_seq_lens;
+    LOG(INFO) << "ForwardInput: batch_forward_type is "
+              << meta.batch_forward_type.to_string();
+    print_tensor(attention.device.kv_seq_lens, "ForwardInput: kv_seq_lens", 4);
+    print_tensor(attention.device.q_seq_lens, "ForwardInput: q_seq_lens", 4);
+    print_tensor(
+        attention.device.q_cu_seq_lens, "ForwardInput: q_cu_seq_lens", 4);
+    print_tensor(
+        attention.device.new_cache_slots, "ForwardInput: new_cache_slots", 4);
+    print_tensor(
+        attention.device.block_tables, "ForwardInput: block_tables", 4);
+    LOG(INFO) << "ForwardInput: dp_global_token_nums is "
+              << parallel.dp_global_token_nums
+              << ", dp_is_decode: " << parallel.dp_is_decode;
+
+    if (const auto* onerec = onerec_params()) {
+      LOG(INFO) << "ForwardInput: has onerec_params";
+      onerec->print();
+    } else if (const auto* llmrec = llmrec_params()) {
+      LOG(INFO) << "ForwardInput: has llm_rec_multi_round_params"
+                << ", beam_width=" << llmrec->beam_width
+                << ", total_round=" << llmrec->total_round;
+    }
     LOG(INFO) << " params.selected_token_idxes "
               << sampling_params.selected_token_idxes;
     LOG(INFO) << " params.sample_idxes " << sampling_params.sample_idxes;
@@ -572,13 +657,139 @@ struct ForwardInput {
 
   bool has_step_meta() const { return step_decode.has_value(); }
 
+  int32_t get_q_seq_len(int32_t seq_idx) const {
+#if defined(USE_NPU)
+    CHECK(seq_idx < attention.host.q_seq_lens.size()) << "seq_idx out of range";
+    return attention.host.q_seq_lens[seq_idx];
+#else
+    CHECK(seq_idx < attention.host.q_seq_lens.size() - 1)
+        << "seq_idx out of range";
+    return attention.host.q_seq_lens[seq_idx + 1] -
+           attention.host.q_seq_lens[seq_idx];
+#endif
+  }
+
+  bool synchronize_layer(uint32_t layer_idx) const {
+#if defined(USE_NPU)
+    if (parallel.layer_wise_load_synchronizer != nullptr &&
+        layer_idx % parallel.layers_per_bacth_copy == 0) {
+      if (!parallel.layer_wise_load_synchronizer->synchronize_layer(
+              layer_idx / parallel.layers_per_bacth_copy)) {
+        return false;
+      }
+    }
+#else
+    (void)layer_idx;
+#endif
+    return true;
+  }
+
+  bool record_layer(uint32_t layer_idx, const torch::Device& device) const {
+#if defined(USE_MLU)
+    if (parallel.layer_synchronizer != nullptr) {
+      return parallel.layer_synchronizer->record_current(layer_idx,
+                                                         device.index());
+    }
+#else
+    (void)layer_idx;
+    (void)device;
+#endif
+    return true;
+  }
+
+  const OneRecInput* onerec_params() const {
+    if (const auto* params = std::get_if<OneRecInput>(&rec_params)) {
+      return params;
+    }
+    if (const auto* params = std::get_if<OneRecXAttentionParams>(&rec_params)) {
+      return static_cast<const OneRecInput*>(params);
+    }
+    return nullptr;
+  }
+
+  bool has_onerec_params() const { return onerec_params() != nullptr; }
+
+  OneRecInput& mutable_onerec_params() {
+    if (auto* params = std::get_if<OneRecInput>(&rec_params)) {
+      return *params;
+    }
+    if (auto* params = std::get_if<OneRecXAttentionParams>(&rec_params)) {
+      return static_cast<OneRecInput&>(*params);
+    }
+    rec_params.emplace<OneRecInput>();
+    return std::get<OneRecInput>(rec_params);
+  }
+
+  const OneRecXAttentionParams* onerec_xattention_params() const {
+    return std::get_if<OneRecXAttentionParams>(&rec_params);
+  }
+
+  bool has_onerec_xattention_params() const {
+    return onerec_xattention_params() != nullptr;
+  }
+
+  OneRecXAttentionParams& mutable_onerec_xattention_params() {
+    if (!has_onerec_xattention_params()) {
+      rec_params.emplace<OneRecXAttentionParams>();
+    }
+    return std::get<OneRecXAttentionParams>(rec_params);
+  }
+
+  const LlmRecMultiRoundParams* llmrec_params() const {
+    return std::get_if<LlmRecMultiRoundParams>(&rec_params);
+  }
+
+  bool has_llmrec_params() const { return llmrec_params() != nullptr; }
+
+  LlmRecMultiRoundParams& mutable_llmrec_params() {
+    if (!has_llmrec_params()) {
+      rec_params.emplace<LlmRecMultiRoundParams>();
+    }
+    return std::get<LlmRecMultiRoundParams>(rec_params);
+  }
+
+  BatchInputMeta meta;
+  AttentionInput attention;
+  ModelEmbeddingInput embedding;
+  ParallelInput parallel;
+  BlockCopyInput block_copy;
+  MultiModalInput multimodal;
+  ExpertInput expert;
+  GraphInput graph;
+
+  // Multi block manager block tables for DeepSeek V4.
+  // Each tensor is [batch_size, max_block_len] for one manager.
+  std::vector<torch::Tensor> multi_block_tables;
+
+  // Shifted target token ids for MTP training/evaluation paths.
+  torch::Tensor mtp_shifted_token_ids;
+  // Previous layer top-k indices reused by NPU MTP draft decoding.
+  torch::Tensor dsa_topk_indices;
+  bool is_spec_verify = false;
+  torch::Tensor num_accepted_tokens;
+
+  RecInput rec_params;
+
+  // dit input data
+  DiTForwardInput dit_forward_input;
+
+  // Optional attention metadata, built by executor
+  // Using shared_ptr with forward declaration to avoid circular dependency
+  std::shared_ptr<layer::AttentionMetadata> attn_metadata;
+
+  // Flag for CUDA graph capture mode
+  bool enable_cuda_graph = false;
+
+  // Compatibility flag for code paths added before ForwardInput became the
+  // model payload. Kept in sync by callers that still use the generic name.
+  bool enable_graph = false;
+
   // flatten token ids
   torch::Tensor token_ids;
   // flatten positions
   torch::Tensor positions;
   torch::Tensor token_ids_host;
   torch::Tensor positions_host;
-  ModelInputParams input_params;
   SamplingParameters sampling_params;
   SamplingParameters decoder_sampling_params;
 
@@ -616,14 +827,14 @@ inline ForwardInput cp_partition_forward_input(const ForwardInput& input,
                                                int32_t cp_rank,
                                                int32_t cp_size) {
   if (cp_size <= 1 || !input.host_token_ids().defined() ||
-      !input.input_params.meta.batch_forward_type.is_prefill()) {
+      !input.meta.batch_forward_type.is_prefill()) {
     return input;
   }
 
   CHECK_GT(cp_size, 0);
   CHECK_GE(cp_rank, 0);
   CHECK_LT(cp_rank, cp_size);
-  CHECK_GT(input.input_params.meta.num_sequences, 0);
+  CHECK_GT(input.meta.num_sequences, 0);
 
   ForwardInput output = input;
   output.set_host_views(output);
@@ -636,13 +847,11 @@ inline ForwardInput cp_partition_forward_input(const ForwardInput& input,
     return detail::tensor_to_vector<int32_t>(tensor);
   };
 
-  const std::vector<int32_t> seq_lens =
-      host_vector_or_tensor(input.input_params.attention.host.kv_seq_lens,
-                            input.input_params.attention.device.kv_seq_lens);
-  const std::vector<int32_t> q_seq_lens =
-      host_vector_or_tensor(input.input_params.attention.host.q_seq_lens,
-                            input.input_params.attention.device.q_seq_lens);
-  const int32_t num_sequences = input.input_params.meta.num_sequences;
+  const std::vector<int32_t> seq_lens = host_vector_or_tensor(
+      input.attention.host.kv_seq_lens, input.attention.device.kv_seq_lens);
+  const std::vector<int32_t> q_seq_lens = host_vector_or_tensor(
+      input.attention.host.q_seq_lens, input.attention.device.q_seq_lens);
+  const int32_t num_sequences = input.meta.num_sequences;
 
   auto to_seq_lens =
       [&](const std::vector<int32_t>& lens) -> std::vector<int32_t> {
@@ -736,39 +945,34 @@ inline ForwardInput cp_partition_forward_input(const ForwardInput& input,
   output.positions_host =
       detail::gather_tensor_by_indices(input.host_positions(), gather_indices);
   output.positions = output.positions_host;
-  output.input_params.attention.host.new_cache_slots = host_vector_or_tensor(
-      input.input_params.attention.host.new_cache_slots,
-      input.input_params.attention.device.new_cache_slots);
-  if (!output.input_params.attention.host.new_cache_slots.empty() &&
-      output.input_params.attention.host.new_cache_slots.size() ==
+  output.attention.host.new_cache_slots =
+      host_vector_or_tensor(input.attention.host.new_cache_slots,
+                            input.attention.device.new_cache_slots);
+  if (!output.attention.host.new_cache_slots.empty() &&
+      output.attention.host.new_cache_slots.size() ==
           static_cast<size_t>(token_num)) {
     std::vector<int32_t> cp_new_cache_slots;
     cp_new_cache_slots.reserve(gather_indices.size());
     for (int64_t idx : gather_indices) {
       cp_new_cache_slots.push_back(
-          output.input_params.attention.host
-              .new_cache_slots[static_cast<size_t>(idx)]);
+          output.attention.host.new_cache_slots[static_cast<size_t>(idx)]);
     }
-    output.input_params.attention.host.new_cache_slots =
-        std::move(cp_new_cache_slots);
-    output.input_params.attention.device.new_cache_slots =
-        detail::int_vector_to_cpu_tensor(
-            output.input_params.attention.host.new_cache_slots);
+    output.attention.host.new_cache_slots = std::move(cp_new_cache_slots);
+    output.attention.device.new_cache_slots =
+        detail::int_vector_to_cpu_tensor(output.attention.host.new_cache_slots);
   }
-  if (input.input_params.embedding.input_embedding.defined() &&
-      input.input_params.embedding.input_embedding.size(0) == token_num) {
-    output.input_params.embedding.input_embedding =
-        detail::gather_tensor_by_indices_on_dim(
-            input.input_params.embedding.input_embedding,
-            gather_indices,
-            /*dim=*/0);
+  if (input.embedding.input_embedding.defined() &&
+      input.embedding.input_embedding.size(0) == token_num) {
+    output.embedding.input_embedding =
+        detail::gather_tensor_by_indices_on_dim(input.embedding.input_embedding,
+                                                gather_indices,
+                                                /*dim=*/0);
   }
-  if (input.input_params.attention.device.new_cache_slot_offsets.defined() &&
-      input.input_params.attention.device.new_cache_slot_offsets.size(0) ==
-          token_num) {
-    output.input_params.attention.device.new_cache_slot_offsets =
+  if (input.attention.device.new_cache_slot_offsets.defined() &&
+      input.attention.device.new_cache_slot_offsets.size(0) == token_num) {
+    output.attention.device.new_cache_slot_offsets =
         detail::gather_tensor_by_indices_on_dim(
-            input.input_params.attention.device.new_cache_slot_offsets,
+            input.attention.device.new_cache_slot_offsets,
             gather_indices,
             /*dim=*/0);
   }
@@ -797,17 +1001,17 @@ inline ForwardInput cp_partition_forward_input(const ForwardInput& input,
   std::partial_sum(
       cp_q_lens.begin(), cp_q_lens.end(), cp_q_cu_seq_lens.begin());
 
-  output.input_params.attention.host.q_seq_lens = cp_q_seq_lens;
-  output.input_params.attention.host.kv_seq_lens = cp_seq_lens;
-  output.input_params.attention.host.q_cu_seq_lens = cp_q_cu_seq_lens;
-  output.input_params.attention.device.q_seq_lens =
+  output.attention.host.q_seq_lens = cp_q_seq_lens;
+  output.attention.host.kv_seq_lens = cp_seq_lens;
+  output.attention.host.q_cu_seq_lens = cp_q_cu_seq_lens;
+  output.attention.device.q_seq_lens =
       detail::int_vector_to_cpu_tensor(cp_q_seq_lens);
-  output.input_params.attention.device.kv_seq_lens =
+  output.attention.device.kv_seq_lens =
       detail::int_vector_to_cpu_tensor(cp_seq_lens);
-  output.input_params.attention.device.q_cu_seq_lens =
+  output.attention.device.q_cu_seq_lens =
       detail::int_vector_to_cpu_tensor(cp_q_cu_seq_lens);
-  output.input_params.meta.q_max_seq_len = cp_global_max_seq_len;
-  output.input_params.meta.kv_max_seq_len = cp_global_max_seq_len;
+  output.meta.q_max_seq_len = cp_global_max_seq_len;
+  output.meta.kv_max_seq_len = cp_global_max_seq_len;
 
   if (input.sampling_params.selected_token_idxes.defined() &&
       input.sampling_params.selected_token_idxes.numel() > 0) {

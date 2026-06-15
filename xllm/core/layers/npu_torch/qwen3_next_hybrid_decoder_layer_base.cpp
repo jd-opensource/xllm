@@ -19,6 +19,8 @@ limitations under the License.
 #include <optional>
 #include <tuple>
 
+#include "runtime/forward_params.h"
+
 namespace xllm {
 namespace layer {
 
@@ -112,7 +114,7 @@ torch::Tensor Qwen3HybridDecoderLayerImplBase::forward(
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
-    const ModelInputParams& input_params,
+    const ForwardInput& input,
     const torch::Tensor& mrope_cos_sin) {
   // Pre-attention norm
   if (!residual.has_value()) {
@@ -127,7 +129,7 @@ torch::Tensor Qwen3HybridDecoderLayerImplBase::forward(
     x = attention_->forward(
         positions, x, attn_metadata, kv_cache, mrope_cos_sin);
   } else {
-    x = linear_attention_->forward(x, attn_metadata, kv_cache, input_params);
+    x = linear_attention_->forward(x, attn_metadata, kv_cache, input);
   }
 
   // Post-attention norm
@@ -135,7 +137,7 @@ torch::Tensor Qwen3HybridDecoderLayerImplBase::forward(
 
   // MLP forward
   if (moe_mlp_) {
-    x = moe_mlp_(x, input_params);
+    x = moe_mlp_(x, input.parallel);
   } else {
     x = mlp_(x);
   }

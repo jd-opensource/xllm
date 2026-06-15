@@ -23,16 +23,6 @@ limitations under the License.
 namespace xllm::kernel::npu {
 namespace {
 
-torch::TensorList value_or_empty_tensor_list(
-    const std::optional<torch::TensorList>& list,
-    std::vector<torch::Tensor>& empty_storage) {
-  if (list.has_value()) {
-    return list.value();
-  }
-  empty_storage.clear();
-  return torch::TensorList(empty_storage);
-}
-
 bool should_use_extended_grouped_matmul_signature(
     const std::optional<torch::TensorList>& bias,
     const std::optional<torch::TensorList>& scale,
@@ -112,32 +102,6 @@ std::vector<torch::Tensor> apply_npu_grouped_matmul(
         resolved_group_list_type);
   }
 
-  std::vector<torch::Tensor> empty_bias;
-  std::vector<torch::Tensor> empty_scale;
-  std::vector<torch::Tensor> empty_offset;
-  std::vector<torch::Tensor> empty_antiquant_scale;
-  std::vector<torch::Tensor> empty_antiquant_offset;
-  std::vector<torch::Tensor> empty_per_token_scale;
-  std::vector<torch::Tensor> empty_activation_input;
-  std::vector<torch::Tensor> empty_activation_quant_scale;
-  std::vector<torch::Tensor> empty_activation_quant_offset;
-
-  const auto bias_list = value_or_empty_tensor_list(bias, empty_bias);
-  const auto scale_list = value_or_empty_tensor_list(scale, empty_scale);
-  const auto offset_list = value_or_empty_tensor_list(offset, empty_offset);
-  const auto antiquant_scale_list =
-      value_or_empty_tensor_list(antiquant_scale, empty_antiquant_scale);
-  const auto antiquant_offset_list =
-      value_or_empty_tensor_list(antiquant_offset, empty_antiquant_offset);
-  const auto per_token_scale_list =
-      value_or_empty_tensor_list(per_token_scale, empty_per_token_scale);
-  const auto activation_input_list =
-      value_or_empty_tensor_list(activation_input, empty_activation_input);
-  const auto activation_quant_scale_list = value_or_empty_tensor_list(
-      activation_quant_scale, empty_activation_quant_scale);
-  const auto activation_quant_offset_list = value_or_empty_tensor_list(
-      activation_quant_offset, empty_activation_quant_offset);
-
   const int64_t resolved_split_item = split_item.value_or(2);
   const int64_t resolved_group_type = group_type.value_or(0);
   const int64_t resolved_group_list_type = group_list_type.value_or(1);
@@ -150,26 +114,22 @@ std::vector<torch::Tensor> apply_npu_grouped_matmul(
   return at_npu::native::custom_ops::npu_grouped_matmul(
       x,
       weight,
-      bias_list,
-      scale_list,
-      offset_list,
-      antiquant_scale_list,
-      antiquant_offset_list,
-      per_token_scale_list,
-      group_list.value(),
-      activation_input_list,
-      activation_quant_scale_list,
-      activation_quant_offset_list,
+      bias,
+      scale,
+      offset,
+      antiquant_scale,
+      antiquant_offset,
+      per_token_scale,
+      group_list,
+      activation_input,
+      activation_quant_scale,
+      activation_quant_offset,
       resolved_split_item,
       resolved_group_type,
       resolved_group_list_type,
       resolved_act_type,
       resolved_tuning_config,
-      ::std::optional<int64_t>{static_cast<int64_t>(resolved_output_dtype)},
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt);
+      ::std::optional<at::ScalarType>{resolved_output_dtype});
 }
 
 }  // namespace xllm::kernel::npu

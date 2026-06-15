@@ -22,7 +22,7 @@ limitations under the License.
 
 #include "eplb_executor.h"
 #include "eplb_policy.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 namespace xllm {
 
 class EplbManager {

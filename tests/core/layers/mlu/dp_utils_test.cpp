@@ -329,13 +329,13 @@ TEST(DpUtilsTest, UnpadTokensRestoresOriginalLength) {
 }
 
 TEST(DpUtilsTest, AllDpRanksAreDecodeNeedsEveryRankDecode) {
-  ModelInputParams decode_params;
-  decode_params.parallel.dp_is_decode = {1, 1, 1};
-  EXPECT_TRUE(all_dp_ranks_are_decode(decode_params));
+  ParallelInput decode_input;
+  decode_input.dp_is_decode = {1, 1, 1};
+  EXPECT_TRUE(all_dp_ranks_are_decode(decode_input));
 
-  ModelInputParams mixed_params;
-  mixed_params.parallel.dp_is_decode = {1, 0, 1};
-  EXPECT_FALSE(all_dp_ranks_are_decode(mixed_params));
+  ParallelInput mixed_input;
+  mixed_input.dp_is_decode = {1, 0, 1};
+  EXPECT_FALSE(all_dp_ranks_are_decode(mixed_input));
 }
 
 }  // namespace test

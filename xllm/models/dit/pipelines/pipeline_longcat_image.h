@@ -32,6 +32,7 @@ limitations under the License.
 #include "models/dit/transformers/transformer_longcat_image.h"
 #include "models/model_registry.h"
 #include "models/vlm/qwen2_5_vl.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -548,10 +549,9 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
     const auto& text_encoder_args = context_.get_model_args("text_encoder");
     std::vector<KVCache> kv_caches(text_encoder_args.n_layers());
 
-    ModelInputParams input_params =
-        build_longcat_input_params(tokens_flat, positions_2d, attention_mask);
-    auto model_output = text_encoder_->forward(
-        tokens_flat, positions_2d, kv_caches, input_params);
+    ForwardInput input =
+        build_longcat_input(tokens_flat, positions_2d, attention_mask);
+    auto model_output = text_encoder_->forward(input, kv_caches);
     torch::Tensor hidden_states_flat = model_output.hidden_states;
 
     int64_t hidden_size = hidden_states_flat.size(-1);
@@ -628,12 +628,13 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
   std::string prompt_template_encode_prefix_;
   std::string prompt_template_encode_suffix_;
 
-  // Build ModelInputParams for LongCat-Image text encoding
-  ModelInputParams build_longcat_input_params(
-      const torch::Tensor& tokens,
-      const torch::Tensor& positions,
-      const torch::Tensor& attention_mask) {
-    ModelInputParams params;
+  // Build ForwardInput for LongCat-Image text encoding
+  ForwardInput build_longcat_input(const torch::Tensor& tokens,
+                                   const torch::Tensor& positions,
+                                   const torch::Tensor& attention_mask) {
+    ForwardInput params;
+    params.token_ids = tokens;
+    params.positions = positions;
 
     int64_t actual_seq_len;
     if (positions.dim() == 2) {
@@ -657,7 +658,7 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
 
     // Let Qwen2_5_VL build multimodal-aware embeddings from tokens and params.
     params.embedding.input_embedding =
-        text_encoder_->get_input_embeddings(tokens, params);
+        text_encoder_->get_input_embeddings(tokens, params.multimodal);
 
     if (attention_mask.defined() && attention_mask.size(0) > 0) {
       params.graph.attn_mask = attention_mask.view({-1}).to(torch::kFloat32);

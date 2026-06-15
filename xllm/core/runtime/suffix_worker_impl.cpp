@@ -77,13 +77,13 @@ SuffixWorkerImpl::SuffixWorkerImpl(const ParallelArgs& parallel_args,
 
 std::optional<ForwardOutput> SuffixWorkerImpl::step_empty(
     const ForwardInput& input) {
-  if (!input.input_params.meta.batch_forward_type.is_decode()) {
+  if (!input.meta.batch_forward_type.is_decode()) {
     auto output = impl_->step(input);
     output->sample_output.embeddings = torch::Tensor();
     return output;
   } else {
     ForwardInput new_input = input;
-    for (auto& it : new_input.input_params.parallel.dp_global_token_nums) {
+    for (auto& it : new_input.parallel.dp_global_token_nums) {
       it *= options_.num_speculative_tokens() + 1;
     }
 
@@ -103,9 +103,8 @@ std::optional<ForwardOutput> SuffixWorkerImpl::step_prefill(
   COUNTER_ADD(speculative_execution_latency_seconds_target,
               timer.elapsed_seconds());
 
-  const auto& input_params = input.input_params;
-  const int32_t num_sequences = input_params.meta.num_sequences;
-  const auto& request_ids = input_params.embedding.request_ids;
+  const int32_t num_sequences = input.meta.num_sequences;
+  const auto& request_ids = input.embedding.request_ids;
 
   if (suffix_cache_ != nullptr &&
       request_ids.size() == static_cast<size_t>(num_sequences)) {
@@ -115,7 +114,7 @@ std::optional<ForwardOutput> SuffixWorkerImpl::step_prefill(
 
     int32_t start_idx = 0;
     for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
-      int32_t q_len = input_params.get_q_seq_len(seq_id);
+      int32_t q_len = input.get_q_seq_len(seq_id);
       Slice<int32_t> seq_tokens =
           tokens_ids_slice.slice(start_idx, start_idx + q_len);
       start_idx += q_len;
@@ -174,9 +173,9 @@ std::optional<ForwardOutput> SuffixWorkerImpl::step_prefill(
 std::optional<ForwardOutput> SuffixWorkerImpl::step_decode(
     const ForwardInput& input) {
   const int32_t num_speculative_tokens = options_.num_speculative_tokens();
-  const int32_t num_sequences = input.input_params.meta.num_sequences;
+  const int32_t num_sequences = input.meta.num_sequences;
   const int32_t num_val_tokens = num_speculative_tokens + 1;
-  const auto& request_ids = input.input_params.embedding.request_ids;
+  const auto& request_ids = input.embedding.request_ids;
 
   const bool has_request_ids =
       suffix_cache_ != nullptr &&

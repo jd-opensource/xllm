@@ -34,11 +34,9 @@ class Qwen3_5GatedDeltaNetImpl : public Qwen3NextGatedDeltaNetImpl {
                            const torch::TensorOptions& options);
 
  protected:
-  std::pair<torch::Tensor, torch::Tensor> project_decode_inputs(
-      const torch::Tensor& hidden_states) override;
-  std::pair<torch::Tensor, torch::Tensor> project_flat_inputs(
-      const torch::Tensor& hidden_states) override;
-  bool use_fla_ssm_state_layout() const override { return true; }
+  std::pair<torch::Tensor, torch::Tensor> project_padded_inputs(
+      const torch::Tensor& hidden_states,
+      const AttentionMetadata& attn_metadata) override;
 
   void load_projection_state_dict(const StateDict& state_dict) override;
   void verify_projection_weights(const std::string& prefix) const override;

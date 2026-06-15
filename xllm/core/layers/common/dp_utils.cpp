@@ -181,25 +181,24 @@ bool need_dp_moe_gather(const ParallelArgs& args, bool enable_moe_all2all) {
 }
 
 torch::Tensor gather_dp_tokens(const torch::Tensor& input,
-                               const ModelInputParams& params,
+                               const ParallelInput& parallel,
                                const ParallelArgs& args) {
   if (args.dp_size() <= 1) {
     return input;
   }
 
-  return parallel_state::gather(input,
-                                args.dp_local_process_group_,
-                                params.parallel.dp_global_token_nums);
+  return parallel_state::gather(
+      input, args.dp_local_process_group_, parallel.dp_global_token_nums);
 }
 
 torch::Tensor get_dp_local_slice(const torch::Tensor& input,
-                                 const ModelInputParams& params,
+                                 const ParallelInput& parallel,
                                  const ParallelArgs& args) {
   if (args.dp_size() <= 1) {
     return input;
   }
 
-  const auto& dp_tokens = params.parallel.dp_global_token_nums;
+  const auto& dp_tokens = parallel.dp_global_token_nums;
   const int64_t dp_rank = args.dp_local_process_group_->rank();
 
   int64_t start = 0;
@@ -211,13 +210,13 @@ torch::Tensor get_dp_local_slice(const torch::Tensor& input,
   return input.slice(0, start, end);
 }
 
-bool all_dp_ranks_are_decode(const ModelInputParams& params) {
-  if (params.parallel.dp_is_decode.empty()) {
-    return params.parallel.dp_global_token_nums.size() <= 1;
+bool all_dp_ranks_are_decode(const ParallelInput& parallel) {
+  if (parallel.dp_is_decode.empty()) {
+    return parallel.dp_global_token_nums.size() <= 1;
   }
 
-  return std::all_of(params.parallel.dp_is_decode.begin(),
-                     params.parallel.dp_is_decode.end(),
+  return std::all_of(parallel.dp_is_decode.begin(),
+                     parallel.dp_is_decode.end(),
                      [](int32_t val) { return val == 1; });
 }
 

@@ -125,8 +125,8 @@ torch::Tensor clone_cpu_tensor_view(const torch::Tensor& tensor) {
 void stabilize_schedule_overlap_host_views(ForwardInput& input) {
   input.token_ids_host = clone_cpu_tensor_view(input.token_ids_host);
   input.positions_host = clone_cpu_tensor_view(input.positions_host);
-  input.input_params.attention.host.block_tables =
-      clone_cpu_tensor_view(input.input_params.attention.host.block_tables);
+  input.attention.host.block_tables =
+      clone_cpu_tensor_view(input.attention.host.block_tables);
 }
 
 }  // namespace

@@ -23,10 +23,10 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "framework/model/model_input_params.h"
 #include "layers/common/attention_metadata.h"
 #include "layers/common/attention_metadata_builder.h"
 #include "layers/common/dsa_metadata.h"
+#include "runtime/forward_params.h"
 #include "util/tensor_helper.h"
 
 namespace xllm::layer {
@@ -166,7 +166,7 @@ torch::Tensor build_decode_slot_mapping(const torch::Tensor& cache_block_table,
 }  // namespace
 
 AttentionMetadata DSAMetadataBuilderMlu::build(
-    const ModelInputParams& params,
+    const ForwardInput& params,
     const torch::Tensor& positions,
     const std::vector<std::vector<DSACacheInfo>>& caches_info,
     const std::vector<DSAGroupInfo>& group_infos,
@@ -201,7 +201,7 @@ AttentionMetadata DSAMetadataBuilderMlu::build(
 }
 
 void DSAMetadataBuilderMlu::build_dsa_fields(
-    const ModelInputParams& params,
+    const ForwardInput& params,
     const AttentionMetadata& attn_metadata,
     const torch::Tensor& positions,
     const std::vector<std::vector<DSACacheInfo>>& caches_info,
@@ -811,7 +811,7 @@ void DSAMetadataBuilderMlu::build_swa_plan(
       torch::tensor(context_lens, torch::TensorOptions().dtype(torch::kInt32));
 }
 
-void DSAMetadataBuilderMlu::build_positions(const ModelInputParams& params,
+void DSAMetadataBuilderMlu::build_positions(const ForwardInput& params,
                                             int32_t batch_size,
                                             DSAMetadata& dsa_metadata) {
   (void)params;

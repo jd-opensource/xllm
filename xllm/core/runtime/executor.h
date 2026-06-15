@@ -20,9 +20,10 @@ limitations under the License.
 #include "framework/batch/batch.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model/model_output.h"
 #include "runtime/executor_impl.h"
+#include "runtime/forward_params.h"
 #include "runtime/options.h"
 
 namespace xllm {
@@ -38,13 +39,8 @@ class Executor final {
 
   ForwardInput prepare_inputs(Batch& batch);
 
-  // tokens: vector size is dp_size, each element is [num_tokens/dp_size]
-  // positions: vector size is dp_size, each element is [num_tokens/dp_size]
-  // token pos in the sequence returns: ModelOutput
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& params);
+  ModelOutput forward(const ForwardInput& input,
+                      std::vector<KVCache>& kv_caches);
 
  private:
   std::unique_ptr<ExecutorImpl> impl_;
