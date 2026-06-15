@@ -36,6 +36,7 @@ class DeekseekV32DecoderLoader : public BaseLoader {
                            int32_t v_head_dim,
                            bool prefill_isBF16,
                            bool decode_isBF16,
+                           const std::vector<int>& attn_linear_quant_types,
                            LoadMode mode = LoadMode::kEager);
 
   void load_state_dict(const StateDict& state_dict) override;
@@ -102,6 +103,13 @@ class DeekseekV32DecoderLoader : public BaseLoader {
 
   void merge_experts_weights();
 
+  void preprocess_w4a8_dynamic_experts_weights();
+
+  bool use_quant_weight_mapping() const;
+  bool is_attn_dynamic_desc(int index) const;
+
+  int get_w4a8_expert_shard_dim(const std::string& suffix) const;
+
   torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts,
                                       bool transpose = false);
 
@@ -140,6 +148,7 @@ class DeekseekV32DecoderLoader : public BaseLoader {
   int32_t end_expert_id_;
   int32_t ep_rank_;
   int32_t redundant_experts_num_;
+  int32_t quant_group_size_ = 0;
 
   int32_t layer_id_;
   int32_t qk_nope_head_dim_;
@@ -153,6 +162,8 @@ class DeekseekV32DecoderLoader : public BaseLoader {
   int32_t decode_worldSize_;
   bool prefill_isBF16_;
   bool decode_isBF16_;
+  // Compatibility vector: entries may be legacy LinearType or new LinearDesc.
+  std::vector<int> attn_linear_quant_types_;
   std::mutex shared_experts_mutex_;
   std::mutex experts_mutex_;
 

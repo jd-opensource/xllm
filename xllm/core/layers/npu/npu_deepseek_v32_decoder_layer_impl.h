@@ -180,7 +180,10 @@ class NpuDeepseekV32DecoderLayerImpl : public BaseLayer {
   int32_t cp_size_;
 
   float sm_scale_;
+  int32_t quant_group_size_ = 0;
   int32_t num_speculative_tokens_ = 0;
+  // Compatibility vector: entries may be legacy LinearType or new LinearDesc.
+  std::vector<int> attn_linear_quant_types_;
 
   atb_speed::deepseekV2::DecoderLayerParam prefill_param_;
   atb_speed::deepseekV2::DecoderLayerParam decode_param_;

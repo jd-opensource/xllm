@@ -19,8 +19,10 @@ limitations under the License.
 
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
+#include <cctype>
 #include <iostream>
 #include <numeric>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -32,11 +34,111 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "core/layers/common/dsa_topk_share_plan.h"
 #include "framework/parallel_state/npu_cp_prepare.h"
+#include "framework/quant_args.h"
 #include "layers/common/rotary_embedding_util.h"
 #include "loader/deepseek_v32_decoder_loader.h"
 
 namespace xllm {
 namespace layer {
+
+namespace {
+constexpr int kQProjBLinearIndex = 1;
+constexpr int kTranspose = 1;
+constexpr int kNotTranspose = 0;
+
+std::string normalize_quant_type(std::string value) {
+  std::transform(
+      value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+      });
+  return value;
+}
+
+std::optional<std::string> get_layer_quant_desc(
+    const QuantArgs& quant_args,
+    int32_t layer_id,
+    const std::vector<std::string>& local_prefixes) {
+  const std::string layer_prefix =
+      "model.layers." + std::to_string(layer_id) + ".";
+  std::optional<std::pair<std::string, std::string>> resolved;
+  std::optional<std::string> unresolved_prefix;
+  for (const auto& local_prefix : local_prefixes) {
+    const std::string prefix = layer_prefix + local_prefix;
+    auto quant_desc = quant_args.get_quant_method(prefix, "weight");
+    if (!quant_desc.has_value()) {
+      if (resolved.has_value()) {
+        LOG(FATAL) << "Inconsistent quant_desc for prefix '" << prefix
+                   << "': unresolved, but prefix '" << resolved->first
+                   << "' resolved to '" << resolved->second << "'.";
+      }
+      unresolved_prefix = prefix;
+      continue;
+    }
+    const std::string quant_type = normalize_quant_type(quant_desc.value());
+    if (unresolved_prefix.has_value()) {
+      LOG(FATAL) << "Inconsistent quant_desc for prefix '"
+                 << unresolved_prefix.value() << "': unresolved, but prefix '"
+                 << prefix << "' resolved to '" << quant_type << "'.";
+    }
+    if (!resolved.has_value()) {
+      resolved = std::make_pair(prefix, quant_type);
+      continue;
+    }
+    CHECK_EQ(resolved->second, quant_type)
+        << "Inconsistent quant_desc for prefix '" << prefix << "' resolved to '"
+        << quant_type << "', but prefix '" << resolved->first
+        << "' resolved to '" << resolved->second << "'.";
+  }
+  if (!resolved.has_value()) {
+    CHECK(quant_args.quant_descs().empty())
+        << "Missing quant_desc for layer " << layer_id
+        << " attention prefixes: "
+        << boost::algorithm::join(local_prefixes, ", ");
+    return std::nullopt;
+  }
+  return resolved->second;
+}
+
+int quant_desc_to_linear_desc(const std::optional<std::string>& quant_desc,
+                              int default_desc) {
+  if (!quant_desc.has_value()) {
+    return default_desc;
+  }
+  const std::string quant_type = normalize_quant_type(quant_desc.value());
+  if (quant_type == "w8a8_dynamic") {
+    return static_cast<int>(LinearTypeV2::W8A8_DYNAMIC);
+  }
+  if (quant_type == "w8a8") {
+    return static_cast<int>(LinearTypeV2::W8A8);
+  }
+  LOG(FATAL) << "Unsupported DeepSeek V32 attention quant_desc: "
+             << quant_desc.value();
+  return default_desc;
+}
+
+std::vector<int> resolve_attn_linear_quant_types(const QuantArgs& quant_args,
+                                                 int32_t layer_id) {
+  const int w8a8_desc = static_cast<int>(LinearTypeV2::W8A8);
+  const int fp16_desc = static_cast<int>(LinearTypeV2::FLOAT16);
+  const int q_a_desc = quant_desc_to_linear_desc(
+      get_layer_quant_desc(quant_args, layer_id, {"self_attn.q_a_proj"}),
+      w8a8_desc);
+  const int kv_a_desc = quant_desc_to_linear_desc(
+      get_layer_quant_desc(
+          quant_args, layer_id, {"self_attn.kv_a_proj_with_mqa"}),
+      w8a8_desc);
+  const int q_b_desc = quant_desc_to_linear_desc(
+      get_layer_quant_desc(quant_args, layer_id, {"self_attn.q_b_proj"}),
+      w8a8_desc);
+  const int o_desc = quant_desc_to_linear_desc(
+      get_layer_quant_desc(quant_args, layer_id, {"self_attn.o_proj"}),
+      w8a8_desc);
+  CHECK_EQ(q_a_desc, kv_a_desc)
+      << "DeepSeek V32 currently requires self_attn.q_a_proj and "
+      << "self_attn.kv_a_proj_with_mqa to share the same quant_desc.";
+  return {q_a_desc, q_b_desc, kv_a_desc, fp16_desc, fp16_desc, o_desc};
+}
+}  // namespace
 
 enum DecoderLayerTensorId : int {
   IN_INPUT_NORM_WEIGHT = 0,
@@ -199,6 +301,7 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
 
   auto parallel_args = context.get_parallel_args();
   auto model_args = context.get_model_args();
+  auto quant_args = context.get_quant_args();
   auto options = context.get_tensor_options();
   const DsaTopkShareDecision topk_decision =
       get_dsa_topk_share_decision(model_args, layer_id_);
@@ -209,6 +312,17 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
   first_k_dense_replace_ = model_args.first_k_dense_replace();
   n_layers_ = model_args.n_layers();
   num_experts_ = model_args.n_routed_experts();
+  quant_group_size_ = static_cast<int32_t>(quant_args.group_size());
+  attn_linear_quant_types_ =
+      resolve_attn_linear_quant_types(quant_args, layer_id_);
+  if (quantize_type_ == "w4a8_dynamic") {
+    CHECK_GE(quant_group_size_, 0)
+        << "W4A8_DYNAMIC group_size must be >= 0, got " << quant_group_size_;
+    CHECK_EQ(quant_args.quant_version(), "1.0.0")
+        << "W4A8_DYNAMIC only supports quant_version 1.0.0, got "
+        << (quant_args.quant_version().empty() ? "<empty>"
+                                               : quant_args.quant_version());
+  }
   localWorldSize_ = parallel_args.mapping().localWorldSize();
   ep_size_ = parallel_args.ep_size();
   ep_local_tp_size_ = parallel_args.world_size() / ep_size_;
@@ -250,6 +364,7 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
       v_head_dim_,
       prefill_param_.isBF16,
       decode_param_.isBF16,
+      attn_linear_quant_types_,
       ::xllm::LoadConfig::get_instance().enable_manual_loader()
           ? LoadMode::kManual
           : LoadMode::kEager);
@@ -312,12 +427,26 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
   param.enableLcoc = true;
   // TODO: modify xllm_atb_layers
 
-  param.attnLinearTransposeType = {1, 1, 1, 1, 1, 1};
+  param.attnLinearTransposeType = {
+      kTranspose, kTranspose, kTranspose, kTranspose, kTranspose, kTranspose};
+  if (attn_linear_quant_types_.size() > kQProjBLinearIndex &&
+      attn_linear_quant_types_[kQProjBLinearIndex] ==
+          static_cast<int>(LinearTypeV2::W8A8_DYNAMIC)) {
+    param.attnLinearTransposeType[kQProjBLinearIndex] = kNotTranspose;
+    // Keep the static path on the legacy 6-entry vector. The extra entries are
+    // only for DSA indexer no-quant linears when q_b uses dynamic no-transpose.
+    param.attnLinearTransposeType.insert(param.attnLinearTransposeType.end(),
+                                         {kTranspose, kTranspose, kTranspose});
+  }
   param.mlpLinearTransposeType = {1, -1, 1, -1};
 
-  param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
-                                     ? std::vector<int>{-1, -1, -1, -1}
-                                     : std::vector<int>{1, 0, -1, 1};
+  if (layer_id_ < args.first_k_dense_replace()) {
+    param.moeLinearTransposeType = {-1, -1, -1, -1};
+  } else if (quantize_type_ == "w4a8_dynamic") {
+    param.moeLinearTransposeType = {1, 0, -1, 0};
+  } else {
+    param.moeLinearTransposeType = {1, 0, -1, 1};
+  }
 
   param.worldSize = parallel_args.world_size();
   param.normEps = args.rms_norm_eps();
@@ -335,7 +464,7 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
   param.numHiddenLayers = args.n_layers();
   param.enableIntraLayerAddNorm = true;
   param.enableInterLayerAddNorm = false;
-  if (quantize_type_ == "") {
+  if (quantize_type_ == "" || quantize_type_ == "w4a8_dynamic") {
     param.enableGMMSwigluQuant = false;
   } else {
     param.enableGMMSwigluQuant =
@@ -351,7 +480,8 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
   const bool is_shared_expert_layer =
       layer_id_ >= args.first_k_dense_replace() && args.n_shared_experts() > 0;
   param.enableSwiGLUQuantForSharedExperts =
-      quantize_type_ == "w8a8_dynamic" && is_shared_expert_layer;
+      (quantize_type_ == "w8a8_dynamic" || quantize_type_ == "w4a8_dynamic") &&
+      is_shared_expert_layer;
   if ((::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) &&
       ::xllm::ParallelConfig::get_instance().cp_size() > 1 && is_prefill) {
@@ -438,7 +568,8 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
   param.topkGroups = atb::SVector<int>{args.topk_group()};
   param.isDynamicEp = param.expertParallelDegree == 2 ? true : false;
 
-  param.quantGroupSize = 0;
+  param.quantGroupSize =
+      quantize_type_ == "w4a8_dynamic" ? quant_group_size_ : 0;
   if (quantize_type_ == "") {
     param.enableInitQuant = false;
     param.enableSwigluQuant = false;
@@ -533,16 +664,33 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_quantization_parameters(
                                   static_cast<int>(LinearType::INVALID),
                                   static_cast<int>(LinearType::FP)};
     }
-  } else {
+  } else if (quantize_type_ == "w8a8_dynamic") {
     param.moePackQuantType = static_cast<int>(PackType::ALL_W8A8_DYNAMIC);
     param.packQuantType = {static_cast<int>(PackType::MIX_W8A8),
                            static_cast<int>(PackType::ALL_W8A8_DYNAMIC)};
-    param.attnLinearQuantType = {static_cast<int>(LinearType::INT),
-                                 static_cast<int>(LinearType::INT),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::INT)};
+    param.attnLinearQuantType = attn_linear_quant_types_;
+    param.mlpLinearQuantType = {static_cast<int>(LinearType::INT),
+                                static_cast<int>(LinearType::INVALID),
+                                static_cast<int>(LinearType::INT),
+                                static_cast<int>(LinearType::INVALID)};
+    if (layer_id_ < param.firstKDenseReplace) {
+      param.moeLinearQuantType = {static_cast<int>(LinearType::INVALID),
+                                  static_cast<int>(LinearType::INVALID),
+                                  static_cast<int>(LinearType::INVALID),
+                                  static_cast<int>(LinearType::INVALID)};
+    } else {
+      param.moeLinearQuantType = {static_cast<int>(LinearType::FP),
+                                  static_cast<int>(LinearType::INT),
+                                  static_cast<int>(LinearType::INVALID),
+                                  static_cast<int>(LinearType::INT)};
+    }
+  } else if (quantize_type_ == "w4a8_dynamic") {
+    param.moePackQuantType = static_cast<int>(PackType::ALL_W4A8);
+    // The ATB W4A8 path keeps dense/shared MLP linears on W8A8 dynamic;
+    // only routed experts use W4A8 GMM.
+    param.packQuantType = {static_cast<int>(PackType::MIX_W8A8),
+                           static_cast<int>(PackType::ALL_W8A8_DYNAMIC)};
+    param.attnLinearQuantType = attn_linear_quant_types_;
     param.mlpLinearQuantType = {static_cast<int>(LinearType::INT),
                                 static_cast<int>(LinearType::INVALID),
                                 static_cast<int>(LinearType::INT),
