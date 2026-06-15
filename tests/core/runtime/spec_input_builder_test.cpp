@@ -571,6 +571,34 @@ TEST(SpecDecodeInputBuilderTest, MultiBlockDraftSingleRowPerSeq) {
             std::vector<int32_t>({13, 14, 15}));
 }
 
+TEST(SpecDecodeInputBuilderTest, MultiBlockKeepsSparseAbsoluteRows) {
+  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({24, 20});
+  torch::Tensor positions = torch::tensor({23, 19}, torch::kInt);
+  std::vector<torch::Tensor> multi_block_tables = {torch::tensor(
+      {{-1, -1, -1, -1, -1, 50}, {-1, -1, -1, -1, 60, -1}}, torch::kInt)};
+  ForwardInput input = make_multiblock_forward_input(
+      torch::Tensor(), positions, multi_block_tables, kv_seq_lens);
+  DecodeRowContext ctx = make_decode_row_context(input);
+
+  DecodeBuildBuffers buf;
+  for (int32_t seq_id = 0; seq_id < input.input_params.meta.num_sequences;
+       ++seq_id) {
+    RowSpec row;
+    row.seq_id = seq_id;
+    row.position_offset = 0;
+    row.append_token = false;
+    row.append_block_table = true;
+    append_decode_row(ctx, row, /*block_size=*/4, buf);
+  }
+
+  ASSERT_EQ(buf.out_multi_block_tables.size(), 1);
+  ASSERT_EQ(buf.out_multi_block_tables[0].size(), 2);
+  EXPECT_EQ(buf.out_multi_block_tables[0][0],
+            std::vector<int32_t>({-1, -1, -1, -1, -1, 50}));
+  EXPECT_EQ(buf.out_multi_block_tables[0][1],
+            std::vector<int32_t>({-1, -1, -1, -1, 60, -1}));
+}
+
 TEST(SpecDecodeInputBuilderTest, MultiBlockValidateExpansion) {
   std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
   torch::Tensor token_ids = torch::tensor({10, 20}, torch::kInt);

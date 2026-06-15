@@ -170,6 +170,27 @@ uint32_t get_tp_size(const xllm::runtime::Options& options) {
   return static_cast<uint32_t>(world_size / dp_size);
 }
 
+int64_t get_graph_token_capacity(const xllm::runtime::Options& options) {
+  int64_t capacity = options.max_seqs_per_batch();
+
+  if (!options.is_draft_engine()) {
+    const int64_t validate_width =
+        std::max<int64_t>(1, options.num_speculative_tokens() + 1);
+    const int64_t decode_width =
+        std::max<int64_t>(options.num_decoding_tokens(), validate_width);
+    capacity *= decode_width;
+  }
+
+  capacity = static_cast<int64_t>(get_bucket_num_tokens(
+      static_cast<uint32_t>(std::max<int64_t>(capacity, 1))));
+
+  const uint32_t tp_size = get_tp_size(options);
+  capacity = static_cast<int64_t>(align_tokens(
+      static_cast<uint32_t>(std::max<int64_t>(capacity, tp_size)), tp_size));
+
+  return capacity;
+}
+
 uint32_t get_graph_dp_tokens(uint32_t actual_tokens,
                              const xllm::ModelInputParams& params,
                              const xllm::runtime::Options& options) {
@@ -258,6 +279,8 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
                                            const runtime::Options& options)
     : num_decoding_tokens_(options.num_decoding_tokens()) {
   const int64_t max_tokens = options.max_tokens_per_batch();
+  const int64_t graph_tokens_capacity = get_graph_token_capacity(options);
+  const int64_t max_graph_tokens = std::max(max_tokens, graph_tokens_capacity);
   const int64_t max_seq_lens = get_seq_lens_capacity(options);
   const int64_t max_seq_len = args.max_position_embeddings();
   const uint32_t block_size = options.block_size();
@@ -268,20 +291,21 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   auto int_tensor_options = tensor_options.dtype(torch::kInt32);
 
   // output buffer
-  output_ = torch::zeros({max_tokens, args.hidden_size()}, tensor_options);
+  output_ =
+      torch::zeros({max_graph_tokens, args.hidden_size()}, tensor_options);
   // aux_hidden_states will be lazily initialized when needed
 
   // input buffers
   if (args.rope_scaling_mrope_section().empty()) {
-    positions_ = torch::zeros({max_tokens}, int_tensor_options);
+    positions_ = torch::zeros({max_graph_tokens}, int_tensor_options);
   } else {
-    positions_ = torch::zeros({3, max_tokens}, int_tensor_options);
+    positions_ = torch::zeros({3, max_graph_tokens}, int_tensor_options);
     use_mrope_ = true;
   }
-  tokens_ = torch::zeros({max_tokens}, int_tensor_options);
-  new_cache_slots_ = torch::zeros({max_tokens}, int_tensor_options);
-  block_table_ =
-      torch::zeros({max_tokens, max_num_blocks_per_req}, int_tensor_options);
+  tokens_ = torch::zeros({max_graph_tokens}, int_tensor_options);
+  new_cache_slots_ = torch::zeros({max_graph_tokens}, int_tensor_options);
+  block_table_ = torch::zeros({graph_tokens_capacity, max_num_blocks_per_req},
+                              int_tensor_options);
   // MTP validate expands decode rows from N to N * (K + 1), where K is the
   // speculative token count. Draft-extend only doubles rows, so the same
   // bound covers both paths when speculative decode is enabled.
@@ -293,6 +317,7 @@ void GraphPersistentParam::init_params(const ModelInputParams& params,
                                        uint32_t padding_num_tokens,
                                        uint32_t padding_needed) {
   params_ = params.to(tokens_.device());
+  params_.enable_graph = true;
   params_.attention.device.q_seq_lens = q_seq_lens_.slice(
       0, 0, params.attention.device.q_seq_lens.size(0) + padding_needed);
   params_.attention.device.kv_seq_lens = kv_seq_lens_.slice(
@@ -301,7 +326,6 @@ void GraphPersistentParam::init_params(const ModelInputParams& params,
       new_cache_slots_.slice(0, 0, padding_num_tokens);
   params_.attention.device.block_tables =
       block_table_.slice(0, 0, padding_num_tokens);
-
   if (params.embedding.input_embedding.defined()) {
     if (!input_embeds_.defined()) {
       input_embeds_ = torch::zeros_like(output_);
@@ -319,7 +343,12 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
   int32_t slice_dim = use_mrope_ ? 1 : 0;
   const int64_t actual_tokens = tokens.size(0);
   const int64_t padded_tokens = actual_tokens + padding_needed;
-  const int64_t actual_batch = params.attention.device.block_tables.size(0);
+  const int64_t actual_batch =
+      params.attention.device.block_tables.defined()
+          ? params.attention.device.block_tables.size(0)
+          : (!params.multi_block_tables.empty()
+                 ? params.multi_block_tables[0].size(0)
+                 : actual_tokens);
   const int64_t block_rows_end = actual_batch + padding_needed;
   auto position_slice =
       positions_.slice(slice_dim, 0, positions.size(slice_dim));
@@ -334,6 +363,7 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
     tokens_.slice(0, actual_tokens, padded_tokens).zero_();
     new_cache_slots_.slice(0, actual_tokens, padded_tokens).zero_();
   }
+  params_.meta.num_sequences = params.meta.num_sequences;
 
   // Apply padding if required number of tokens exceeds actual input
   // Generate padded sequence lengths by extending the last valid value
@@ -347,6 +377,10 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
       kv_seq_lens_vec.push_back(kv_seq_lens_vec.back() + num_decoding_tokens_);
     }
   }
+
+  params_.attention.host.q_seq_lens = q_seq_lens_vec;
+  params_.attention.host.kv_seq_lens = kv_seq_lens_vec;
+
   auto q_seq_lens = torch::tensor(q_seq_lens_vec, q_seq_lens_.options());
   auto kv_seq_lens = torch::tensor(kv_seq_lens_vec, kv_seq_lens_.options());
   auto q_seq_slice = q_seq_lens_.slice(0, 0, q_seq_lens.size(0));
@@ -355,19 +389,25 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
   kv_seq_slice.copy_(kv_seq_lens, true);
 
   // Copy block table data
-  const int64_t actual_block_batch =
-      params.attention.device.block_tables.size(0);
-  const int64_t actual_n_block = params.attention.device.block_tables.size(1);
-  auto slice_block_tables =
-      block_table_.slice(0, 0, actual_block_batch).slice(1, 0, actual_n_block);
-  slice_block_tables.copy_(params.attention.device.block_tables, true);
-  if (actual_n_block < block_table_.size(1)) {
-    block_table_.slice(0, 0, actual_block_batch)
-        .slice(1, actual_n_block, block_table_.size(1))
-        .zero_();
+  if (params.attention.device.block_tables.defined()) {
+    const int64_t actual_block_batch =
+        params.attention.device.block_tables.size(0);
+    const int64_t actual_n_block = params.attention.device.block_tables.size(1);
+    auto slice_block_tables = block_table_.slice(0, 0, actual_block_batch)
+                                  .slice(1, 0, actual_n_block);
+    slice_block_tables.copy_(params.attention.device.block_tables, true);
+    if (actual_n_block < block_table_.size(1)) {
+      block_table_.slice(0, 0, actual_block_batch)
+          .slice(1, actual_n_block, block_table_.size(1))
+          .zero_();
+    }
+    if (block_rows_end > actual_block_batch) {
+      block_table_.slice(0, actual_block_batch, block_rows_end).zero_();
+    }
   }
-  if (block_rows_end > actual_block_batch) {
-    block_table_.slice(0, actual_block_batch, block_rows_end).zero_();
+
+  if (!params.multi_block_tables.empty()) {
+    params_.multi_block_tables = params.multi_block_tables;
   }
 
   if (params.embedding.input_embedding.defined()) {
@@ -402,6 +442,25 @@ MluGraph::MluGraph(GraphPersistentParam* persistent_param,
                    uint32_t padding_num_tokens)
     : persistent_param_(persistent_param),
       padding_num_tokens_(padding_num_tokens) {}
+
+void MluGraph::prepare_model_graph_metadata(CausalLM* model,
+                                            const ModelInputParams& params) {
+  if (!model->requires_graph_forward_metadata()) {
+    return;
+  }
+
+  if (!model_graph_metadata_state_) {
+    model_graph_metadata_state_ = model->create_graph_forward_metadata_state();
+  }
+  auto graph_params = make_graph_params(params, padding_num_tokens_);
+  int32_t slice_dim = persistent_param_->use_mrope_ ? 1 : 0;
+  model->prepare_graph_forward_metadata(
+      model_graph_metadata_state_.get(),
+      persistent_param_->positions_.slice(slice_dim, 0, padding_num_tokens_),
+      graph_params);
+
+  persistent_param_->params_.attn_metadata = graph_params.attn_metadata;
+}
 
 void MluGraph::capture(CausalLM* model,
                        std::vector<KVCache>& kv_cache,
@@ -452,7 +511,8 @@ ModelOutput MluGraph::replay() {
   return ModelOutput(persistent_param_->output_.slice(0, 0, actual_tokens));
 }
 
-void MluGraph::update_input_buffer(const torch::Tensor& tokens,
+void MluGraph::update_input_buffer(CausalLM* model,
+                                   const torch::Tensor& tokens,
                                    const torch::Tensor& positions,
                                    const ModelInputParams& params,
                                    bool is_init) {
@@ -462,6 +522,9 @@ void MluGraph::update_input_buffer(const torch::Tensor& tokens,
   }
   persistent_param_->update_input_buffer(
       tokens, positions, params, padding_needed);
+  // For some models (e.g. DeepSeekV4), the metadata depends on variable host
+  // data, which needs to be updated outside of capture.
+  prepare_model_graph_metadata(model, params);
 }
 
 MluGraphExecutorImpl::MluGraphExecutorImpl(CausalLM* model,
@@ -609,7 +672,7 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
   auto it = graphs_.find(graph_tokens);
   if (it != graphs_.end()) {
     MluGraph* cur_graph = it->second.get();
-    cur_graph->update_input_buffer(tokens, positions, graph_params);
+    cur_graph->update_input_buffer(model_, tokens, positions, graph_params);
     ModelOutput result = cur_graph->replay();
     // Return only the actual num_tokens portion
     auto hidden_states = result.hidden_states.slice(0, 0, actual_tokens);
@@ -626,7 +689,7 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
 
   std::unique_ptr<MluGraph> graph =
       std::make_unique<MluGraph>(persistent_param_.get(), graph_tokens);
-  graph->update_input_buffer(tokens, positions, graph_params, true);
+  graph->update_input_buffer(model_, tokens, positions, graph_params, true);
   if (!graph_capture_stream_.has_value()) {
     graph_capture_stream_ =
         torch_mlu::getStreamFromPool(/*isHighPriority=*/false, device_.index());

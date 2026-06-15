@@ -25,6 +25,7 @@ cc_library(
     spin_lock.h
     spin_rw_lock.h
     int32_map.h
+    linalg.h
     suffix_decoding_cache.h
     suffix_tree.h
     tensor_helper.h
@@ -41,6 +42,7 @@ cc_library(
     http_downloader.cpp
     # TODO. add following at next pr.
     json_reader.cpp
+    linalg.cpp
     model_config_utils.cpp
     net.cpp
     pretty_print.cpp

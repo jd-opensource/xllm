@@ -58,6 +58,63 @@ torch::Tensor sanitize_block_table(const torch::Tensor& table) {
   return torch::where(table.lt(0), torch::zeros_like(table), table);
 }
 
+torch::Tensor sanitize_swa_table(const torch::Tensor& table,
+                                 int32_t block_size,
+                                 const std::vector<int32_t>& ctx_lens,
+                                 const std::vector<int32_t>& q_lens,
+                                 int32_t batch_size,
+                                 int64_t window_size) {
+  if (!table.defined()) {
+    return table;
+  }
+  CHECK_GT(block_size, 0) << "SWA block_size must be positive.";
+  CHECK_EQ(static_cast<int32_t>(ctx_lens.size()), batch_size)
+      << "SWA ctx_lens size must match batch_size.";
+  CHECK_EQ(static_cast<int32_t>(q_lens.size()), batch_size)
+      << "SWA q_lens size must match batch_size.";
+  CHECK_EQ(table.dim(), 2) << "SWA block table must be 2D.";
+  CHECK_GE(table.size(0), batch_size)
+      << "SWA block table rows must cover the active batch.";
+
+  torch::Tensor contig_table = table.contiguous();
+  auto table_acc = contig_table.accessor<int32_t, 2>();
+  const int64_t cols = contig_table.size(1);
+  const int64_t block_size_i64 = static_cast<int64_t>(block_size);
+  const int64_t window_left =
+      window_size > 0 ? std::max<int64_t>(window_size - 1, 0) : 0;
+
+  for (int32_t seq = 0; seq < batch_size; ++seq) {
+    const int64_t ctx_len = static_cast<int64_t>(ctx_lens[seq]);
+    if (ctx_len <= 0) {
+      continue;
+    }
+    const int64_t q_len =
+        std::clamp<int64_t>(static_cast<int64_t>(q_lens[seq]), 0, ctx_len);
+    if (q_len <= 0) {
+      continue;
+    }
+    const int64_t q_start = ctx_len - q_len;
+    const int64_t live_token_begin =
+        std::max<int64_t>(0, q_start - window_left);
+    const int64_t live_col_begin = live_token_begin / block_size_i64;
+    const int64_t live_col_end = (ctx_len - 1) / block_size_i64;
+
+    CHECK_LT(live_col_end, cols)
+        << "SWA absolute block table is too short for the live window. seq="
+        << seq << ", ctx_len=" << ctx_len << ", q_len=" << q_len
+        << ", block_size=" << block_size << ", live_col_end=" << live_col_end
+        << ", cols=" << cols;
+    for (int64_t col = live_col_begin; col <= live_col_end; ++col) {
+      CHECK_GE(table_acc[seq][col], 0)
+          << "SWA live window has an invalid absolute block. seq=" << seq
+          << ", col=" << col << ", ctx_len=" << ctx_len << ", q_len=" << q_len
+          << ", block_size=" << block_size;
+    }
+  }
+
+  return sanitize_block_table(contig_table);
+}
+
 void sync_dsa_seq_metadata(AttentionMetadata& attn_metadata,
                            const DSAMetadata& dsa_metadata) {
   attn_metadata.q_cu_seq_lens = dsa_metadata.q_cu_seq_lens;
@@ -216,7 +273,16 @@ void DSAMetadataBuilderMlu::build_dsa_fields(
                     total_tokens,
                     proc_bt[m],
                     proc_slots[m]);
-      proc_bt[m] = sanitize_block_table(proc_bt[m]);
+      if (group_infos[m].type == DSACacheType::SLIDING_WINDOW) {
+        proc_bt[m] = sanitize_swa_table(proc_bt[m],
+                                        group_infos[m].block_size,
+                                        ctx_lens,
+                                        q_lens_vec,
+                                        batch_size,
+                                        window_size);
+      } else {
+        proc_bt[m] = sanitize_block_table(proc_bt[m]);
+      }
     }
 
     build_c128_meta(dsa, proc_bt, group_infos, batch_size);
@@ -517,6 +583,12 @@ void DSAMetadataBuilderMlu::process_swa_group(
     max_dst_len = std::max(max_dst_len, dst_len);
   }
   max_dst_len = std::max(max_dst_len, static_cast<int32_t>(current_cols));
+
+  // To adapt to the fused_compress_single_kv and fused_compress_multi_kv
+  // operators, the input cache tensor must have a shape of [bs, compress_len,
+  // dim]. So the max_dst_len can not be less than C128 compress_len.
+  int32_t min_compress_len = 128 / block_size;
+  max_dst_len = std::max(max_dst_len, min_compress_len);
 
   if (current_cols >= max_dst_len && raw_bt.size(0) == batch_size) {
     out_bt = raw_bt;

@@ -414,6 +414,8 @@ TEST(CompositeBlockManagerTest, SlidingWindowReleasesSkippedPhysicalBlocks) {
   ASSERT_EQ(exceeded[0].size(), sliding_window_blocks_per_sequence + 3);
   EXPECT_FALSE(exceeded[0][0].is_valid());
   EXPECT_FALSE(exceeded[0][1].is_valid());
+  EXPECT_EQ(exceeded[0][0].id(), -1);
+  EXPECT_EQ(exceeded[0][1].id(), -1);
   for (size_t i = 2; i < initial_ids.size(); ++i) {
     EXPECT_EQ(exceeded[0][i].id(), initial_ids[i]);
   }

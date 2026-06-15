@@ -116,8 +116,9 @@ class KVCacheState {
   // block table can be assembled independently of the legacy `blocks_` slot.
   std::vector<std::vector<Block>> composite_blocks_;
 
-  // Sliding-window bookkeeping (DSA SWA: keeps the physical block order
-  // stable so DSA metadata's modulo-based logical->physical mapping holds).
+  // Sliding-window cursor for legacy callers. CompositeBlockManager keeps DSA
+  // SWA block vectors in absolute logical block order and leaves expired
+  // logical positions invalid.
   uint32_t slice_window_pos_ = 0;
   uint32_t slice_window_size_ = 0;
   uint32_t slice_window_buffer_ = 0;

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,4 +15,19 @@ limitations under the License.
 
 #pragma once
 
-#include "layers/common/deepseek_v4_rotary_embedding.h"
+#include <torch/torch.h>
+
+namespace xllm::util {
+
+torch::Tensor create_hadamard_matrix(int64_t dim,
+                                     torch::Dtype dtype,
+                                     const torch::Device& device,
+                                     bool normalize);
+
+torch::Tensor hadamard_transform(const torch::Tensor& input,
+                                 const torch::Tensor& hadamard_matrix);
+
+torch::Tensor rotate_activation(const torch::Tensor& input,
+                                const torch::Tensor& hadamard_matrix);
+
+}  // namespace xllm::util

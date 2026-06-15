@@ -94,10 +94,20 @@ class MluGraph {
 
   // Replay captured graph with new input data
   ModelOutput replay();
-  void update_input_buffer(const torch::Tensor& tokens,
+  void update_input_buffer(CausalLM* model,
+                           const torch::Tensor& tokens,
                            const torch::Tensor& positions,
                            const ModelInputParams& params,
                            bool is_init = false);
+
+  // Accessor for graph metadata state (used by executor to prepare
+  // metadata before replay).
+  ModelGraphMetadataState* model_graph_metadata_state() {
+    return model_graph_metadata_state_.get();
+  }
+
+  void prepare_model_graph_metadata(CausalLM* model,
+                                    const ModelInputParams& params);
 
  private:
   // MLUGraph with mempool for managing temporary tensors during forward pass
@@ -107,6 +117,10 @@ class MluGraph {
   // instances)
   GraphPersistentParam* persistent_param_;  // not owned
   uint32_t padding_num_tokens_;
+
+  // Per-graph metadata state for models that require graph-forward
+  // metadata preparation (e.g., DeepSeek V4 DSA metadata).
+  std::unique_ptr<ModelGraphMetadataState> model_graph_metadata_state_;
 };
 
 // Executor implementation using MLU graph optimization
