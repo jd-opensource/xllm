@@ -153,6 +153,9 @@ std::optional<torch::Tensor> DeepseekV4DecoderLayerImpl::route_input_ids(
   if (id_count == token_count) {
     return flat_ids;
   }
+  CHECK_GT(id_count, 0) << "id_count must be greater than 0.";
+  CHECK_EQ(token_count % id_count, 0)
+      << "token_count must be divisible by id_count.";
   const int64_t repeat_factor = token_count / id_count;
   return flat_ids.unsqueeze(1)
       .repeat({1, repeat_factor})

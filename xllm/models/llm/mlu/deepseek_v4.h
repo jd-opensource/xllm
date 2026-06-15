@@ -40,10 +40,10 @@ limitations under the License.
 #include "core/layers/common/dsa_metadata.h"
 #include "core/layers/common/rms_norm.h"
 #include "core/layers/common/word_embedding.h"
-#include "layers/mlu/deepseek_v4/deepseek_v4_decoder_layer.h"
-#include "layers/mlu/deepseek_v4/dsa_cache_mapping.h"
-#include "layers/mlu/deepseek_v4/dsa_metadata_builder_mlu.h"
-#include "layers/mlu/deepseek_v4/hyper_connection.h"
+#include "core/layers/mlu/deepseek_v4/deepseek_v4_decoder_layer.h"
+#include "core/layers/mlu/deepseek_v4/dsa_cache_mapping.h"
+#include "core/layers/mlu/deepseek_v4/dsa_metadata_builder_mlu.h"
+#include "core/layers/mlu/deepseek_v4/hyper_connection.h"
 #include "models/llm/llm_model_base.h"
 
 namespace xllm::mlu::model {

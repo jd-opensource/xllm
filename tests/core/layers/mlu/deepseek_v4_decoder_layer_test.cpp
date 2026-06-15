@@ -75,6 +75,11 @@ torch::Tensor make_slots(const std::vector<int64_t>& start_pos,
                          int64_t block_count,
                          const torch::Device& device) {
   std::vector<int32_t> slots;
+  int64_t total_q_len = 0;
+  for (int64_t len : q_lens) {
+    total_q_len += len;
+  }
+  slots.reserve(static_cast<size_t>(total_q_len));
   for (int64_t seq_idx = 0; seq_idx < static_cast<int64_t>(q_lens.size());
        ++seq_idx) {
     for (int64_t token_idx = 0; token_idx < q_lens[seq_idx]; ++token_idx) {
@@ -256,9 +261,13 @@ class DeepseekV4DecoderLayerTest : public ::testing::Test {
     dsa->query_start_offsets = offsets_from_lens(q_lens);
 
     std::vector<int32_t> q_cu{0};
+    q_cu.reserve(static_cast<size_t>(batch_size + 1));
     std::vector<int32_t> kv_cu{0};
+    kv_cu.reserve(static_cast<size_t>(batch_size + 1));
     std::vector<int32_t> q_seq;
+    q_seq.reserve(static_cast<size_t>(batch_size));
     std::vector<int32_t> kv_seq;
+    kv_seq.reserve(static_cast<size_t>(batch_size));
     std::vector<int32_t> input_positions;
     input_positions.reserve(static_cast<size_t>(total_tokens));
     for (int64_t seq_idx = 0; seq_idx < batch_size; ++seq_idx) {

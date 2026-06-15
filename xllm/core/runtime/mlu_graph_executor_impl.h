@@ -107,7 +107,6 @@ class MluGraph {
   }
 
   void prepare_model_graph_metadata(CausalLM* model,
-                                    const torch::Tensor& positons,
                                     const ModelInputParams& params);
 
  private:

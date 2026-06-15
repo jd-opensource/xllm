@@ -438,7 +438,6 @@ MluGraph::MluGraph(GraphPersistentParam* persistent_param,
       padding_num_tokens_(padding_num_tokens) {}
 
 void MluGraph::prepare_model_graph_metadata(CausalLM* model,
-                                            const torch::Tensor& positons,
                                             const ModelInputParams& params) {
   if (!model->requires_graph_forward_metadata()) {
     return;
@@ -519,7 +518,7 @@ void MluGraph::update_input_buffer(CausalLM* model,
       tokens, positions, params, padding_needed);
   // For some models (e.g. DeepSeekV4), the metadata depends on variable host
   // data, which needs to be updated outside of capture.
-  prepare_model_graph_metadata(model, positions, params);
+  prepare_model_graph_metadata(model, params);
 }
 
 MluGraphExecutorImpl::MluGraphExecutorImpl(CausalLM* model,
