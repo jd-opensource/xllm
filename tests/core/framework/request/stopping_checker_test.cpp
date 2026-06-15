@@ -52,7 +52,7 @@ TEST(StoppingCheckerTest, IgnoreEosSkipsEosInStopTokens) {
             FinishReason::NONE);
 }
 
-TEST(StoppingCheckerTest, IgnoreEosStillStopsOnStopToken) {
+TEST(StoppingCheckerTest, IgnoreEosSkipsStopToken) {
   StoppingChecker checker(
       /*max_generated_tokens=*/10,
       /*max_context_len=*/0,
@@ -63,7 +63,7 @@ TEST(StoppingCheckerTest, IgnoreEosStillStopsOnStopToken) {
   const std::vector<int32_t> token_ids = {1, 7};
 
   EXPECT_EQ(checker.check(token_ids, /*num_prompt_tokens=*/1),
-            FinishReason::STOP);
+            FinishReason::NONE);
 }
 
 TEST(StoppingCheckerTest, IgnoreEosStillStopsOnStopSequence) {

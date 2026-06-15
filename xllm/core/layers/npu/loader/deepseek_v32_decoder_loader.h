@@ -36,7 +36,7 @@ class DeekseekV32DecoderLoader : public BaseLoader {
                            int32_t v_head_dim,
                            bool prefill_isBF16,
                            bool decode_isBF16,
-                           const std::vector<int>& attn_linear_quant_types,
+                           const std::vector<int32_t>& attn_linear_quant_types,
                            bool skip_topk,
                            LoadMode mode = LoadMode::kEager);
 
@@ -107,8 +107,8 @@ class DeekseekV32DecoderLoader : public BaseLoader {
   void preprocess_w4a8_dynamic_experts_weights();
 
   bool use_quant_weight_mapping() const;
-  bool is_attn_dynamic_desc(int index) const;
-  bool is_attn_quant_desc(int index) const;
+  bool is_attn_dynamic_desc(int32_t index) const;
+  bool is_attn_quant_desc(int32_t index) const;
   bool should_skip_indexer_weight(const std::string& name) const;
   void reset_skipped_indexer_weights();
 
@@ -168,7 +168,7 @@ class DeekseekV32DecoderLoader : public BaseLoader {
   bool decode_isBF16_;
   bool skip_topk_;
   // Compatibility vector: entries may be legacy LinearType or new LinearDesc.
-  std::vector<int> attn_linear_quant_types_;
+  std::vector<int32_t> attn_linear_quant_types_;
   std::mutex shared_experts_mutex_;
   std::mutex experts_mutex_;
 

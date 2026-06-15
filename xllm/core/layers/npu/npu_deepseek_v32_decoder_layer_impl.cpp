@@ -42,11 +42,11 @@ namespace xllm {
 namespace layer {
 
 namespace {
-constexpr int kQProjBLinearIndex = 1;
-constexpr int kIndexerWqBLinearIndex = 6;
-constexpr int kIndexerProjLinearIndex = 8;
-constexpr int kTranspose = 1;
-constexpr int kNotTranspose = 0;
+constexpr int32_t kQProjBLinearIndex = 1;
+constexpr int32_t kIndexerWqBLinearIndex = 6;
+constexpr int32_t kIndexerProjLinearIndex = 8;
+constexpr int32_t kTranspose = 1;
+constexpr int32_t kNotTranspose = 0;
 
 std::string normalize_quant_type(std::string value) {
   std::transform(
@@ -114,44 +114,45 @@ std::optional<std::string> get_optional_layer_quant_desc(
   return normalize_quant_type(quant_desc.value());
 }
 
-int quant_desc_to_linear_desc(const std::optional<std::string>& quant_desc,
-                              int default_desc) {
+int32_t quant_desc_to_linear_desc(const std::optional<std::string>& quant_desc,
+                                  int32_t default_desc) {
   if (!quant_desc.has_value()) {
     return default_desc;
   }
   const std::string quant_type = normalize_quant_type(quant_desc.value());
   if (quant_type == "float") {
-    return static_cast<int>(LinearTypeV2::FLOAT16);
+    return static_cast<int32_t>(LinearTypeV2::FLOAT16);
   }
   if (quant_type == "w8a8_dynamic") {
-    return static_cast<int>(LinearTypeV2::W8A8_DYNAMIC);
+    return static_cast<int32_t>(LinearTypeV2::W8A8_DYNAMIC);
   }
   if (quant_type == "w8a8") {
-    return static_cast<int>(LinearTypeV2::W8A8);
+    return static_cast<int32_t>(LinearTypeV2::W8A8);
   }
   LOG(FATAL) << "Unsupported DeepSeek V32 attention quant_desc: "
              << quant_desc.value();
   return default_desc;
 }
 
-std::vector<int> resolve_attn_linear_quant_types(const QuantArgs& quant_args,
-                                                 int32_t layer_id) {
-  const int w8a8_desc = static_cast<int>(LinearTypeV2::W8A8);
-  const int fp16_desc = static_cast<int>(LinearTypeV2::FLOAT16);
-  const int q_a_desc = quant_desc_to_linear_desc(
+std::vector<int32_t> resolve_attn_linear_quant_types(
+    const QuantArgs& quant_args,
+    int32_t layer_id) {
+  const int32_t w8a8_desc = static_cast<int32_t>(LinearTypeV2::W8A8);
+  const int32_t fp16_desc = static_cast<int32_t>(LinearTypeV2::FLOAT16);
+  const int32_t q_a_desc = quant_desc_to_linear_desc(
       get_layer_quant_desc(quant_args, layer_id, {"self_attn.q_a_proj"}),
       w8a8_desc);
-  const int kv_a_desc = quant_desc_to_linear_desc(
+  const int32_t kv_a_desc = quant_desc_to_linear_desc(
       get_layer_quant_desc(
           quant_args, layer_id, {"self_attn.kv_a_proj_with_mqa"}),
       w8a8_desc);
-  const int q_b_desc = quant_desc_to_linear_desc(
+  const int32_t q_b_desc = quant_desc_to_linear_desc(
       get_layer_quant_desc(quant_args, layer_id, {"self_attn.q_b_proj"}),
       w8a8_desc);
-  const int o_desc = quant_desc_to_linear_desc(
+  const int32_t o_desc = quant_desc_to_linear_desc(
       get_layer_quant_desc(quant_args, layer_id, {"self_attn.o_proj"}),
       w8a8_desc);
-  const int indexer_wq_b_desc = quant_desc_to_linear_desc(
+  const int32_t indexer_wq_b_desc = quant_desc_to_linear_desc(
       get_optional_layer_quant_desc(
           quant_args, layer_id, "self_attn.indexer.wq_b"),
       fp16_desc);
@@ -167,6 +168,16 @@ std::vector<int> resolve_attn_linear_quant_types(const QuantArgs& quant_args,
           indexer_wq_b_desc,
           fp16_desc,
           fp16_desc};
+}
+
+std::vector<int> to_atb_linear_quant_types(
+    const std::vector<int32_t>& linear_quant_types) {
+  std::vector<int> atb_linear_quant_types;
+  atb_linear_quant_types.reserve(linear_quant_types.size());
+  for (int32_t linear_quant_type : linear_quant_types) {
+    atb_linear_quant_types.emplace_back(static_cast<int>(linear_quant_type));
+  }
+  return atb_linear_quant_types;
 }
 }  // namespace
 
@@ -714,7 +725,8 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_quantization_parameters(
     param.moePackQuantType = static_cast<int>(PackType::ALL_W8A8_DYNAMIC);
     param.packQuantType = {static_cast<int>(PackType::MIX_W8A8),
                            static_cast<int>(PackType::ALL_W8A8_DYNAMIC)};
-    param.attnLinearQuantType = attn_linear_quant_types_;
+    param.attnLinearQuantType =
+        to_atb_linear_quant_types(attn_linear_quant_types_);
     param.mlpLinearQuantType = {static_cast<int>(LinearType::INT),
                                 static_cast<int>(LinearType::INVALID),
                                 static_cast<int>(LinearType::INT),
@@ -736,7 +748,8 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_quantization_parameters(
     // only routed experts use W4A8 GMM.
     param.packQuantType = {static_cast<int>(PackType::MIX_W8A8),
                            static_cast<int>(PackType::ALL_W8A8_DYNAMIC)};
-    param.attnLinearQuantType = attn_linear_quant_types_;
+    param.attnLinearQuantType =
+        to_atb_linear_quant_types(attn_linear_quant_types_);
     param.mlpLinearQuantType = {static_cast<int>(LinearType::INT),
                                 static_cast<int>(LinearType::INVALID),
                                 static_cast<int>(LinearType::INT),

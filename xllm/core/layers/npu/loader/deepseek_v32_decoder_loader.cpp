@@ -31,11 +31,11 @@ namespace layer {
 using namespace deepseek_v32_decoder_constants;
 
 namespace {
-constexpr int kQProjALinearIndex = 0;
-constexpr int kQProjBLinearIndex = 1;
-constexpr int kKvAProjLinearIndex = 2;
-constexpr int kOLinearIndex = 5;
-constexpr int kIndexerWqBLinearIndex = 6;
+constexpr int32_t kQProjALinearIndex = 0;
+constexpr int32_t kQProjBLinearIndex = 1;
+constexpr int32_t kKvAProjLinearIndex = 2;
+constexpr int32_t kOLinearIndex = 5;
+constexpr int32_t kIndexerWqBLinearIndex = 6;
 
 std::string TensorShapeString(const torch::Tensor& tensor) {
   std::ostringstream oss;
@@ -192,7 +192,7 @@ DeekseekV32DecoderLoader::DeekseekV32DecoderLoader(
     int32_t v_head_dim,
     bool prefill_isBF16,
     bool decode_isBF16,
-    const std::vector<int>& attn_linear_quant_types,
+    const std::vector<int32_t>& attn_linear_quant_types,
     bool skip_topk,
     LoadMode mode)
     : BaseLoader(weight_count, context, mode),
@@ -311,20 +311,26 @@ bool DeekseekV32DecoderLoader::use_quant_weight_mapping() const {
   return quantize_type_ == "w8a8_dynamic" || quantize_type_ == "w4a8_dynamic";
 }
 
-bool DeekseekV32DecoderLoader::is_attn_dynamic_desc(int index) const {
-  return index >= 0 &&
-         index < static_cast<int>(attn_linear_quant_types_.size()) &&
-         attn_linear_quant_types_[index] ==
-             static_cast<int>(LinearTypeV2::W8A8_DYNAMIC);
+bool DeekseekV32DecoderLoader::is_attn_dynamic_desc(int32_t index) const {
+  if (index < 0) {
+    return false;
+  }
+  const size_t linear_index = static_cast<size_t>(index);
+  return linear_index < attn_linear_quant_types_.size() &&
+         attn_linear_quant_types_[linear_index] ==
+             static_cast<int32_t>(LinearTypeV2::W8A8_DYNAMIC);
 }
 
-bool DeekseekV32DecoderLoader::is_attn_quant_desc(int index) const {
-  return index >= 0 &&
-         index < static_cast<int>(attn_linear_quant_types_.size()) &&
-         (attn_linear_quant_types_[index] ==
-              static_cast<int>(LinearTypeV2::W8A8) ||
-          attn_linear_quant_types_[index] ==
-              static_cast<int>(LinearTypeV2::W8A8_DYNAMIC));
+bool DeekseekV32DecoderLoader::is_attn_quant_desc(int32_t index) const {
+  if (index < 0) {
+    return false;
+  }
+  const size_t linear_index = static_cast<size_t>(index);
+  return linear_index < attn_linear_quant_types_.size() &&
+         (attn_linear_quant_types_[linear_index] ==
+              static_cast<int32_t>(LinearTypeV2::W8A8) ||
+          attn_linear_quant_types_[linear_index] ==
+              static_cast<int32_t>(LinearTypeV2::W8A8_DYNAMIC));
 }
 
 bool DeekseekV32DecoderLoader::should_skip_indexer_weight(
@@ -977,6 +983,7 @@ void DeekseekV32DecoderLoader::set_kv_weight(const StateDict& state_dict,
 void DeekseekV32DecoderLoader::preprocess_linear_for_rope() {
   auto& t = working_tensors();
   std::vector<std::string> linear_for_rope;
+  linear_for_rope.reserve(6);
   linear_for_rope.emplace_back("self_attn.q_b_proj.weight");
   if (is_attn_dynamic_desc(kQProjBLinearIndex)) {
     linear_for_rope.emplace_back("self_attn.q_b_proj.weight_offset");

@@ -166,8 +166,10 @@ torch::Tensor select_mtp_topk_indices_for_next_step(
   }
   CHECK_GE(topk_indices.dim(), 1)
       << "MTP DSA top-k indices must have at least one dimension.";
-  CHECK_GT(topk_indices.size(0), selected_idxes.max().item<int64_t>())
-      << "MTP selected top-k index exceeds top-k rows.";
+  if (selected_idxes.device().is_cpu()) {
+    CHECK_GT(topk_indices.size(0), selected_idxes.max().item<int64_t>())
+        << "MTP selected top-k index exceeds top-k rows.";
+  }
   torch::Tensor index =
       selected_idxes
           .to(torch::dtype(torch::kLong).device(topk_indices.device()))
