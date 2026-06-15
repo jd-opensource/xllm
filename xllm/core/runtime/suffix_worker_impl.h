@@ -19,6 +19,7 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
+#include "runtime/forward_params.h"
 #include "runtime/speculative_worker_impl.h"
 #include "util/suffix_decoding_cache.h"
 

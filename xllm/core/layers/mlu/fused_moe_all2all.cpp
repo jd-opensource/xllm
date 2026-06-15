@@ -86,14 +86,13 @@ void FusedMoEImpl::select_experts_all2all(
             .view_as(dispatch_scale_slice);
     dispatch_scale_slice.copy_(hidden_states_scale_bytes);
   } else {
-    xllm::kernel::MoeExpandInputParams moe_expand_input_params;
-    moe_expand_input_params.input = hidden_states_2d;
-    moe_expand_input_params.gather_index = gather_idx;
-    moe_expand_input_params.cusum_token_count = std::nullopt;
-    moe_expand_input_params.start_expert_id = 0;
-    moe_expand_input_params.expert_size = num_total_experts_;
-    expand_hidden_states =
-        xllm::kernel::moe_expand_input(moe_expand_input_params);
+    xllm::kernel::MoeExpandInputParams moe_expand_input;
+    moe_expand_input.input = hidden_states_2d;
+    moe_expand_input.gather_index = gather_idx;
+    moe_expand_input.cusum_token_count = std::nullopt;
+    moe_expand_input.start_expert_id = 0;
+    moe_expand_input.expert_size = num_total_experts_;
+    expand_hidden_states = xllm::kernel::moe_expand_input(moe_expand_input);
     // use copy to place the output inside the dispatch buffer
     torch::Tensor dispatch_tensor =
         view_as_dtype(expand_hidden_states, torch::kChar);

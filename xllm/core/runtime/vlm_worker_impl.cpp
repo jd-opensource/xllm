@@ -27,7 +27,7 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
 #include "util/threadpool.h"
@@ -57,7 +57,7 @@ bool VLMWorkerImpl::init_model(ModelContext& context) {
 std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& input) {
   Timer timer;
   const bool empty_shard =
-      input.input_params.meta.num_sequences == 0 &&
+      input.meta.num_sequences == 0 &&
       (!input.token_ids.defined() || input.token_ids.numel() == 0);
   if (empty_shard) {
     return ForwardOutput{};
@@ -65,8 +65,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& input) {
 
   // TODO guojinrong, to adapt multi stream parallel later
   // call model executor forward to get hidden states
-  auto model_output = model_executor_->forward(
-      input.token_ids, input.positions, kv_caches_, input.input_params);
+  auto model_output = model_executor_->forward(input, kv_caches_);
   auto& sampling_params = input.sampling_params;
   torch::Tensor logits;
   if (sampling_params.selected_token_idxes.defined()) {

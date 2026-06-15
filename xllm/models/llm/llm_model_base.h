@@ -23,12 +23,14 @@ limitations under the License.
 
 #include "core/common/interruption_bus.h"
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model/model_output.h"
+#include "core/framework/model/model_traits.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/common/lm_head.h"
 #include "core/layers/common/rms_norm.h"
+#include "core/runtime/forward_params.h"
 #include "core/util/rec_model_utils.h"
 #include "models/model_registry.h"
 
@@ -57,15 +59,15 @@ class LlmModelImplBase : public torch::nn::Module {
 
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
-  virtual ModelOutput forward(torch::Tensor tokens,
-                              torch::Tensor positions,
-                              std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) {
+  virtual ModelOutput forward(const ForwardInput& input,
+                              std::vector<KVCache>& kv_caches) {
+    torch::Tensor tokens = input.token_ids;
+    torch::Tensor positions = input.positions;
     if (tokens.numel() == 0) {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
       positions = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
     }
-    auto inputs_embeds = input_params.embedding.input_embedding;
+    auto inputs_embeds = input.embedding.input_embedding;
     // test
     torch::Tensor h;
     if (inputs_embeds.defined()) {
@@ -74,25 +76,28 @@ class LlmModelImplBase : public torch::nn::Module {
       h = embed_tokens_(tokens);
     }
 
-    auto modified_input_params = input_params;
-    auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;
+    ForwardInput modified_input = input;
+    auto& dp_token_nums = modified_input.parallel.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
-    if (!modified_input_params.attn_metadata) {
-      modified_input_params.attn_metadata =
-          std::make_shared<layer::AttentionMetadata>(
-              layer::AttentionMetadataBuilder::build(modified_input_params,
-                                                     model_args_.enable_mla()));
+    if (!modified_input.attn_metadata) {
+      modified_input.attn_metadata = std::make_shared<layer::AttentionMetadata>(
+          layer::AttentionMetadataBuilder::build(
+              modified_input.meta,
+              modified_input.attention,
+              modified_input.graph,
+              modified_input.llmrec_params(),
+              modified_input.enable_cuda_graph,
+              model_args_.enable_mla()));
     }
-    auto& attn_metadata = *(modified_input_params.attn_metadata);
+    auto& attn_metadata = *(modified_input.attn_metadata);
     if (positions.dim() == 2) {
       std::tie(attn_metadata.mrope_cos, attn_metadata.mrope_sin) =
           apply_mrope(positions);
     }
 
     const LlmRecMultiRoundParams* llmrec_params = nullptr;
-    if (is_rec_multi_round_mode() &&
-        modified_input_params.has_llmrec_params()) {
-      llmrec_params = modified_input_params.llmrec_params();
+    if (is_rec_multi_round_mode() && modified_input.has_llmrec_params()) {
+      llmrec_params = modified_input.llmrec_params();
       CHECK_EQ(llmrec_params->full_k_caches.size(), layers_.size())
           << "Rec multi-round mode requires full_k_caches per layer.";
       CHECK_EQ(llmrec_params->full_v_caches.size(), layers_.size())
@@ -115,19 +120,24 @@ class LlmModelImplBase : public torch::nn::Module {
       attn_metadata.plan_info->layer_id = i;
 #endif
       auto& layer = layers_[i];
-      h = layer(h,
-                residual,
-                positions,
-                attn_metadata,
-                kv_caches[i],
-                modified_input_params);
-      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
-                                              h.device())) {
+      h = layer(
+          h, residual, positions, attn_metadata, kv_caches[i], modified_input);
+      if (!modified_input.record_layer(static_cast<uint32_t>(i), h.device())) {
         return ModelOutput();
       }
     }
     auto [hidden_states, residual_out] = norm_(h, residual);
     return ModelOutput(hidden_states, residual_out);
+  }
+
+  virtual ModelOutput forward(torch::Tensor tokens,
+                              torch::Tensor positions,
+                              std::vector<KVCache>& kv_caches,
+                              const ForwardInput& input) {
+    ForwardInput modified_input = input;
+    modified_input.token_ids = tokens;
+    modified_input.positions = positions;
+    return forward(modified_input, kv_caches);
   }
 
   // load the weight from the checkpoint
@@ -188,11 +198,49 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   // returns: [num_tokens, hidden_size]
-  virtual ModelOutput forward(const torch::Tensor& tokens,
-                              const torch::Tensor& positions,
+  virtual ModelOutput forward(const ForwardInput& input,
+                              std::vector<KVCache>& kv_caches) {
+    using ModelImplType = typename LlmModelType::ContainedType;
+    if constexpr (requires(ModelImplType* model,
+                           const ForwardInput& forward_input,
+                           std::vector<KVCache>& caches) {
+                    model->forward(forward_input, caches);
+                  }) {
+      return model_->forward(input, kv_caches);
+    } else if constexpr (requires(ModelImplType* model,
+                                  torch::Tensor tokens,
+                                  torch::Tensor positions,
+                                  std::vector<KVCache>& caches,
+                                  const ForwardInput& params) {
+                           model->forward(tokens, positions, caches, params);
+                         }) {
+      return model_->forward(
+          input.token_ids, input.positions, kv_caches, input);
+    } else {
+      static_assert(sizeof(ModelImplType) == 0,
+                    "Model must implement a supported forward interface");
+    }
+  }
+
+  virtual ModelOutput forward(torch::Tensor tokens,
+                              torch::Tensor positions,
                               std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) {
-    return model_(tokens, positions, kv_caches, input_params);
+                              const ForwardInput& input) {
+    ForwardInput modified_input = input;
+    modified_input.token_ids = tokens;
+    modified_input.positions = positions;
+    using ModelImplType = typename LlmModelType::ContainedType;
+    if constexpr (requires(ModelImplType* model,
+                           torch::Tensor token_ids,
+                           torch::Tensor pos,
+                           std::vector<KVCache>& caches,
+                           const ForwardInput& params) {
+                    model->forward(token_ids, pos, caches, params);
+                  }) {
+      return model_->forward(tokens, positions, kv_caches, modified_input);
+    } else {
+      return forward(modified_input, kv_caches);
+    }
   }
 
   // hidden_states: [num_tokens, hidden_size]

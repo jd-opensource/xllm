@@ -14,7 +14,9 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+
 #include "comm_channel.h"
+#include "runtime/forward_params.h"
 #include "runtime/forward_shared_memory_manager.h"
 #include "runtime/options.h"
 

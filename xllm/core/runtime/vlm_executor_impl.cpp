@@ -33,11 +33,6 @@ VlmExecutorImpl::VlmExecutorImpl(CausalLM* model,
       args_(args),
       device_(device),
       options_(options) {
-  if (options_.max_encoder_cache_size() > 0) {
-    encoder_cache_ = std::make_unique<EncoderCache>(
-        options_.max_encoder_cache_size() * 1024 * 1024);
-  }
-
   if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     llm_executor_ = ExecutorImplFactory::get_instance().create_executor_impl(
         model, args, device, options, Device::type_str());
@@ -49,51 +44,40 @@ ForwardInput VlmExecutorImpl::prepare_inputs(Batch& batch) {
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());
 }
 
-MMDict VlmExecutorImpl::encode(const ModelInputParams& params) {
-  return model_->encode(params);
+MMDict VlmExecutorImpl::encode(const ForwardInput& input) {
+  return dynamic_cast<CausalVLM*>(model_)->encode(input);
 }
 
-ModelOutput VlmExecutorImpl::run(const torch::Tensor& tokens,
-                                 const torch::Tensor& positions,
-                                 std::vector<KVCache>& kv_caches,
-                                 const ModelInputParams& params) {
+ModelOutput VlmExecutorImpl::run(const ForwardInput& input,
+                                 std::vector<KVCache>& kv_caches) {
   torch::NoGradGuard no_grad;
-  auto& mm_data = params.multimodal.mm_data;
-  if (encoder_cache_) {
-    EncoderCacheLookupVisitor lookup(encoder_cache_.get());
-    mm_data.foreach (lookup);
-  }
-
+  ForwardInput model_input = input;
+  auto& mm_data = model_input.multimodal.mm_data;
   EncoderInputGatherVisitor input_gather;
   mm_data.foreach (input_gather);
   CHECK(input_gather.finish(mm_data));
   mm_data.to(device_);
 
-  MMDict embedding = encode(params);
+  auto embedding = encode(model_input);
   EncoderOutputScatterVisitor scatter(embedding);
   mm_data.foreach (scatter);
   CHECK(scatter.finish());
 
-  if (encoder_cache_) {
-    EncoderCacheInsertVisitor insert(encoder_cache_.get());
-    mm_data.foreach (insert);
-  }
-
   EncoderEmbeddingGatherVisitor gather(device_,
                                        mm_data.type(),
-                                       params.attention.host.kv_seq_lens,
-                                       params.attention.host.q_seq_lens);
+                                       model_input.attention.host.kv_seq_lens,
+                                       model_input.attention.host.q_seq_lens);
   mm_data.foreach (gather);
   CHECK(gather.finish(mm_data));
 
-  params.embedding.input_embedding =
-      model_->get_input_embeddings(tokens, params);
+  model_input.embedding.input_embedding =
+      model_->get_input_embeddings(model_input.token_ids, model_input);
 
   if (llm_executor_) {
-    return llm_executor_->run(tokens, positions, kv_caches, params);
+    return llm_executor_->run(model_input, kv_caches);
   }
 
-  return model_->forward(tokens, positions, kv_caches, params);
+  return model_->forward(model_input, kv_caches);
 }
 
 }  // namespace xllm

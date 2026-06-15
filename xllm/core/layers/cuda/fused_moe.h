@@ -21,7 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
@@ -45,7 +45,7 @@ class FusedMoEImpl : public torch::nn::Module {
   torch::Tensor forward_experts(const torch::Tensor& hidden_states,
                                 torch::Tensor router_logits);
   torch::Tensor forward(const torch::Tensor& hidden_states,
-                        const ModelInputParams& input_params);
+                        const ParallelInput& parallel_input);
   void load_state_dict(const StateDict& state_dict);
 
  private:

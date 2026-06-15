@@ -159,25 +159,25 @@ struct DiTInputParams {
 
 struct DiTRequestState {
  public:
-  DiTRequestState(DiTInputParams& input_params,
+  DiTRequestState(DiTInputParams& input,
                   DiTGenerationParams& generation_params,
                   const DiTOutputFunc& output_func,
                   const DiTOutputsFunc& outputs_func,
                   std::optional<Call*> call = std::nullopt)
-      : input_params_(std::move(input_params)),
+      : input_(std::move(input)),
         generation_params_(std::move(generation_params)),
         output_func_(std::move(output_func)),
         outputs_func_(std::move(outputs_func)),
         call_(call) {}
   DiTRequestState() {}
-  DiTInputParams& input_params() { return input_params_; }
+  DiTInputParams& input() { return input_; }
   DiTGenerationParams& generation_params() { return generation_params_; }
   DiTOutputFunc& output_func() { return output_func_; }
   DiTOutputsFunc& outputs_func() { return outputs_func_; }
   std::optional<Call*>& call() { return call_; }
 
  private:
-  DiTInputParams input_params_;
+  DiTInputParams input_;
   DiTGenerationParams generation_params_;
   DiTOutputFunc output_func_;
   DiTOutputsFunc outputs_func_;

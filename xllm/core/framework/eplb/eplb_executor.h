@@ -20,7 +20,7 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "framework/model/causal_lm.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "platform/device.h"
 #include "runtime/forward_params.h"
 

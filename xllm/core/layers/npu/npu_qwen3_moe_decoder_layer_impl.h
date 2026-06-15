@@ -22,12 +22,13 @@ limitations under the License.
 #include <nlohmann/json.hpp>
 
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/parallel_state/npu_dp_ep_padding.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "loader/qwen3_moe_decoder_loader.h"
 #include "npu_base_layer.h"
+#include "runtime/forward_params.h"
 #include "xllm_atb_layers/core/include/atb_speed/base/hosttensor_binder.h"
 #include "xllm_atb_layers/core/include/atb_speed/base/model.h"
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
@@ -54,7 +55,7 @@ class NpuQwen3MoeDecoderLayerImpl : public BaseLayer {
                         torch::Tensor& sin_pos,
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params,
+                        const ForwardInput& input,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
                         int node_id = 0);
@@ -104,7 +105,7 @@ class NpuQwen3MoeDecoderLayerImpl : public BaseLayer {
                                torch::Tensor& sin_pos,
                                torch::Tensor& attn_mask,
                                KVCache& kv_cache,
-                               const ModelInputParams& input_params,
+                               const ForwardInput& input,
                                bool is_prefill,
                                bool use_graph_decode_input);
 

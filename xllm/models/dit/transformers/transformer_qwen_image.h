@@ -31,7 +31,7 @@ limitations under the License.
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/dit_cache/dit_cache.h"
 #include "core/framework/dit_model_loader.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"
 #include "core/layers/common/add_matmul.h"

@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "onerec_batch_input_builder.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 

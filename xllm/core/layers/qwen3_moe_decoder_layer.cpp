@@ -20,6 +20,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "core/framework/config/eplb_config.h"
 #include "layers/common/dp_utils.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 namespace layer {
@@ -27,9 +28,8 @@ namespace layer {
 namespace {
 
 #if defined(USE_MLU)
-bool use_moe_all2all(bool enable_deep_ep,
-                     const ModelInputParams& input_params) {
-  return enable_deep_ep && all_dp_ranks_are_decode(input_params);
+bool use_moe_all2all(bool enable_deep_ep, const ParallelInput& parallel_input) {
+  return enable_deep_ep && all_dp_ranks_are_decode(parallel_input);
 }
 #endif
 bool is_moe_layer(const ModelArgs& model_args, int32_t layer_id) {
@@ -101,18 +101,18 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
 
 torch::Tensor Qwen3MoeDecoderLayerImpl::run_moe(
     torch::Tensor x,
-    const ModelInputParams& input_params) {
+    const ParallelInput& parallel_input) {
 #if defined(USE_MLU)
   const bool enable_moe_all2all =
-      use_moe_all2all(enable_deep_ep_, input_params);
+      use_moe_all2all(enable_deep_ep_, parallel_input);
   if (need_dp_moe_gather(parallel_args_, enable_moe_all2all)) {
-    x = gather_dp_tokens(x, input_params, parallel_args_);
+    x = gather_dp_tokens(x, parallel_input, parallel_args_);
     x = moe_mlp_->forward_experts(x, enable_moe_all2all);
-    return get_dp_local_slice(x, input_params, parallel_args_);
+    return get_dp_local_slice(x, parallel_input, parallel_args_);
   }
   return moe_mlp_->forward_experts(x, enable_moe_all2all);
 #else
-  return moe_mlp_(x, input_params);
+  return moe_mlp_(x, parallel_input);
 #endif
 }
 
@@ -135,7 +135,7 @@ torch::Tensor Qwen3MoeDecoderLayerImpl::forward(
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
-    const ModelInputParams& input_params) {
+    const ForwardInput& input) {
   // Pre-attention norm
   if (!residual.has_value()) {
     residual = x;
@@ -152,7 +152,7 @@ torch::Tensor Qwen3MoeDecoderLayerImpl::forward(
 
   // MLP forward
   if (moe_mlp_) {
-    x = run_moe(x, input_params);
+    x = run_moe(x, input.parallel);
   } else {
     x = mlp_(x);
   }

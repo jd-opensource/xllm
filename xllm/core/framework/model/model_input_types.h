@@ -20,7 +20,6 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstring>
-#include <memory>
 #include <optional>
 #include <string>
 #include <variant>
@@ -32,10 +31,6 @@ limitations under the License.
 #if defined(USE_MLU)
 #include "platform/mlu/mlu_layer_synchronizer.h"
 #endif
-#if defined(USE_DCU)
-#include "platform/dcu/dcu_layer_synchronizer.h"
-#endif
-
 #include "core/framework/multimodal/mm_batch_data.h"
 #include "framework/batch/batch_forward_type.h"
 #include "framework/parallel_state/npu_cp_ep_padding.h"
@@ -46,11 +41,8 @@ limitations under the License.
 #include "util/tensor_helper.h"
 
 namespace xllm {
-namespace layer {
-struct AttentionMetadata;
-}  // namespace layer
 
-struct OneRecModelInputParams {
+struct OneRecInput {
   enum class RecStage {
     PREFILL,
     DECODE,
@@ -80,8 +72,8 @@ struct OneRecModelInputParams {
   torch::Tensor encoder_token_ids;
   torch::Tensor encoder_positions;
 
-  OneRecModelInputParams to(const c10::Device& device) const {
-    OneRecModelInputParams result = *this;
+  OneRecInput to(const c10::Device& device) const {
+    OneRecInput result = *this;
 
     if (encoder_seq_lens_tensor.defined()) {
       result.encoder_seq_lens_tensor = encoder_seq_lens_tensor.to(device);
@@ -112,7 +104,7 @@ struct OneRecModelInputParams {
   }
 
   void print() const {
-    LOG(INFO) << "OneRecModelInputParams:"
+    LOG(INFO) << "OneRecInput:"
               << " rec_stage: "
               << (rec_stage == RecStage::PREFILL ? "PREFILL" : "DECODE")
               << " is_hybrid_mode: " << is_hybrid_mode
@@ -158,7 +150,7 @@ struct OneRecModelInputParams {
   }
 };
 
-struct OneRecXAttentionParams : public OneRecModelInputParams {
+struct OneRecXAttentionParams : public OneRecInput {
   std::vector<torch::Tensor> unshared_k_caches;
   std::vector<torch::Tensor> unshared_v_caches;
   std::vector<torch::Tensor> shared_k_caches;
@@ -170,8 +162,7 @@ struct OneRecXAttentionParams : public OneRecModelInputParams {
 
   OneRecXAttentionParams to(const c10::Device& device) const {
     OneRecXAttentionParams result = *this;
-    static_cast<OneRecModelInputParams&>(result) =
-        OneRecModelInputParams::to(device);
+    static_cast<OneRecInput&>(result) = OneRecInput::to(device);
     result.unshared_k_caches.clear();
     result.unshared_v_caches.clear();
     result.shared_k_caches.clear();
@@ -207,7 +198,7 @@ struct OneRecXAttentionParams : public OneRecModelInputParams {
 
   void print() const {
     LOG(INFO) << "OneRecXAttentionParams:";
-    OneRecModelInputParams::print();
+    OneRecInput::print();
     LOG(INFO) << " unshared_k_caches size: " << unshared_k_caches.size()
               << " unshared_v_caches size: " << unshared_v_caches.size()
               << " shared_k_caches size: " << shared_k_caches.size()
@@ -336,10 +327,10 @@ struct LlmRecMultiRoundParams {
   }
 };
 
-using RecModelInputParams = std::variant<std::monostate,
-                                         OneRecModelInputParams,
-                                         OneRecXAttentionParams,
-                                         LlmRecMultiRoundParams>;
+using RecInput = std::variant<std::monostate,
+                              OneRecInput,
+                              OneRecXAttentionParams,
+                              LlmRecMultiRoundParams>;
 
 struct AttentionHostInput {
   std::vector<int32_t> q_seq_lens;
@@ -793,8 +784,6 @@ struct ParallelInput {
 
 #if defined(USE_MLU)
   std::shared_ptr<MLULayerSynchronizerImpl> layer_synchronizer = nullptr;
-#elif defined(USE_DCU)
-  std::shared_ptr<DCULayerSynchronizerImpl> layer_synchronizer = nullptr;
 #elif defined(USE_NPU)
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
   uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
@@ -832,7 +821,7 @@ struct ParallelInput {
         .moe_idx(safe_to(cp_ep_padding_data.moe_idx(), device, true))
         .expert_array(safe_to(cp_ep_padding_data.expert_array(), device, true));
     out.cp_prefill_inputs = cp_prefill_inputs.to(device);
-#if defined(USE_NPU) || defined(USE_MLU) || defined(USE_DCU)
+#if defined(USE_NPU) || defined(USE_MLU)
     out.layer_synchronizer = layer_synchronizer;
 #endif
 #if defined(USE_NPU)
@@ -880,215 +869,6 @@ struct GraphInput {
     out.expanded_kv_seq_lens_vec = expanded_kv_seq_lens_vec;
     return out;
   }
-};
-
-struct ModelInputParams {
-  ModelInputParams to(const torch::Device& device) const {
-    ModelInputParams params;
-    params.meta = meta;
-    params.attention = attention.to(device);
-    params.embedding = embedding.to(device);
-    params.block_copy = block_copy.to(device);
-    params.multimodal = multimodal.to(device);
-    params.parallel = parallel.to(device);
-    params.expert = expert.to(device);
-    params.graph = graph.to(device);
-    params.dit_forward_input = dit_forward_input.to(device);
-    params.is_spec_verify = is_spec_verify;
-    params.num_accepted_tokens = safe_to(num_accepted_tokens, device, true);
-    params.dsa_topk_indices = safe_to(dsa_topk_indices, device, true);
-    for (const auto& table : multi_block_tables) {
-      params.multi_block_tables.push_back(
-          safe_to(table, table.options().device(torch::kCPU), true));
-    }
-    params.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
-    if (!params.embedding.linear_state_indices.defined() &&
-        !params.embedding.linear_state_ids.empty()) {
-      params.embedding.linear_state_indices =
-          torch::tensor(params.embedding.linear_state_ids, torch::kInt)
-              .to(device);
-    }
-
-    // rec_params device conversion for both OneRec and LLM-Rec variants
-    if (const auto* onerec_xattn = onerec_xattention_params()) {
-      params.rec_params = onerec_xattn->to(device);
-    } else if (const auto* onerec = onerec_params()) {
-      params.rec_params = onerec->to(device);
-    } else if (const auto* llmrec = llmrec_params()) {
-      params.rec_params = llmrec->to(device);
-    }
-
-    return params;
-  }
-
-  void print() const {
-    LOG(INFO) << "ModelInputParams: batch_forward_type is "
-              << meta.batch_forward_type.to_string() << " , num_sequences is "
-              << meta.num_sequences << " , kv_max_seq_len is "
-              << meta.kv_max_seq_len << " , q_max_seq_len is "
-              << meta.q_max_seq_len;
-    LOG(INFO) << "ModelInputParams: attention.host.kv_seq_lens is "
-              << attention.host.kv_seq_lens;
-    LOG(INFO) << "ModelInputParams: attention.host.q_seq_lens is "
-              << attention.host.q_seq_lens;
-    LOG(INFO) << "ModelInputParams: batch_forward_type is "
-              << meta.batch_forward_type.to_string();
-    print_tensor(
-        attention.device.kv_seq_lens, "ModelInputParams: kv_seq_lens", 4);
-    print_tensor(
-        attention.device.q_seq_lens, "ModelInputParams: q_seq_lens", 4);
-    print_tensor(
-        attention.device.q_cu_seq_lens, "ModelInputParams: q_cu_seq_lens", 4);
-    print_tensor(attention.device.new_cache_slots,
-                 "ModelInputParams: new_cache_slots",
-                 4);
-    print_tensor(
-        attention.device.block_tables, "ModelInputParams: block_tables", 4);
-    LOG(INFO) << "ModelInputParams: dp_global_token_nums is "
-              << parallel.dp_global_token_nums
-              << ", dp_is_decode: " << parallel.dp_is_decode;
-    LOG(INFO) << "ModelInputParams: is_spec_verify is " << is_spec_verify;
-    print_tensor(num_accepted_tokens,
-                 "ModelInputParams: num_accepted_tokens",
-                 /*max_elements=*/4);
-
-    if (const auto* onerec_xattn = onerec_xattention_params()) {
-      LOG(INFO) << "ModelInputParams: has onerec_xattention_params";
-      onerec_xattn->print();
-    } else if (const auto* onerec = onerec_params()) {
-      LOG(INFO) << "ModelInputParams: has onerec_params";
-      onerec->print();
-    } else if (const auto* llmrec = llmrec_params()) {
-      LOG(INFO) << "ModelInputParams: has llm_rec_multi_round_params"
-                << ", beam_width=" << llmrec->beam_width
-                << ", total_round=" << llmrec->total_round;
-    }
-  }
-
-  int32_t get_q_seq_len(int32_t seq_idx) const {
-#if defined(USE_NPU)
-    CHECK(seq_idx < attention.host.q_seq_lens.size()) << "seq_idx out of range";
-    return attention.host.q_seq_lens[seq_idx];
-#else
-    CHECK(seq_idx < attention.host.q_seq_lens.size() - 1)
-        << "seq_idx out of range";
-    return attention.host.q_seq_lens[seq_idx + 1] -
-           attention.host.q_seq_lens[seq_idx];
-#endif
-  }
-
-  bool synchronize_layer(uint32_t layer_idx) const {
-#if defined(USE_NPU)
-    if (parallel.layer_wise_load_synchronizer != nullptr &&
-        layer_idx % parallel.layers_per_bacth_copy == 0) {
-      if (!parallel.layer_wise_load_synchronizer->synchronize_layer(
-              layer_idx / parallel.layers_per_bacth_copy)) {
-        return false;
-      }
-    }
-#else
-    (void)layer_idx;
-#endif
-    return true;
-  }
-
-  bool record_layer(uint32_t layer_idx, const torch::Device& device) const {
-#if defined(USE_MLU) || defined(USE_DCU)
-    if (parallel.layer_synchronizer != nullptr) {
-      return parallel.layer_synchronizer->record_current(layer_idx,
-                                                         device.index());
-    }
-#else
-    (void)layer_idx;
-    (void)device;
-#endif
-    return true;
-  }
-
-  BatchInputMeta meta;
-  AttentionInput attention;
-  ModelEmbeddingInput embedding;
-  ParallelInput parallel;
-  BlockCopyInput block_copy;
-  MultiModalInput multimodal;
-  ExpertInput expert;
-  GraphInput graph;
-
-  // Multi block manager block tables for DeepSeek V4.
-  // Each tensor is [batch_size, max_block_len] for one manager.
-  std::vector<torch::Tensor> multi_block_tables;
-
-  // Shifted target token ids for MTP training/evaluation paths.
-  torch::Tensor mtp_shifted_token_ids;
-  bool is_spec_verify = false;
-  torch::Tensor num_accepted_tokens;
-  torch::Tensor dsa_topk_indices;
-
-  RecModelInputParams rec_params;
-
-  // dit input data
-  DiTForwardInput dit_forward_input;
-
-  const OneRecModelInputParams* onerec_params() const {
-    if (const auto* params = std::get_if<OneRecModelInputParams>(&rec_params)) {
-      return params;
-    }
-    if (const auto* params = std::get_if<OneRecXAttentionParams>(&rec_params)) {
-      return static_cast<const OneRecModelInputParams*>(params);
-    }
-    return nullptr;
-  }
-
-  bool has_onerec_params() const { return onerec_params() != nullptr; }
-
-  OneRecModelInputParams& mutable_onerec_params() {
-    if (auto* params = std::get_if<OneRecModelInputParams>(&rec_params)) {
-      return *params;
-    }
-    if (auto* params = std::get_if<OneRecXAttentionParams>(&rec_params)) {
-      return static_cast<OneRecModelInputParams&>(*params);
-    }
-    if (!has_onerec_params()) {
-      rec_params.emplace<OneRecModelInputParams>();
-    }
-    return std::get<OneRecModelInputParams>(rec_params);
-  }
-
-  const OneRecXAttentionParams* onerec_xattention_params() const {
-    return std::get_if<OneRecXAttentionParams>(&rec_params);
-  }
-
-  bool has_onerec_xattention_params() const {
-    return onerec_xattention_params() != nullptr;
-  }
-
-  OneRecXAttentionParams& mutable_onerec_xattention_params() {
-    if (!has_onerec_xattention_params()) {
-      rec_params.emplace<OneRecXAttentionParams>();
-    }
-    return std::get<OneRecXAttentionParams>(rec_params);
-  }
-
-  // Accessors for LLM Rec multi-round params inside rec_params variant
-  const LlmRecMultiRoundParams* llmrec_params() const {
-    return std::get_if<LlmRecMultiRoundParams>(&rec_params);
-  }
-
-  bool has_llmrec_params() const { return llmrec_params() != nullptr; }
-
-  LlmRecMultiRoundParams& mutable_llmrec_params() {
-    if (!has_llmrec_params()) {
-      rec_params.emplace<LlmRecMultiRoundParams>();
-    }
-    return std::get<LlmRecMultiRoundParams>(rec_params);
-  }
-
-  // Optional attention metadata, built by executor
-  // Using shared_ptr with forward declaration to avoid circular dependency
-  std::shared_ptr<layer::AttentionMetadata> attn_metadata;
-
-  // Flag for graph capture/replay mode.
-  bool enable_graph = false;
 };
 
 }  // namespace xllm

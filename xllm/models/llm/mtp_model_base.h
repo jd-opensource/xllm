@@ -26,6 +26,7 @@ limitations under the License.
 #include "core/framework/state_dict/utils.h"
 #include "core/util/utils.h"
 #include "llm_model_base.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -106,19 +107,19 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
       torch::Tensor positions,
       const layer::AttentionMetadata& attn_metadata,
       KVCache& kv_cache,
-      const ModelInputParams& input_params,
+      const ForwardInput& input,
       const std::optional<torch::Tensor>& input_ids = std::nullopt) {
     // Layer norm on token inputs
     auto enorm_out = std::get<0>(enorm_(embed));
 
-    torch::Tensor embedding_data = input_params.embedding.input_embedding;
+    torch::Tensor embedding_data = input.embedding.input_embedding;
     // for dummy data parallel run, we set a empty embedding
     if (attn_metadata.is_dummy) {
       embedding_data = torch::zeros({embed.size(0), model_args_.hidden_size()},
                                     embed.options());
     }
     CHECK(embedding_data.defined())
-        << "embedding is not defined in input_params.embedding.input_embedding";
+        << "embedding is not defined in input.embedding.input_embedding";
     torch::Tensor previous_hidden_states = embedding_data;
     previous_hidden_states = std::get<0>(hnorm_(previous_hidden_states));
 
@@ -143,22 +144,18 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
                                       torch::Tensor&,
                                       const layer::AttentionMetadata&,
                                       KVCache&,
-                                      const ModelInputParams&,
+                                      const ForwardInput&,
                                       const std::optional<torch::Tensor>&>) {
       hidden_states = mtp_block_(hidden_states,
                                  residual,
                                  positions,
                                  attn_metadata,
                                  kv_cache,
-                                 input_params,
+                                 input,
                                  input_ids);
     } else {
-      hidden_states = mtp_block_(hidden_states,
-                                 residual,
-                                 positions,
-                                 attn_metadata,
-                                 kv_cache,
-                                 input_params);
+      hidden_states = mtp_block_(
+          hidden_states, residual, positions, attn_metadata, kv_cache, input);
     }
 
     if (is_deepseek_v4_mtp_model(model_args_)) {
@@ -272,26 +269,25 @@ class MtpModelImplBase : public torch::nn::Module {
   ModelOutput forward(torch::Tensor tokens,
                       torch::Tensor positions,
                       std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
+                      const ForwardInput& input) {
     // for dp, if tokens is empty, set tokens to 1 and positions to 0
-    ModelInputParams modified_input_params = input_params;
+    ForwardInput modified_input = input;
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
         positions = torch::tensor({1}).to(torch::kInt32).to(device_);
       }
-      auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;
+      auto& dp_token_nums = modified_input.parallel.dp_global_token_nums;
       std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     }
-    if (!modified_input_params.attn_metadata) {
-      modified_input_params.attn_metadata =
-          std::make_shared<layer::AttentionMetadata>(
-              layer::AttentionMetadataBuilder::build(modified_input_params,
-                                                     model_args_.enable_mla(),
-                                                     /*attn_mask=*/std::nullopt,
-                                                     /*device=*/device_));
+    if (!modified_input.attn_metadata) {
+      modified_input.attn_metadata = std::make_shared<layer::AttentionMetadata>(
+          layer::AttentionMetadataBuilder::build(modified_input,
+                                                 model_args_.enable_mla(),
+                                                 /*attn_mask=*/std::nullopt,
+                                                 /*device=*/device_));
     }
-    auto& attn_metadata = *(modified_input_params.attn_metadata);
+    auto& attn_metadata = *(modified_input.attn_metadata);
     torch::Tensor hidden_states = embed_tokens_(tokens);
     // Mask out embeddings where positions == 0 (for MTP not needed at pos 0)
     auto mask = (positions == 0);  // bool tensor
@@ -312,10 +308,10 @@ class MtpModelImplBase : public torch::nn::Module {
                             positions,
                             attn_metadata,
                             kv_caches[i],
-                            modified_input_params,
+                            modified_input,
                             tokens);
-      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
-                                              hidden_states.device())) {
+      if (!modified_input.record_layer(static_cast<uint32_t>(i),
+                                       hidden_states.device())) {
         return ModelOutput();
       }
     }

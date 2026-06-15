@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "framework/sampling/rejection_sampler.h"
+#include "runtime/forward_params.h"
 #include "runtime/llm_worker_impl.h"
 #include "runtime/options.h"
 

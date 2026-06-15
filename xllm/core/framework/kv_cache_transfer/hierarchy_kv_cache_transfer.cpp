@@ -23,6 +23,7 @@ limitations under the License.
 #include <memory>
 
 #include "framework/kv_cache_transfer/kv_cache_store.h"
+#include "runtime/forward_params.h"
 namespace xllm {
 
 constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
@@ -128,18 +129,17 @@ uint32_t HierarchyKVCacheTransfer::transfer_kv_blocks(
   return 0;
 }
 
-void HierarchyKVCacheTransfer::set_layer_synchronizer(
-    ModelInputParams& params) {
+void HierarchyKVCacheTransfer::set_layer_synchronizer(ForwardInput& input) {
 #if defined(USE_NPU)
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (layer_wise_load_synchronizer_.count(params.meta.batch_id) != 0) {
-      params.parallel.layer_wise_load_synchronizer =
-          layer_wise_load_synchronizer_[params.meta.batch_id];
-      layer_wise_load_synchronizer_.erase(params.meta.batch_id);
+    if (layer_wise_load_synchronizer_.count(input.meta.batch_id) != 0) {
+      input.parallel.layer_wise_load_synchronizer =
+          layer_wise_load_synchronizer_[input.meta.batch_id];
+      layer_wise_load_synchronizer_.erase(input.meta.batch_id);
       uint32_t event_cnt =
-          params.parallel.layer_wise_load_synchronizer->get_event_size();
-      params.parallel.layers_per_bacth_copy =
+          input.parallel.layer_wise_load_synchronizer->get_event_size();
+      input.parallel.layers_per_bacth_copy =
           (options_.layers() + event_cnt - 1) / event_cnt;
     }
   }

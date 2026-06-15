@@ -22,12 +22,13 @@ limitations under the License.
 #include "core/layers/npu/npu_onerec_block_layer_impl.h"
 #include "core/util/env_var.h"
 #include "core/util/rec_model_utils.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
 inline torch::Tensor pad_encoder_output(const torch::Tensor& encoder_output,
-                                        const ModelInputParams& input_params) {
-  const auto* onerec_params = input_params.onerec_params();
+                                        const ForwardInput& input) {
+  const auto* onerec_params = input.onerec_params();
   CHECK(onerec_params != nullptr) << "OneRec requires onerec_params().";
 
   const int64_t bs = onerec_params->bs;
@@ -71,7 +72,7 @@ inline torch::Tensor compute_onerec_position_bias(
     int64_t max_distance = 128,
     const torch::TensorOptions& options = torch::kFloat32,
     bool is_decode_stage = false,
-    const ModelInputParams* input_params = nullptr) {
+    const ForwardInput* input = nullptr) {
   auto device = options.device();
   auto dtype = options.dtype();
 
@@ -138,9 +139,9 @@ inline torch::Tensor compute_onerec_position_bias(
     values = values.permute({2, 0, 1});
   }
 
-  if (is_decode_stage && input_params != nullptr &&
-      !input_params->attention.host.kv_seq_lens.empty()) {
-    const int32_t seq_kv_len = input_params->attention.host.kv_seq_lens[0];
+  if (is_decode_stage && input != nullptr &&
+      !input->attention.host.kv_seq_lens.empty()) {
+    const int32_t seq_kv_len = input->attention.host.kv_seq_lens[0];
     values = values.slice(1, -1, values.size(1)).slice(2, 0, seq_kv_len);
   } else if (is_decode_stage) {
     values = values.slice(1, -1, values.size(1));
@@ -190,11 +191,11 @@ class OneRecStackImpl : public torch::nn::Module {
   torch::Tensor forward(const torch::Tensor& tokens,
                         const torch::Tensor& positions,
                         std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params,
+                        const ForwardInput& input,
                         const torch::Tensor& encoder_output = torch::Tensor()) {
     (void)positions;
 
-    const auto* onerec_params = input_params.onerec_params();
+    const auto* onerec_params = input.onerec_params();
     CHECK(onerec_params != nullptr) << "OneRec requires onerec_params().";
 
     torch::Tensor h;
@@ -243,13 +244,13 @@ class OneRecStackImpl : public torch::nn::Module {
     }
 
     const bool is_prefill =
-        onerec_params->rec_stage == OneRecModelInputParams::RecStage::PREFILL;
-    auto [query_length, key_length] = compute_sequence_lengths(
-        input_params.meta.q_max_seq_len, is_prefill, input_params);
+        onerec_params->rec_stage == OneRecInput::RecStage::PREFILL;
+    auto [query_length, key_length] =
+        compute_sequence_lengths(input.meta.q_max_seq_len, is_prefill, input);
 
-    ModelInputParams input_params_local = input_params;
-    auto& mutable_onerec_params = input_params_local.mutable_onerec_params();
-    const auto* onerec_xattn_params = input_params.onerec_xattention_params();
+    ForwardInput input_local = input;
+    auto& mutable_onerec_params = input_local.mutable_onerec_params();
+    const auto* onerec_xattn_params = input.onerec_xattention_params();
 
     auto validate_selected_token_idxes_stage = [&](const char* stage_name) {
       if (!is_decoder_ || onerec_xattn_params == nullptr ||
@@ -278,13 +279,12 @@ class OneRecStackImpl : public torch::nn::Module {
     const bool is_decode_stage = is_decoder_ && !is_prefill;
     torch::Tensor effective_attn_mask;
     if (use_absolute_position_embedding_) {
-      const int64_t batch_size =
-          std::max<int64_t>(1, input_params.meta.num_sequences);
+      const int64_t batch_size = std::max<int64_t>(1, input.meta.num_sequences);
       effective_attn_mask =
           create_moe_attention_mask(query_length, h, is_decoder_, batch_size);
     } else {
       effective_attn_mask = compute_position_bias_mask(
-          query_length, key_length, h, is_decode_stage, input_params);
+          query_length, key_length, h, is_decode_stage, input);
     }
 
     auto preprocessed_attn_mask =
@@ -309,12 +309,11 @@ class OneRecStackImpl : public torch::nn::Module {
     for (size_t i = 0; i < layers_.size(); ++i) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.parallel.layer_synchronizer) {
-        event = input_params.parallel.layer_synchronizer->get_event(i);
-        event_flag =
-            input_params.parallel.layer_synchronizer->get_event_flag(i);
+      if (input.parallel.layer_synchronizer) {
+        event = input.parallel.layer_synchronizer->get_event(i);
+        event_flag = input.parallel.layer_synchronizer->get_event_flag(i);
       }
-      if (!input_params.synchronize_layer(i)) {
+      if (!input.synchronize_layer(i)) {
         return torch::Tensor();
       }
 
@@ -329,15 +328,15 @@ class OneRecStackImpl : public torch::nn::Module {
           h,
           preprocessed_attn_mask,
           kv_cache_ref,
-          input_params_local,
+          input_local,
           npu_encoder_output.defined() ? &npu_encoder_output : nullptr,
           static_cast<int>(i),
           event,
           event_flag,
           expert_array);
 
-      if (input_params.parallel.layer_synchronizer != nullptr &&
-          !input_params.parallel.layer_synchronizer->synchronize_layer(i)) {
+      if (input.parallel.layer_synchronizer != nullptr &&
+          !input.parallel.layer_synchronizer->synchronize_layer(i)) {
         return torch::Tensor();
       }
       validate_selected_token_idxes_stage(
@@ -397,11 +396,11 @@ class OneRecStackImpl : public torch::nn::Module {
   std::pair<int64_t, int64_t> compute_sequence_lengths(
       int64_t seq_length,
       bool is_prefill,
-      const ModelInputParams& input_params) const {
+      const ForwardInput& input) const {
     int64_t query_length = seq_length;
     int64_t key_length = seq_length;
 
-    const auto* onerec_params = input_params.onerec_params();
+    const auto* onerec_params = input.onerec_params();
     CHECK(onerec_params != nullptr) << "OneRec requires onerec_params().";
 
     if (is_decoder_) {
@@ -410,10 +409,10 @@ class OneRecStackImpl : public torch::nn::Module {
         key_length = seq_length;
       } else {
         query_length = 1;
-        if (!input_params.attention.host.kv_seq_lens.empty()) {
+        if (!input.attention.host.kv_seq_lens.empty()) {
           key_length =
-              *std::max_element(input_params.attention.host.kv_seq_lens.begin(),
-                                input_params.attention.host.kv_seq_lens.end());
+              *std::max_element(input.attention.host.kv_seq_lens.begin(),
+                                input.attention.host.kv_seq_lens.end());
         }
         // Decode keeps a square bias/mask shape expected by OneRec NPU block.
         query_length = key_length;
@@ -460,12 +459,11 @@ class OneRecStackImpl : public torch::nn::Module {
     return effective_attn_mask;
   }
 
-  torch::Tensor compute_position_bias_mask(
-      int64_t query_length,
-      int64_t key_length,
-      const torch::Tensor& h,
-      bool is_decode_stage,
-      const ModelInputParams& input_params) {
+  torch::Tensor compute_position_bias_mask(int64_t query_length,
+                                           int64_t key_length,
+                                           const torch::Tensor& h,
+                                           bool is_decode_stage,
+                                           const ForwardInput& input) {
     CHECK(!position_bias_embedding_.is_empty())
         << "position_bias_embedding is required for relative attention.";
 
@@ -479,7 +477,7 @@ class OneRecStackImpl : public torch::nn::Module {
                                      relative_attention_max_distance_,
                                      torch::dtype(h.dtype()).device(h.device()),
                                      is_decode_stage,
-                                     &input_params);
+                                     &input);
 
     auto effective_attn_mask = layer_position_bias.is_contiguous()
                                    ? layer_position_bias

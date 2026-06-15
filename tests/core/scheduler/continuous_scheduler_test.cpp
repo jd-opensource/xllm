@@ -364,10 +364,9 @@ TEST(ContinuousSchedulerFactoryTest,
 
   const auto forward_input =
       batches[0].prepare_forward_input(1, 0, ModelArgs());
-  EXPECT_TRUE(
-      forward_input.input_params.meta.batch_forward_type.is_chunked_prefill());
-  EXPECT_FALSE(forward_input.input_params.meta.batch_forward_type.is_mixed());
-  EXPECT_EQ(forward_input.input_params.meta.num_sequences, 1);
+  EXPECT_TRUE(forward_input.meta.batch_forward_type.is_chunked_prefill());
+  EXPECT_FALSE(forward_input.meta.batch_forward_type.is_mixed());
+  EXPECT_EQ(forward_input.meta.num_sequences, 1);
   EXPECT_EQ(batches[0].get_allowed_max_tokens()[0],
             opt.max_tokens_per_chunk_for_prefill());
 }
@@ -1027,7 +1026,6 @@ TEST(ContinuousSchedulerTest, PauseAbortCancelsRunningRequests) {
   EXPECT_EQ(scheduler->get_waiting_requests_num(), 0);     // NOT requeued
 
   (void)engine.release();
-
 }
 
 }  // namespace xllm

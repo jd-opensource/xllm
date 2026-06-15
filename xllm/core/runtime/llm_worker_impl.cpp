@@ -34,7 +34,6 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
 #if defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA)
 #include "layers/cuda/flashinfer_workspace.h"
@@ -177,7 +176,7 @@ LLMWorkerImpl::step_async_no_sync(const ForwardInput& input) {
                         input = std::move(input_on_device),
                         promise = std::move(promise)]() mutable {
     if (hierarchy_kv_cache_transfer_ != nullptr) {
-      hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
+      hierarchy_kv_cache_transfer_->set_layer_synchronizer(input);
     }
 
     const auto output = this->step_no_sync(input);
@@ -226,8 +225,8 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
             context_.get_model_args().n_layers());
 #endif
 #if defined(USE_NPU) || defined(USE_MLU) || defined(USE_DCU)
-    const_cast<ModelInputParams*>(&(input.input_params))
-        ->parallel.layer_synchronizer = layer_synchronizer;
+    const_cast<ForwardInput&>(input).parallel.layer_synchronizer =
+        layer_synchronizer;
 
     futures.emplace_back(
         kv_cache_transfer_->push_kv_blocks_async(input.transfer_kv_infos,
@@ -237,12 +236,11 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
 #endif
   }
   if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
-    eplb_executor_->eplb_execute(input.input_params.expert.eplb_info);
+    eplb_executor_->eplb_execute(input.expert.eplb_info);
   }
 
   // call model executor forward to get hidden states
-  auto model_output = model_executor_->forward(
-      input.token_ids, input.positions, kv_caches_, input.input_params);
+  auto model_output = model_executor_->forward(input, kv_caches_);
   if (!model_output.hidden_states.defined()) {
     return std::nullopt;
   }
@@ -338,8 +336,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     } else {
       embeddings = model_output.hidden_states;
     }
-    if (!input.input_params.meta.batch_forward_type.is_decode() &&
-        !is_spec_draft_) {
+    if (!input.meta.batch_forward_type.is_decode() && !is_spec_draft_) {
       // Target prefill keeps the full hidden in `embeddings` for the draft
       // input_embedding. Under CP this is the LOCAL token shard, whose rows
       // cannot be indexed by the CP all-gather-space selected_token_idxes.

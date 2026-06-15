@@ -22,16 +22,19 @@ limitations under the License.
 #include <nlohmann/json.hpp>
 
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model_context.h"
 #include "framework/parallel_state/npu_dp_ep_padding.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "loader/glm4_moe_lite_decoder_loader.h"
 #include "npu_base_layer.h"
+#include "runtime/forward_params.h"
 #include "xllm_atb_layers/models/glm/layer/moe_decoder_layer.h"
 
 namespace xllm {
+struct ForwardInput;
+
 namespace layer {
 
 class NpuGlm4MoeDecoderLiteImpl : public BaseLayer {
@@ -50,7 +53,7 @@ class NpuGlm4MoeDecoderLiteImpl : public BaseLayer {
                         torch::Tensor& sin_pos,
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params,
+                        const ForwardInput& input,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
                         int node_id = 0);
@@ -102,7 +105,7 @@ class NpuGlm4MoeDecoderLiteImpl : public BaseLayer {
                                torch::Tensor& sin_pos,
                                torch::Tensor& attn_mask,
                                KVCache& kv_cache,
-                               const ModelInputParams& input_params,
+                               const ForwardInput& input,
                                bool is_prefill);
 
   std::string model_name_;

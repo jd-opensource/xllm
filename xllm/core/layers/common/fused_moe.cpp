@@ -41,7 +41,7 @@ torch::Tensor FusedMoEImpl::forward_experts(
 }
 
 torch::Tensor FusedMoEImpl::forward(const torch::Tensor& /*hidden_states*/,
-                                    const ModelInputParams& /*input_params*/) {
+                                    const ParallelInput& /*parallel_input*/) {
   NOT_IMPLEMENTED_WITH_MSG(
       "FusedMoE is not supported for this backend. Please use CUDA, MLU or "
       "ILU backend for MoE models.");

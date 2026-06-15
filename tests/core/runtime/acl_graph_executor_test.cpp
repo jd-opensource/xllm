@@ -145,13 +145,13 @@ class SimpleCausalLM : public CausalLM {
   torch::Tensor forward_impl(const torch::Tensor& tokens,
                              const torch::Tensor& positions,
                              std::vector<KVCache>& kv_caches,
-                             const ModelInputParams& params) {
+                             const ForwardInput& input) {
     // Simple computation: token embedding + position embedding + linear layer
     // This creates temporary tensors that NPUGraph mempool will manage
     LOG(INFO) << "SimpleCausalLM forward_impl, tokens: " << tokens.sizes()
               << ", positions: " << positions.sizes()
               << ", kv_caches: " << kv_caches.size()
-              << ", params: " << params.meta.num_sequences;
+              << ", params: " << input.meta.num_sequences;
     const int64_t num_tokens = tokens.size(0);
     const int64_t hidden_size = args_.hidden_size();
 
@@ -168,30 +168,29 @@ class SimpleCausalLM : public CausalLM {
     // Apply linear layer
     auto output = linear_->forward(combined);
 
-    // Add some computation using other params to make it more realistic
-    // if (params.attention.device.kv_seq_lens.defined()) {
+    // Add some computation using other input fields to make it more realistic
+    // if (input.attention.device.kv_seq_lens.defined()) {
     //   // Use kv_seq_lens in computation
-    //   auto kv_lens_sum = torch::sum(params.attention.device.kv_seq_lens);
+    //   auto kv_lens_sum = torch::sum(input.attention.device.kv_seq_lens);
     //   output = output + kv_lens_sum * kv_scale_;
     // }
 
-    // if (params.attention.device.q_seq_lens.defined()) {
+    // if (input.attention.device.q_seq_lens.defined()) {
     //   // Use q_seq_lens in computation
-    //   auto q_lens_sum = torch::sum(params.attention.device.q_seq_lens);
+    //   auto q_lens_sum = torch::sum(input.attention.device.q_seq_lens);
     //   output = output + q_lens_sum * q_scale_;
     // }
 
-    if (params.attention.device.new_cache_slots.defined()) {
+    if (input.attention.device.new_cache_slots.defined()) {
       // Use new_cache_slots in computation
-      auto cache_slots_sum =
-          torch::sum(params.attention.device.new_cache_slots);
+      auto cache_slots_sum = torch::sum(input.attention.device.new_cache_slots);
       output = output + cache_slots_sum * cache_scale_;
     }
 
-    if (params.attention.device.block_tables.defined() && !kv_caches.empty()) {
+    if (input.attention.device.block_tables.defined() && !kv_caches.empty()) {
       // Use block_tables to do embedding lookup from kv_cache - Rec multi-round
       // computation Calculate max_seq_len from actual seq_len tensor
-      auto max_seq_len = torch::max(params.attention.device.kv_seq_lens);
+      auto max_seq_len = torch::max(input.attention.device.kv_seq_lens);
 
       // Calculate max_block_nums_per_seq
       auto max_block_nums_per_seq = torch::ceil(max_seq_len / block_size_);
@@ -201,14 +200,14 @@ class SimpleCausalLM : public CausalLM {
           first_full_attention_cache(kv_caches).get_k_cache();
 
       // Create col_indices and mask
-      int64_t block_table_len = params.attention.device.block_tables.size(1);
+      int64_t block_table_len = input.attention.device.block_tables.size(1);
       auto col_indices = torch::arange(
           block_table_len, torch::dtype(torch::kInt64).device(device_));
       auto mask = col_indices < (max_block_nums_per_seq - scalar_one_);
 
       // Directly compute embedding
       auto kv_embeddings = torch::embedding(
-          kv_cache_tensor, params.attention.device.block_tables);
+          kv_cache_tensor, input.attention.device.block_tables);
 
       // Apply mask and sum
       auto kv_embeddings_masked = kv_embeddings * mask.view({1, -1, 1});
@@ -220,11 +219,10 @@ class SimpleCausalLM : public CausalLM {
   }
 
   // Adapter method to match CausalLM base class interface
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& parameters) override {
-    auto hidden_states = forward_impl(tokens, positions, kv_caches, parameters);
+  ModelOutput forward(const ForwardInput& input,
+                      std::vector<KVCache>& kv_caches) override {
+    auto hidden_states =
+        forward_impl(input.token_ids, input.positions, kv_caches, input);
     return ModelOutput(hidden_states);
   }
 
@@ -431,33 +429,23 @@ TEST_F(AclGraphExecutorTest, GraphExecutorVsEagerExecution) {
             << std::endl;
   std::cout << "forward_input.positions: " << forward_input.positions
             << std::endl;
-  std::cout << "forward_input.input_params.attention.device.q_seq_lens: "
-            << forward_input.input_params.attention.device.q_seq_lens
-            << std::endl;
-  std::cout << "forward_input.input_params.attention.device.kv_seq_lens: "
-            << forward_input.input_params.attention.device.kv_seq_lens
-            << std::endl;
-  std::cout << "forward_input.input_params.attention.device.new_cache_slots: "
-            << forward_input.input_params.attention.device.new_cache_slots
-            << std::endl;
-  std::cout << "forward_input.input_params.attention.device.block_tables: "
-            << forward_input.input_params.attention.device.block_tables
-            << std::endl;
+  std::cout << "forward_input.attention.device.q_seq_lens: "
+            << forward_input.attention.device.q_seq_lens << std::endl;
+  std::cout << "forward_input.attention.device.kv_seq_lens: "
+            << forward_input.attention.device.kv_seq_lens << std::endl;
+  std::cout << "forward_input.attention.device.new_cache_slots: "
+            << forward_input.attention.device.new_cache_slots << std::endl;
+  std::cout << "forward_input.attention.device.block_tables: "
+            << forward_input.attention.device.block_tables << std::endl;
   // Test eager execution (direct model forward)
-  auto eager_model_output = model_->forward({forward_input.token_ids},
-                                            {forward_input.positions},
-                                            kv_caches_,
-                                            {forward_input.input_params});
+  auto eager_model_output = model_->forward(forward_input, kv_caches_);
   auto eager_output = eager_model_output.hidden_states;
   // Create ACL graph executor
   auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
   // Test graph execution with NPUGraph mempool optimization
-  auto graph_model_output = graph_executor->run({forward_input.token_ids},
-                                                {forward_input.positions},
-                                                kv_caches_,
-                                                {forward_input.input_params});
+  auto graph_model_output = graph_executor->run(forward_input, kv_caches_);
   auto graph_output = graph_model_output.hidden_states;
   // Compare outputs - should be identical
   EXPECT_TRUE(
@@ -483,16 +471,10 @@ TEST_F(AclGraphExecutorTest, GraphReplayConsistency) {
       model_.get(), model_args_, *device_, options_);
 
   // First execution (should create graph with NPUGraph mempool)
-  auto output1 = graph_executor->run({forward_input.token_ids},
-                                     {forward_input.positions},
-                                     kv_caches_,
-                                     {forward_input.input_params});
+  auto output1 = graph_executor->run(forward_input, kv_caches_);
 
   // Second execution (should replay graph using mempool-managed tensors)
-  auto output2 = graph_executor->run({forward_input.token_ids},
-                                     {forward_input.positions},
-                                     kv_caches_,
-                                     {forward_input.input_params});
+  auto output2 = graph_executor->run(forward_input, kv_caches_);
 
   // Compare outputs - should be identical
   EXPECT_TRUE(torch::allclose(output1.hidden_states,
@@ -551,10 +533,7 @@ TEST_F(AclGraphExecutorTest, DifferentBatchSizes) {
         model_.get(), model_args_, *device_, options_);
 
     // Test graph execution
-    auto output = graph_executor->run({forward_input.token_ids},
-                                      {forward_input.positions},
-                                      kv_caches_,
-                                      {forward_input.input_params});
+    auto output = graph_executor->run(forward_input, kv_caches_);
 
     // Verify output shape
     EXPECT_EQ(output.hidden_states.size(0),
@@ -598,14 +577,8 @@ TEST_F(AclGraphExecutorTest, DecodeBatchSizeThresholdFallsBackToEager) {
   auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
-  auto eager_out = npu_executor->run({forward_input.token_ids},
-                                     {forward_input.positions},
-                                     kv_caches_,
-                                     {forward_input.input_params});
-  auto graph_out = graph_executor->run({forward_input.token_ids},
-                                       {forward_input.positions},
-                                       kv_caches_,
-                                       {forward_input.input_params});
+  auto eager_out = npu_executor->run(forward_input, kv_caches_);
+  auto graph_out = graph_executor->run(forward_input, kv_caches_);
 
   EXPECT_EQ(graph_out.hidden_states.size(0),
             batch_size * options_.num_decoding_tokens());
@@ -630,20 +603,14 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImpl) {
   auto npu_executor = std::make_unique<BaseExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
-  auto npu_model_output = npu_executor->run({forward_input.token_ids},
-                                            {forward_input.positions},
-                                            kv_caches_,
-                                            {forward_input.input_params});
+  auto npu_model_output = npu_executor->run(forward_input, kv_caches_);
   auto npu_output = npu_model_output.hidden_states;
 
   // Test ACL Graph Executor with NPUGraph mempool optimization
   auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
-  auto graph_model_output = graph_executor->run({forward_input.token_ids},
-                                                {forward_input.positions},
-                                                kv_caches_,
-                                                {forward_input.input_params});
+  auto graph_model_output = graph_executor->run(forward_input, kv_caches_);
   auto graph_output = graph_model_output.hidden_states;
 
   // Compare outputs - should be identical
@@ -679,24 +646,15 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImplMultipleRuns) {
   const int num_runs = 3;
   for (int i = 0; i < num_runs; ++i) {
     // Direct model forward call (baseline)
-    auto direct_model_output = model_->forward({forward_input.token_ids},
-                                               {forward_input.positions},
-                                               kv_caches_,
-                                               {forward_input.input_params});
+    auto direct_model_output = model_->forward(forward_input, kv_caches_);
     auto direct_output = direct_model_output.hidden_states;
 
     // NPU Executor run
-    auto npu_model_output = npu_executor->run({forward_input.token_ids},
-                                              {forward_input.positions},
-                                              kv_caches_,
-                                              {forward_input.input_params});
+    auto npu_model_output = npu_executor->run(forward_input, kv_caches_);
     auto npu_output = npu_model_output.hidden_states;
 
     // ACL Graph Executor run with NPUGraph mempool
-    auto graph_model_output = graph_executor->run({forward_input.token_ids},
-                                                  {forward_input.positions},
-                                                  kv_caches_,
-                                                  {forward_input.input_params});
+    auto graph_model_output = graph_executor->run(forward_input, kv_caches_);
     auto graph_output = graph_model_output.hidden_states;
 
     // Compare direct model output with NPU Executor output
@@ -739,13 +697,12 @@ TEST_F(AclGraphExecutorTest, BatchInputCarriesLinearStateIds) {
 
   auto forward_input = batch->prepare_forward_input(
       options_.num_decoding_tokens(), 0, model_args_);
-  ASSERT_EQ(forward_input.input_params.meta.num_sequences, 1);
-  ASSERT_EQ(forward_input.input_params.embedding.linear_state_ids.size(), 1);
-  EXPECT_EQ(forward_input.input_params.embedding.linear_state_ids[0],
+  ASSERT_EQ(forward_input.meta.num_sequences, 1);
+  ASSERT_EQ(forward_input.embedding.linear_state_ids.size(), 1);
+  EXPECT_EQ(forward_input.embedding.linear_state_ids[0],
             expected_linear_state_id);
-  ASSERT_EQ(forward_input.input_params.embedding.embedding_ids.size(), 1);
-  EXPECT_EQ(forward_input.input_params.embedding.embedding_ids[0],
-            expected_linear_state_id);
+  ASSERT_EQ(forward_input.embedding.embedding_ids.size(), 1);
+  EXPECT_EQ(forward_input.embedding.embedding_ids[0], expected_linear_state_id);
 }
 
 TEST(AclGraphExecutorHybridTest, KvCacheSupportsLinearOnlyLayers) {
@@ -795,16 +752,11 @@ TEST_F(AclGraphExecutorTest, GraphExecutorUsesFirstFullAttentionKvCache) {
       LinearAttentionKVCacheTensors{conv_cache, ssm_cache});
   hybrid_kv_caches.emplace_back(KVCacheTensors{full_k, full_v});
 
-  auto eager_model_output = model_->forward({forward_input.token_ids},
-                                            {forward_input.positions},
-                                            hybrid_kv_caches,
-                                            {forward_input.input_params});
+  auto eager_model_output = model_->forward(forward_input, hybrid_kv_caches);
   auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
-  auto graph_model_output = graph_executor->run({forward_input.token_ids},
-                                                {forward_input.positions},
-                                                hybrid_kv_caches,
-                                                {forward_input.input_params});
+  auto graph_model_output =
+      graph_executor->run(forward_input, hybrid_kv_caches);
 
   EXPECT_TRUE(torch::allclose(eager_model_output.hidden_states,
                               graph_model_output.hidden_states,

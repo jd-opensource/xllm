@@ -25,8 +25,8 @@ limitations under the License.
 #include "executor_impl_factory.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
-#include "framework/model/model_input_params.h"
 #include "options.h"
+#include "runtime/forward_params.h"
 
 namespace xllm::mlu {
 // Helper class to hold persistent parameters for graph execution
@@ -39,14 +39,14 @@ class GraphPersistentParam {
 
   ~GraphPersistentParam() = default;
 
-  void init_params(const ModelInputParams& params,
+  void init_params(const ForwardInput& input,
                    uint32_t padding_num_tokens,
                    uint32_t padding_needed);
 
   // Update persistent tensors with new input data
   void update_input_buffer(const torch::Tensor& tokens,
                            const torch::Tensor& positions,
-                           const ModelInputParams& params,
+                           const ForwardInput& input,
                            uint32_t padding_needed);
 
   std::size_t get_persistent_tensor_bytes() const;
@@ -54,7 +54,7 @@ class GraphPersistentParam {
   // input tensors
   torch::Tensor tokens_;
   torch::Tensor positions_;
-  ModelInputParams params_;
+  ForwardInput input_;
   // mrope
   bool use_mrope_ = false;
   // output
@@ -96,7 +96,7 @@ class MluGraph {
   ModelOutput replay();
   void update_input_buffer(const torch::Tensor& tokens,
                            const torch::Tensor& positions,
-                           const ModelInputParams& params,
+                           const ForwardInput& input,
                            bool is_init = false);
 
  private:
@@ -123,16 +123,12 @@ class MluGraphExecutorImpl : public ExecutorImpl {
   ForwardInput prepare_inputs(Batch& batch) override;
 
   // Execute model with graph optimization for decode phase
-  ModelOutput run(const torch::Tensor& tokens,
-                  const torch::Tensor& positions,
-                  std::vector<KVCache>& kv_caches,
-                  const ModelInputParams& params) override;
+  ModelOutput run(const ForwardInput& input,
+                  std::vector<KVCache>& kv_caches) override;
 
  private:
-  ModelOutput run_eager(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& params);
+  ModelOutput run_eager(const ForwardInput& input,
+                        std::vector<KVCache>& kv_caches);
   void init_param_once();
   void log_memory_after_capture();
 

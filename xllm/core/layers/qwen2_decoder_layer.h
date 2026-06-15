@@ -25,12 +25,14 @@ limitations under the License.
 #include "common/rms_norm.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/state_dict/state_dict.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
+struct ForwardInput;
+
 namespace layer {
 
 class Qwen2DecoderLayerImpl : public torch::nn::Module {
@@ -45,7 +47,7 @@ class Qwen2DecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor& positions,
                         const AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params);
+                        const ForwardInput& input);
 
  private:
   Qwen2Attention attention_{nullptr};

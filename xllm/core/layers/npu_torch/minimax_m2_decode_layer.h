@@ -20,6 +20,7 @@ limitations under the License.
 #include "core/framework/model_context.h"
 #include "core/layers/common/rms_norm.h"
 #include "core/layers/npu_torch/fused_moe.h"
+#include "core/runtime/forward_params.h"
 #include "minimax_m2_attention.h"
 
 namespace xllm {
@@ -34,7 +35,7 @@ class MiniMaxM2DecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor& positions,
                         const layer::AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params);
+                        const ForwardInput& input);
 
   void load_state_dict(const StateDict& state_dict);
 

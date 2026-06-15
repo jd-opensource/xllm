@@ -21,7 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "framework/batch/batch_forward_type.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "runtime/forward_params.h"
 
 namespace xllm::cp {
@@ -77,7 +77,7 @@ ForwardInput make_forward_input(
   fi.token_ids = torch::tensor(tokens, int32_cpu());
   fi.positions = torch::tensor(positions, int32_cpu());
 
-  auto& p = fi.input_params;
+  auto& p = fi;
   p.meta.batch_forward_type = type;
   p.meta.num_sequences = static_cast<int32_t>(q_seq_lens.size());
   p.attention.host.q_seq_lens = to_layout_seq_lens(q_seq_lens);
@@ -112,12 +112,12 @@ ForwardInput make_forward_input(
 TEST(CpInputPartitionTest, NoOpWhenCpSizeOne) {
   auto fi = make_forward_input({1, 2, 3, 4}, {0, 1, 2, 3}, /*q_seq_lens=*/{4});
   auto orig_tokens = tensor_to_vec(fi.token_ids);
-  auto orig_q_seq = fi.input_params.attention.host.q_seq_lens;
+  auto orig_q_seq = fi.attention.host.q_seq_lens;
 
   cp_partition_inplace(fi, /*cp_rank=*/0, /*cp_size=*/1);
 
   EXPECT_EQ(tensor_to_vec(fi.token_ids), orig_tokens);
-  EXPECT_EQ(fi.input_params.attention.host.q_seq_lens, orig_q_seq);
+  EXPECT_EQ(fi.attention.host.q_seq_lens, orig_q_seq);
 }
 
 TEST(CpInputPartitionTest, CpPartitionedFlagPropagatesThroughCopy) {
@@ -126,8 +126,8 @@ TEST(CpInputPartitionTest, CpPartitionedFlagPropagatesThroughCopy) {
   // (MTP target/draft) from re-partitioning an already-partitioned tensor
   // that lives on device.
   ForwardInput fi;
-  fi.input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
-  fi.input_params.meta.num_sequences = 1;
+  fi.meta.batch_forward_type = BatchForwardType::PREFILL;
+  fi.meta.num_sequences = 1;
   fi.token_ids = torch::tensor(std::vector<int32_t>{1}, int32_cpu());
   fi.cp_partitioned = true;
 
@@ -168,13 +168,13 @@ TEST(CpInputPartitionTest, NoOpWhenDecode) {
 
 TEST(CpInputPartitionTest, NoOpWhenNoSequences) {
   ForwardInput fi;
-  fi.input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
-  fi.input_params.meta.num_sequences = 0;
+  fi.meta.batch_forward_type = BatchForwardType::PREFILL;
+  fi.meta.num_sequences = 0;
   fi.token_ids = torch::tensor(std::vector<int32_t>{}, int32_cpu());
 
   cp_partition_inplace(fi, /*cp_rank=*/0, /*cp_size=*/2);
   // No crash, fields stay empty.
-  EXPECT_EQ(fi.input_params.meta.num_sequences, 0);
+  EXPECT_EQ(fi.meta.num_sequences, 0);
 }
 
 TEST(CpInputPartitionTest, SingleSequenceCp2EvenLength) {
@@ -215,16 +215,14 @@ TEST(CpInputPartitionTest, MultiSequenceUnevenLengths) {
   cp_partition_inplace(rank0, 0, 2);
   // seq0 contributes [0,1], seq1 contributes [5,6]
   EXPECT_EQ(tensor_to_vec(rank0.token_ids), std::vector<int32_t>({0, 1, 5, 6}));
-  EXPECT_EQ(rank0.input_params.attention.host.q_seq_lens,
-            to_layout_seq_lens({2, 2}));
+  EXPECT_EQ(rank0.attention.host.q_seq_lens, to_layout_seq_lens({2, 2}));
 
   auto rank1 = make_forward_input(tokens, positions, {5, 6});
   cp_partition_inplace(rank1, 1, 2);
   // seq0 contributes [2,3,4], seq1 contributes [7,8,9,10]
   EXPECT_EQ(tensor_to_vec(rank1.token_ids),
             std::vector<int32_t>({2, 3, 4, 7, 8, 9, 10}));
-  EXPECT_EQ(rank1.input_params.attention.host.q_seq_lens,
-            to_layout_seq_lens({3, 4}));
+  EXPECT_EQ(rank1.attention.host.q_seq_lens, to_layout_seq_lens({3, 4}));
 }
 
 TEST(CpInputPartitionTest, Cp4Partition) {
@@ -254,7 +252,7 @@ TEST(CpInputPartitionTest, MtpShiftedTokensFollowGather) {
 
   auto rank1 = make_forward_input(tokens, positions, {8}, {}, shifted);
   cp_partition_inplace(rank1, /*cp_rank=*/1, /*cp_size=*/2);
-  EXPECT_EQ(tensor_to_vec(rank1.input_params.embedding.mtp_shifted_token_ids),
+  EXPECT_EQ(tensor_to_vec(rank1.embedding.mtp_shifted_token_ids),
             std::vector<int32_t>({1002, 1003, 1004, 1005}));
 }
 
@@ -301,8 +299,7 @@ TEST(CpInputPartitionTest, MultiSeqMultiRankPinning) {
     cp_partition_inplace(fi, e.cp_rank, e.cp_size);
     EXPECT_EQ(tensor_to_vec(fi.token_ids), e.tokens)
         << "cp_size=" << e.cp_size << ",cp_rank=" << e.cp_rank;
-    EXPECT_EQ(fi.input_params.attention.host.q_seq_lens,
-              to_layout_seq_lens(e.q_lens))
+    EXPECT_EQ(fi.attention.host.q_seq_lens, to_layout_seq_lens(e.q_lens))
         << "cp_size=" << e.cp_size << ",cp_rank=" << e.cp_rank;
   }
 }

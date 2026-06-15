@@ -24,13 +24,14 @@ limitations under the License.
 #include "common/attention_metadata.h"
 #include "common/rms_norm.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
 #include "npu_torch/deepseek_sparse_attention.h"
 #include "npu_torch/deepseek_v4_gate.h"
 #include "npu_torch/fused_moe.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 namespace layer {
@@ -49,7 +50,7 @@ class DeepseekV4DecoderLayerImpl : public torch::nn::Module {
       torch::Tensor& positions,
       const AttentionMetadata& attn_metadata,
       KVCache& kv_cache,
-      const ModelInputParams& input_params,
+      const ForwardInput& input,
       const std::optional<torch::Tensor>& input_ids = std::nullopt);
 
  private:

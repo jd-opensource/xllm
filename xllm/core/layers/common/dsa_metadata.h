@@ -56,7 +56,7 @@ struct DSACompressedAttentionMetadata {
 // DSAMetadata contains DeepSeek V4 sparse attention specific metadata,
 // aligned with Python DSAMetadata(AttentionMetadata) class.
 // It is built once at the beginning of model forward pass and reused by
-// all layers. Use DSAMetadataBuilder to build instances from ModelInputParams.
+// all layers. Use DSAMetadataBuilder to build instances from ForwardInput.
 struct DSAMetadata {
   // ===== Fields from Python AttentionMetadata base class =====
   // seq_lens: kv sequence lengths (context_length)

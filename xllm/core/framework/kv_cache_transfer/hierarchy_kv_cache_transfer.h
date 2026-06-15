@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include "runtime/forward_params.h"
+
 // clang-format off
 #if defined(USE_NPU)
 #include "acl/acl_rt.h"
@@ -28,12 +30,14 @@ limitations under the License.
 
 #include "common/types.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "platform/device.h"
 #include "util/blockingconcurrentqueue.h"
 #include "util/threadpool.h"
 
 namespace xllm {
+struct ForwardInput;
+
 class HierarchyKVCacheTransfer {
  public:
   struct Options {
@@ -60,7 +64,7 @@ class HierarchyKVCacheTransfer {
   uint32_t transfer_kv_blocks(const uint64_t batch_id,
                               Slice<BlockTransferInfo>& block_transfer_info);
 
-  void set_layer_synchronizer(ModelInputParams& params);
+  void set_layer_synchronizer(ForwardInput& input);
 
  private:
   void create_page_aligned_host_cache();

@@ -33,9 +33,6 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/distributed_runtime/master.h"
 #include "core/framework/config/execution_config.h"
-#include "core/framework/config/kv_cache_config.h"
-#include "core/framework/config/service_config.h"
-#include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
@@ -45,7 +42,6 @@ limitations under the License.
 #include "runtime/worker.h"
 #include "util/env_var.h"
 #include "util/pretty_print.h"
-#include "util/tensor_helper.h"
 #include "util/utils.h"
 namespace xllm {
 
@@ -79,10 +75,7 @@ VLMEngine::VLMEngine(const runtime::Options& options,
   process_group_test();
 
   // init thread pool
-  threadpool_ = std::make_unique<ThreadPool>(
-      /*num_threads=*/16,
-      /*cpu_binding=*/false,
-      /*pool_name=*/"VLMEngine.forward_input");
+  threadpool_ = std::make_unique<ThreadPool>(16);
 }
 
 void VLMEngine::process_group_test() {
@@ -147,14 +140,6 @@ bool VLMEngine::init_model() {
   n_local_kv_heads_ = std::max<int64_t>(1, n_kv_heads / world_size);
   head_dim_ = args_.head_dim();
   dtype_ = util::parse_dtype(args_.dtype(), options_.devices()[0]);
-  if (has_linear_attention_layers(args_)) {
-    const int64_t linear_n_k_heads = args_.linear_num_key_heads();
-    const int64_t linear_n_v_heads = args_.linear_num_value_heads();
-    n_local_linear_k_heads_ =
-        std::max<int64_t>(1, linear_n_k_heads / world_size);
-    n_local_linear_v_heads_ =
-        std::max<int64_t>(1, linear_n_v_heads / world_size);
-  }
 
   // key + value for all layers
   LOG(INFO) << "Block info, block_size: " << options_.block_size()
@@ -210,8 +195,6 @@ bool VLMEngine::init_model() {
 KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
   const int64_t max_cache_size = options_.max_cache_size();
   const double max_memory_utilization = options_.max_memory_utilization();
-  const int64_t encoder_cache_reserved_bytes =
-      options_.max_encoder_cache_size() * 1024 * 1024;
 
   std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
   futures.reserve(worker_clients_num_);
@@ -232,9 +215,7 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
               << ": available memory: " << readable_size(available_memory)
               << ", total memory: " << readable_size(total_memory)
               << ". Using max_memory_utilization: " << max_memory_utilization
-              << ", max_cache_size: " << readable_size(max_cache_size)
-              << ", encoder_cache_reserved: "
-              << readable_size(encoder_cache_reserved_bytes);
+              << ", max_cache_size: " << readable_size(max_cache_size);
     GAUGE_SET(weight_size_in_kilobytes,
               (total_memory - available_memory) / 1024);
     GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
@@ -247,31 +228,14 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
     if (max_cache_size > 0) {
       available_memory = std::min(available_memory, max_cache_size);
     }
-
-    available_memory -= encoder_cache_reserved_bytes;
-
     cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
   }
 
-  KVCacheEstimateOptions estimate_options;
-  estimate_options.dtype = dtype_;
-  estimate_options.kv_cache_dtype = options_.kv_cache_dtype();
-  estimate_options.cache_size_in_bytes = cache_size_in_bytes;
-  estimate_options.block_size = options_.block_size();
-  estimate_options.world_size = dp_local_tp_size_;
-  estimate_options.n_local_kv_heads = n_local_kv_heads_;
-  estimate_options.n_local_linear_k_heads = n_local_linear_k_heads_;
-  estimate_options.n_local_linear_v_heads = n_local_linear_v_heads_;
-  estimate_options.max_seqs_per_batch =
-      static_cast<int64_t>(options_.max_seqs_per_batch());
-  estimate_options.max_concurrent_requests = static_cast<int64_t>(
-      ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
-  estimate_options.is_draft_engine = options_.is_draft_engine();
-  estimate_options.enable_prefix_cache =
-      ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
-
-  KVCacheCapacity kv_cache_cap =
-      ::xllm::estimate_kv_cache_capacity(args_, estimate_options);
+  KVCacheCapacity kv_cache_cap;
+  kv_cache_cap.cache_size_in_bytes() =
+      std::max(cache_size_in_bytes, int64_t(0));
+  CHECK_GT(kv_cache_cap.cache_size_in_bytes(), 0)
+      << "Available kv cache size must be greater than 0";
   GAUGE_SET(total_kv_cache_size_in_kilobytes,
             kv_cache_cap.cache_size_in_bytes() / 1024);
 
@@ -281,22 +245,33 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
     DeviceMonitor::get_instance().set_total_activation_memory(device.index());
   }
 
+  // compute kv cache slot size
+  const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
+  int64_t slot_size = 0;
+  if (args_.enable_mla()) {
+    slot_size = dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
+  } else {
+    slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
+  }
+  kv_cache_cap.slot_size() = slot_size;
+  kv_cache_cap.n_layers() = args_.n_layers();
+  kv_cache_cap.block_size() = options_.block_size();
+
+  // compute kv cache n_blocks
+  const int64_t block_size = kv_cache_cap.block_size();
+  const int64_t block_size_in_bytes = block_size * slot_size;
+  kv_cache_cap.n_blocks() = kv_cache_cap.cache_size_in_bytes() /
+                            (args_.n_layers() * block_size_in_bytes);
+  CHECK_GT(kv_cache_cap.n_blocks(), 0) << "no n_blocks for kv cache";
+
   return kv_cache_cap;
 }
 
 bool VLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   LOG(INFO) << "kv cache capacity: "
-            << readable_size(kv_cache_cap.cache_size_in_bytes())
+            << "bytes: " << kv_cache_cap.cache_size_in_bytes()
             << ", blocks: " << kv_cache_cap.n_blocks()
-            << ", slot_size: " << kv_cache_cap.slot_size()
-            << ", index_slot_size: " << kv_cache_cap.index_slot_size()
-            << ", scale_slot_size: " << kv_cache_cap.scale_slot_size()
-            << ", linear_slot_size: " << kv_cache_cap.linear_slot_size()
-            << ", linear_blocks: " << kv_cache_cap.num_linear_state_blocks()
-            << ", reserved_linear_bytes: "
-            << readable_size(kv_cache_cap.linear_cache_size_in_bytes())
-            << ", n_layers: " << kv_cache_cap.n_layers()
-            << ", kv_cache_dtype: " << options_.kv_cache_dtype();
+            << ", slot_size: " << kv_cache_cap.slot_size();
 
   const int32_t block_size = static_cast<int32_t>(kv_cache_cap.block_size());
   const KVCacheShape kv_cache_shape(kv_cache_cap, args_, dp_local_tp_size_);
@@ -308,14 +283,10 @@ bool VLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   options.num_blocks(kv_cache_cap.n_blocks())
       .host_num_blocks(0)  // no host cache for vlm engine currently.
       .block_size(block_size)
-      .enable_linear_state(has_linear_attention_layers(args_))
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_cache_upload(options_.enable_cache_upload())
-      .hasher_type(BlockHasherType::MM)
-      .max_concurrent_requests(
-          ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
-  kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
+      .enable_cache_upload(options_.enable_cache_upload());
+  kv_cache_manager_ = std::make_unique<BlockManagerPool>(options);
 
   // init kv cache for each worker in parallel
   std::vector<folly::SemiFuture<bool>> futures;
@@ -333,6 +304,7 @@ bool VLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   return true;
 }
 
+// TODO: support dp batches later
 ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
   if (worker_clients_.empty()) {
     // empty worker, return
@@ -364,16 +336,9 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
 
   assert(dp_size_ == worker_clients_num_ / dp_local_tp_size_);
   size_t dp_rank = 0;
-  for (int32_t worker_rank = 0; worker_rank < worker_clients_num_;
+  for (auto worker_rank = 0; worker_rank < worker_clients_num_;
        worker_rank += dp_local_tp_size_) {
     auto result = results[worker_rank].value();
-    const bool empty_shard = batch[dp_rank].size() == 0 &&
-                             (!forward_inputs[dp_rank].token_ids.defined() ||
-                              forward_inputs[dp_rank].token_ids.numel() == 0);
-    if (empty_shard) {
-      ++dp_rank;
-      continue;
-    }
     if (result.has_value()) {
       if (result.value().outputs.empty() && layer_forward_interrupted_) {
         throw ForwardInterruptedException();
@@ -476,39 +441,26 @@ std::vector<ForwardInput> VLMEngine::prepare_inputs(std::vector<Batch>& batch) {
   BatchForwardType batch_forward_type;
 
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    if (batch[dp_rank].empty()) {
-      // Use value-initialization to zero primitive fields for empty shard.
-      ForwardInput empty_input;
-      empty_input.input_params.meta.batch_forward_type = BatchForwardType();
-      empty_input.input_params.meta.batch_id = UNINITIALIZED_BATCH_ID;
-      batched_inputs.emplace_back(std::move(empty_input));
-    } else {
-      batched_inputs.emplace_back(std::move(
-          batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
-    }
+    batched_inputs.emplace_back(std::move(
+        batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
     dp_global_token_nums[dp_rank] =
         static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
     if (batch_forward_type.is_empty() &&
-        !batched_inputs[dp_rank]
-             .input_params.meta.batch_forward_type.is_empty()) {
-      batch_forward_type =
-          batched_inputs[dp_rank].input_params.meta.batch_forward_type;
+        !batched_inputs[dp_rank].meta.batch_forward_type.is_empty()) {
+      batch_forward_type = batched_inputs[dp_rank].meta.batch_forward_type;
     }
     dp_is_decode[dp_rank] =
-        batched_inputs[dp_rank]
-            .input_params.meta.batch_forward_type.is_decode() &&
-        batched_inputs[dp_rank].input_params.meta.q_max_seq_len == 1;
+        batched_inputs[dp_rank].meta.batch_forward_type.is_decode() &&
+        batched_inputs[dp_rank].meta.q_max_seq_len == 1;
   }
 
   // update dp_global_token_nums and batch_forward_type
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs[dp_rank].input_params.parallel.dp_global_token_nums =
+    batched_inputs[dp_rank].parallel.dp_global_token_nums =
         dp_global_token_nums;
-    batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
-    if (batched_inputs[dp_rank]
-            .input_params.meta.batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].input_params.meta.batch_forward_type =
-          batch_forward_type;
+    if (batched_inputs[dp_rank].meta.batch_forward_type.is_empty()) {
+      batched_inputs[dp_rank].parallel.dp_is_decode = dp_is_decode;
+      batched_inputs[dp_rank].meta.batch_forward_type = batch_forward_type;
     }
   }
 

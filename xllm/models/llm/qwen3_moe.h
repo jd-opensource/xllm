@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "core/framework/model/model_output.h"
+#include "runtime/forward_params.h"
 #if defined(USE_NPU)
 #include "core/common/global_flags.h"
 #include "core/layers/common/attention_mask.h"
@@ -101,15 +102,15 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
   ModelOutput forward(torch::Tensor tokens,
                       torch::Tensor positions,
                       std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) override {
-    ModelInputParams modified_input_params = input_params;
+                      const ForwardInput& input) override {
+    ForwardInput modified_input = input;
     if (tokens.numel() == 0) {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
       positions = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
     }
-    auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;
+    auto& dp_token_nums = modified_input.parallel.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
-    auto inputs_embeds = input_params.embedding.input_embedding;
+    auto inputs_embeds = input.embedding.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
@@ -117,14 +118,13 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       h = embed_tokens_(tokens);
     }
 
-    auto deep_stacks = input_params.multimodal.deep_stacks;
+    auto deep_stacks = input.multimodal.deep_stacks;
     int deep_stack_size = deep_stacks.size();
-    if (!modified_input_params.attn_metadata) {
-      modified_input_params.attn_metadata =
-          std::make_shared<layer::AttentionMetadata>(
-              get_attention_metadata(modified_input_params, h));
+    if (!modified_input.attn_metadata) {
+      modified_input.attn_metadata = std::make_shared<layer::AttentionMetadata>(
+          get_attention_metadata(modified_input, h));
     }
-    auto& attn_metadata = *(modified_input_params.attn_metadata);
+    auto& attn_metadata = *(modified_input.attn_metadata);
     bool only_prefill =
         (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
     if (positions.dim() == 2 && only_prefill && !mrope_section_.empty()) {
@@ -133,9 +133,8 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
     }
 
     const LlmRecMultiRoundParams* llmrec_params = nullptr;
-    if (is_rec_multi_round_mode() &&
-        modified_input_params.has_llmrec_params()) {
-      llmrec_params = modified_input_params.llmrec_params();
+    if (is_rec_multi_round_mode() && modified_input.has_llmrec_params()) {
+      llmrec_params = modified_input.llmrec_params();
       CHECK_EQ(llmrec_params->full_k_caches.size(), layers_.size())
           << "Rec multi-round mode requires full_k_caches per layer.";
       CHECK_EQ(llmrec_params->full_v_caches.size(), layers_.size())
@@ -166,14 +165,9 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       }
 #endif
       auto& layer = layers_[i];
-      h = layer(h,
-                residual,
-                positions,
-                attn_metadata,
-                kv_caches[i],
-                modified_input_params);
-      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
-                                              h.device())) {
+      h = layer(
+          h, residual, positions, attn_metadata, kv_caches[i], modified_input);
+      if (!modified_input.record_layer(static_cast<uint32_t>(i), h.device())) {
         return ModelOutput();
       }
 
@@ -231,9 +225,8 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
   }
 
  private:
-  layer::AttentionMetadata get_attention_metadata(
-      const ModelInputParams& params,
-      const torch::Tensor& h) {
+  layer::AttentionMetadata get_attention_metadata(const ForwardInput& params,
+                                                  const torch::Tensor& h) {
 #if defined(USE_NPU)
     max_seq_len_ = std::max(params.meta.kv_max_seq_len, max_seq_len_);
     torch::Tensor attn_mask;

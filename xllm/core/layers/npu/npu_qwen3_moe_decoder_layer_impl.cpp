@@ -26,6 +26,7 @@ limitations under the License.
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
+#include "runtime/forward_params.h"
 namespace xllm {
 namespace layer {
 
@@ -332,12 +333,12 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
     torch::Tensor& sin_pos,
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
-    const ModelInputParams& input_params,
+    const ForwardInput& input,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
     int node_id) {
   atb::Status st;
-  if (!input_params.meta.batch_forward_type.is_decode()) {
+  if (!input.meta.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
                             x,
                             residual,
@@ -345,7 +346,7 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
                             sin_pos,
                             attn_mask,
                             kv_cache,
-                            input_params,
+                            input,
                             true,
                             false);
     st = execute_node(prefill_node_, node_id, event, event_flag);
@@ -354,7 +355,7 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
   } else {
     const bool use_graph_decode_input =
         ::xllm::ExecutionConfig::get_instance().enable_graph() &&
-        input_params.graph.tiling_data.defined();
+        input.graph.tiling_data.defined();
     auto& decode_node =
         use_graph_decode_input ? decode_graph_node_ : decode_eager_node_;
     build_node_variant_pack(decode_node,
@@ -364,7 +365,7 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
                             sin_pos,
                             /*attn_mask*/ tensor_placeholder_,
                             kv_cache,
-                            input_params,
+                            input,
                             false,
                             use_graph_decode_input);
     st = execute_node(decode_node, node_id + 1000, event, event_flag);
@@ -383,16 +384,16 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
     torch::Tensor& sin_pos,
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
-    const ModelInputParams& input_params,
+    const ForwardInput& input,
     bool is_prefill,
     bool use_graph_decode_input) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
   int32_t input_idx = 0;
-  auto& dp_ep_padding = input_params.parallel.dp_ep_padding_data;
+  auto& dp_ep_padding = input.parallel.dp_ep_padding_data;
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.expert.expert_array);
+      atb_speed::Utils::AtTensor2Tensor(input.expert.expert_array);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 2) =
       atb_speed::Utils::AtTensor2Tensor(expert_group_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =
@@ -411,18 +412,17 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_v_cache());
 
-  if (!input_params.attention.device.block_tables.defined() ||
-      input_params.attention.device.block_tables.storage().data() == nullptr) {
+  if (!input.attention.device.block_tables.defined() ||
+      input.attention.device.block_tables.storage().data() == nullptr) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
         atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10).hostData =
         const_cast<int32_t*>(placeholder_vec_.data());
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
-        atb_speed::Utils::AtTensor2Tensor(
-            input_params.attention.device.kv_seq_lens);
+        atb_speed::Utils::AtTensor2Tensor(input.attention.device.kv_seq_lens);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10).hostData =
-        const_cast<int32_t*>(input_params.attention.host.kv_seq_lens.data());
+        const_cast<int32_t*>(input.attention.host.kv_seq_lens.data());
   }
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
@@ -432,23 +432,22 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
       const_cast<int32_t*>(placeholder_vec_.data());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
-  if (!input_params.attention.device.block_tables.defined() ||
-      input_params.attention.device.block_tables.storage().data() == nullptr) {
+  if (!input.attention.device.block_tables.defined() ||
+      input.attention.device.block_tables.storage().data() == nullptr) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 14) =
         atb_speed::Utils::AtTensor2Tensor(block_tables_placeholder_);
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 14) =
-        atb_speed::Utils::AtTensor2Tensor(
-            input_params.attention.device.block_tables);
+        atb_speed::Utils::AtTensor2Tensor(input.attention.device.block_tables);
   }
-  if (!input_params.attention.device.block_tables.defined() ||
-      input_params.attention.device.block_tables.storage().data() == nullptr) {
+  if (!input.attention.device.block_tables.defined() ||
+      input.attention.device.block_tables.storage().data() == nullptr) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 15) =
         atb_speed::Utils::AtTensor2Tensor(slot_tensor_placeholder_);
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 15) =
         atb_speed::Utils::AtTensor2Tensor(
-            input_params.attention.device.new_cache_slots);
+            input.attention.device.new_cache_slots);
   }
 
   input_idx = WEIGHT_COUNT_PER_LAYER + 16;
@@ -456,19 +455,18 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
       (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ||
        ::xllm::KVCacheConfig::get_instance().enable_prefix_cache())) {
     node.variantPack.inTensors.at(input_idx++) =
-        atb_speed::Utils::AtTensor2Tensor(
-            input_params.attention.device.q_seq_lens);
+        atb_speed::Utils::AtTensor2Tensor(input.attention.device.q_seq_lens);
     node.variantPack.inTensors.at(input_idx - 1).hostData =
-        const_cast<int32_t*>(input_params.attention.host.q_seq_lens.data());
+        const_cast<int32_t*>(input.attention.host.q_seq_lens.data());
   }
 
   if (!is_prefill && use_graph_decode_input &&
-      input_params.graph.tiling_data.defined()) {
+      input.graph.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.graph.tiling_data);
+        atb_speed::Utils::AtTensor2Tensor(input.graph.tiling_data);
   }
 
-  if (input_params.meta.batch_forward_type.is_decode() &&
+  if (input.meta.batch_forward_type.is_decode() &&
       ::xllm::KernelConfig::get_instance().enable_intralayer_addnorm() &&
       residual.has_value()) {
     // input

@@ -19,7 +19,7 @@ limitations under the License.
 
 #include "MTTOplib/Attention.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
@@ -31,7 +31,7 @@ struct ForwardParams {
   torch::Tensor& positions;
   AttentionMetadata const& attn_meta;
   KVCache& kv_cache;
-  ModelInputParams const& input_params;
+  AttentionInput const& attention;
 };
 
 class MUSALayerBaseImpl : public torch::nn::Module {

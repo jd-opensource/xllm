@@ -34,6 +34,7 @@ limitations under the License.
 #include "framework/parallel_state/npu_cp_prepare.h"
 #include "layers/common/rotary_embedding_util.h"
 #include "loader/deepseek_v32_decoder_loader.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 namespace layer {
@@ -809,7 +810,7 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
     torch::Tensor& sin_pos,
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
-    const ModelInputParams& input_params,
+    const ForwardInput& input,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
     int node_id) {
@@ -820,7 +821,7 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
                            sin_pos,
                            attn_mask,
                            kv_cache,
-                           input_params,
+                           input,
                            torch::Tensor(),
                            nullptr,
                            event,
@@ -834,23 +835,21 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward_with_topk(
     torch::Tensor& sin_pos,
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
-    const ModelInputParams& input_params,
+    const ForwardInput& input,
     const torch::Tensor& shared_topk_indices,
     torch::Tensor* output_topk_indices,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
     int node_id) {
   atb::Status st;
-  ModelInputParams& input_params_new =
-      const_cast<ModelInputParams&>(input_params);
-  if (input_params_new.meta.batch_forward_type.is_decode()) {
+  if (input.meta.batch_forward_type.is_decode()) {
     build_node_variant_pack(decode_node_,
                             x,
                             cos_pos,
                             sin_pos,
                             attn_mask,
                             kv_cache,
-                            input_params_new,
+                            input,
                             false,
                             shared_topk_indices,
                             output_topk_indices);
@@ -864,7 +863,7 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward_with_topk(
                             sin_pos,
                             attn_mask,
                             kv_cache,
-                            input_params_new,
+                            input,
                             true,
                             shared_topk_indices,
                             output_topk_indices);
@@ -882,16 +881,16 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
     torch::Tensor& sin_pos,
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
-    ModelInputParams& input_params,
+    const ForwardInput& input,
     bool is_prefill,
     const torch::Tensor& shared_topk_indices,
     torch::Tensor* output_topk_indices) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
   // final_hidden_states_ = torch::zeros_like(x);
   int32_t input_idx = 0;
-  auto& dp_ep_padding = input_params.parallel.dp_ep_padding_data;
-  auto& cp_ep_padding = input_params.parallel.cp_ep_padding_data;
-  auto& cp_inputs = input_params.parallel.cp_prefill_inputs;
+  DpEpPaddingData dp_ep_padding = input.parallel.dp_ep_padding_data;
+  CpEpPaddingData cp_ep_padding = input.parallel.cp_ep_padding_data;
+  const auto& cp_inputs = input.parallel.cp_prefill_inputs;
   const bool use_cp_ep_padding = (cp_size_ > 1 && is_prefill);
 
   if (dp_size_ <= 1 && ep_size_ <= 1 || cp_size_ > 1) {
@@ -926,19 +925,17 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_v_cache());
 
-  if ((!input_params.attention.device.block_tables.defined() ||
-       input_params.attention.device.block_tables.storage().data() ==
-           nullptr)) {
+  if ((!input.attention.device.block_tables.defined() ||
+       input.attention.device.block_tables.storage().data() == nullptr)) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
         atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
         const_cast<int32_t*>(placeholder_vec_.data());
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
-        atb_speed::Utils::AtTensor2Tensor(
-            input_params.attention.device.kv_seq_lens);
+        atb_speed::Utils::AtTensor2Tensor(input.attention.device.kv_seq_lens);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
-        const_cast<int32_t*>(input_params.attention.host.kv_seq_lens.data());
+        const_cast<int32_t*>(input.attention.host.kv_seq_lens.data());
   }
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 12) =
@@ -950,35 +947,32 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 14) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
-  if (!input_params.attention.device.block_tables.defined() ||
-      input_params.attention.device.block_tables.storage().data() == nullptr) {
+  if (!input.attention.device.block_tables.defined() ||
+      input.attention.device.block_tables.storage().data() == nullptr) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 15) =
         atb_speed::Utils::AtTensor2Tensor(block_tables_placeholder_);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 16) =
         atb_speed::Utils::AtTensor2Tensor(slot_tensor_placeholder_);
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 15) =
-        atb_speed::Utils::AtTensor2Tensor(
-            input_params.attention.device.block_tables);
+        atb_speed::Utils::AtTensor2Tensor(input.attention.device.block_tables);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 16) =
         atb_speed::Utils::AtTensor2Tensor(
-            input_params.attention.device.new_cache_slots);
+            input.attention.device.new_cache_slots);
   }
 
   if (num_speculative_tokens_ > 0 && !is_prefill) {
-    if ((!input_params.attention.device.block_tables.defined() ||
-         input_params.attention.device.block_tables.storage().data() ==
-             nullptr)) {
+    if ((!input.attention.device.block_tables.defined() ||
+         input.attention.device.block_tables.storage().data() == nullptr)) {
       node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 17) =
           atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
       node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 17).hostData =
           const_cast<int32_t*>(placeholder_vec_.data());
     } else {
       node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 17) =
-          atb_speed::Utils::AtTensor2Tensor(
-              input_params.attention.device.q_seq_lens);
+          atb_speed::Utils::AtTensor2Tensor(input.attention.device.q_seq_lens);
       node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 17).hostData =
-          const_cast<int32_t*>(input_params.attention.host.q_seq_lens.data());
+          const_cast<int32_t*>(input.attention.host.q_seq_lens.data());
     }
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 17) =
@@ -1036,7 +1030,7 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
         atb_speed::Utils::AtTensor2Tensor(expert_routing_map_);
     if (!is_prefill) {
       node.variantPack.outTensors.at(1) = atb_speed::Utils::AtTensor2Tensor(
-          input_params.expert
+          input.expert
               .expert_load_data[layer_id_ - decode_param_.firstKDenseReplace]);
     }
   }
@@ -1050,10 +1044,9 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 30) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_index_cache());
 
-  if (input_params.attention.device.q_seq_lens.numel() != 0) {
+  if (input.attention.device.q_seq_lens.numel() != 0) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 31) =
-        atb_speed::Utils::AtTensor2Tensor(
-            input_params.attention.device.q_cu_seq_lens);
+        atb_speed::Utils::AtTensor2Tensor(input.attention.device.q_cu_seq_lens);
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 31) =
         atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
@@ -1098,7 +1091,7 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
         ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
       node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 41) =
           atb_speed::Utils::AtTensor2Tensor(
-              input_params.attention.device.in_prefix_slots);
+              input.attention.device.in_prefix_slots);
     }
   }
 

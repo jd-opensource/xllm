@@ -26,7 +26,7 @@ limitations under the License.
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/dit_cache/dit_cache.h"
 #include "core/framework/dit_model_loader.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model_context.h"
 #include "core/framework/request/dit_request_state.h"
 #include "core/framework/state_dict/state_dict.h"

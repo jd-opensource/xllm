@@ -23,7 +23,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
 #include "core/layers/npu/npu_qwen2_vision_encoder_layer_impl.h"
@@ -35,6 +35,7 @@ limitations under the License.
 #include "processors/qwen2_vl_image_processor.h"
 #include "processors/qwen2_vl_video_processor.h"
 #include "qwen2_5_vl.h"
+#include "runtime/forward_params.h"
 
 namespace xllm::npu::model {
 
@@ -477,10 +478,10 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
         register_module("language_model", QWen2ForCausalLM(context));
   }
 
-  void prepare_encoder_input(const ModelInputParams& input_params,
+  void prepare_encoder_input(const ForwardInput& input,
                              std::optional<Qwen2_VLImageInputs>& image_inputs,
                              std::optional<Qwen2_VLVideoInputs>& video_inputs) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+    const auto& mm_data = input.multimodal.mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
       pixel_values = res.value();
@@ -510,17 +511,17 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
           pixel_values_videos, video_grid_thw, second_per_grid_ts};
   }
 
-  MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
+  MMDict get_multimodal_embeddings(const ForwardInput& input) {
     std::optional<Qwen2_VLImageInputs> image_input;
     std::optional<Qwen2_VLVideoInputs> video_input;
-    prepare_encoder_input(input_params, image_input, video_input);
+    prepare_encoder_input(input, image_input, video_input);
     MMDict multimodal_embeds;
     if (image_input) {
       torch::Tensor image_pixels = image_input->pixel_values.to(options_);
       torch::Tensor image_grid =
           image_input->image_grid_thw.to(options_.device());
       std::vector<int32_t> image_token_nums =
-          get_mm_token_nums(input_params.multimodal.mm_data, MMType::IMAGE);
+          get_mm_token_nums(input.multimodal.mm_data, MMType::IMAGE);
       if (!use_encoder_dp_) {
         auto image_embeds = visual_(image_pixels, image_grid);
         multimodal_embeds["image|embedding"] =
@@ -547,8 +548,8 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
   }
 
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
-                                     const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+                                     const ForwardInput& input) {
+    const auto& mm_data = input.multimodal.mm_data;
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
     auto merge_modality = [&](const std::string& embed_key,
                               const std::string& mask_key) {
@@ -569,8 +570,8 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
   ModelOutput forward(const torch::Tensor& tokens,
                       const torch::Tensor& positions,
                       std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    return language_model_(tokens, positions, kv_caches, input_params);
+                      const ForwardInput& input) {
+    return language_model_->forward(tokens, positions, kv_caches, input);
   }
 
   torch::Tensor pooler(const torch::Tensor& hidden_states,

@@ -19,10 +19,11 @@ limitations under the License.
 #include "forward_params.h"
 #include "framework/model/causal_vlm.h"
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "options.h"
+#include "runtime/forward_params.h"
 #include "runtime/worker_impl.h"
 
 namespace xllm {

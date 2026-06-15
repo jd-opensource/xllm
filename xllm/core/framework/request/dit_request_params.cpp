@@ -34,6 +34,11 @@ std::string generate_request_id(const std::string& prefix) {
          short_uuid.random();
 }
 
+std::string generate_audio_generation_request_id() {
+  return "audiogen-" + InstanceName::name()->get_name_hash() + "-" +
+         short_uuid.random();
+}
+
 // Decode a base64-encoded WAV/audio blob into a float32 CPU tensor of shape
 // (1, num_samples) at the given sample rate (mono).
 // Returns true on success and writes to `out`; logs ERROR and returns false
@@ -89,28 +94,74 @@ bool decode_base64_image(const std::string& base64, torch::Tensor& out) {
   return true;
 }
 
-// Shared helper: populate DiTInputParams fields common to Image and Video
-// input.
+// Shared helper: populate DiTInputParams from an image-like input proto.
 template <typename InputProto>
-void fill_input_params(DiTInputParams& input_params, const InputProto& input) {
-  input_params.prompt = input.prompt();
-  if (input.has_negative_prompt()) {
-    input_params.negative_prompt = input.negative_prompt();
+void fill_input(DiTInputParams& input, const InputProto& proto_input) {
+  // Fields common to both proto::Input and proto::VideoInput
+  input.prompt = proto_input.prompt();
+  if (proto_input.has_negative_prompt()) {
+    input.negative_prompt = proto_input.negative_prompt();
   }
-  if (input.has_prompt_embed()) {
-    input_params.prompt_embed = util::proto_to_torch(input.prompt_embed());
+  if (proto_input.has_prompt_embed()) {
+    input.prompt_embed = util::proto_to_torch(proto_input.prompt_embed());
   }
-  if (input.has_negative_prompt_embed()) {
-    input_params.negative_prompt_embed =
-        util::proto_to_torch(input.negative_prompt_embed());
+  if (proto_input.has_negative_prompt_embed()) {
+    input.negative_prompt_embed =
+        util::proto_to_torch(proto_input.negative_prompt_embed());
   }
-  if (input.has_image()) {
-    decode_base64_image(input.image(), input_params.image);
+  if (proto_input.has_image()) {
+    decode_base64_image(proto_input.image(), input.image);
+  }
+
+  // Image-only fields (proto::Input)
+  if constexpr (std::is_same_v<InputProto, proto::Input>) {
+    if (proto_input.has_prompt_2()) {
+      input.prompt_2 = proto_input.prompt_2();
+    }
+    if (proto_input.has_negative_prompt_2()) {
+      input.negative_prompt_2 = proto_input.negative_prompt_2();
+    }
+    if (proto_input.has_pooled_prompt_embed()) {
+      input.pooled_prompt_embed =
+          util::proto_to_torch(proto_input.pooled_prompt_embed());
+    }
+    if (proto_input.has_negative_pooled_prompt_embed()) {
+      input.negative_pooled_prompt_embed =
+          util::proto_to_torch(proto_input.negative_pooled_prompt_embed());
+    }
+    if (proto_input.has_latent()) {
+      input.latent = util::proto_to_torch(proto_input.latent());
+    }
+    if (proto_input.has_masked_image_latent()) {
+      input.masked_image_latent =
+          util::proto_to_torch(proto_input.masked_image_latent());
+    }
+    if (proto_input.has_mask_image()) {
+      decode_base64_image(proto_input.mask_image(), input.mask_image);
+    }
+    input.images.reserve(proto_input.images().size());
+    for (const auto& image : proto_input.images()) {
+      torch::Tensor tensor;
+      if (!decode_base64_image(image, tensor)) {
+        continue;
+      }
+      input.images.emplace_back(std::move(tensor));
+    }
+    if (proto_input.has_control_image()) {
+      decode_base64_image(proto_input.control_image(), input.control_image);
+    }
+  }
+
+  // Video-only fields (proto::VideoInput)
+  if constexpr (std::is_same_v<InputProto, proto::VideoInput>) {
+    if (proto_input.has_last_image()) {
+      decode_base64_image(proto_input.last_image(), input.last_image);
+    }
   }
 }
 
-// Shared helper: populate generation params common to Image and Video
-// parameters.
+// Shared helper: populate generation params from a parameters proto.
+// Both ImageParameters and VideoParameters share most fields.
 template <typename ParamsProto>
 void fill_generation_params(DiTGenerationParams& generation_params,
                             const ParamsProto& params) {
@@ -134,6 +185,14 @@ void fill_generation_params(DiTGenerationParams& generation_params,
   if (params.has_max_sequence_length()) {
     generation_params.max_sequence_length = params.max_sequence_length();
   }
+  if constexpr (std::is_same_v<ParamsProto, proto::Parameters>) {
+    if (params.has_enable_cfg_renorm()) {
+      generation_params.enable_cfg_renorm = params.enable_cfg_renorm();
+    }
+    if (params.has_cfg_renorm_min()) {
+      generation_params.cfg_renorm_min = params.cfg_renorm_min();
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -149,44 +208,7 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
   model = request.model();
 
   if (request.has_input()) {
-    const auto& input = request.input();
-    fill_input_params(input_params, input);
-    // Image-only input fields
-    if (input.has_prompt_2()) {
-      input_params.prompt_2 = input.prompt_2();
-    }
-    if (input.has_negative_prompt_2()) {
-      input_params.negative_prompt_2 = input.negative_prompt_2();
-    }
-    if (input.has_pooled_prompt_embed()) {
-      input_params.pooled_prompt_embed =
-          util::proto_to_torch(input.pooled_prompt_embed());
-    }
-    if (input.has_negative_pooled_prompt_embed()) {
-      input_params.negative_pooled_prompt_embed =
-          util::proto_to_torch(input.negative_pooled_prompt_embed());
-    }
-    if (input.has_latent()) {
-      input_params.latent = util::proto_to_torch(input.latent());
-    }
-    if (input.has_masked_image_latent()) {
-      input_params.masked_image_latent =
-          util::proto_to_torch(input.masked_image_latent());
-    }
-    if (input.has_mask_image()) {
-      decode_base64_image(input.mask_image(), input_params.mask_image);
-    }
-    input_params.images.reserve(input.images().size());
-    for (const auto& image : input.images()) {
-      torch::Tensor tensor;
-      if (!decode_base64_image(image, tensor)) {
-        continue;
-      }
-      input_params.images.emplace_back(std::move(tensor));
-    }
-    if (input.has_control_image()) {
-      decode_base64_image(input.control_image(), input_params.control_image);
-    }
+    fill_input(input, request.input());
   }
 
   generation_params.num_images_per_prompt = 1;
@@ -196,13 +218,6 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
     if (params.has_num_images_per_prompt()) {
       generation_params.num_images_per_prompt =
           static_cast<uint32_t>(params.num_images_per_prompt());
-    }
-    // Image-only generation fields
-    if (params.has_enable_cfg_renorm()) {
-      generation_params.enable_cfg_renorm = params.enable_cfg_renorm();
-    }
-    if (params.has_cfg_renorm_min()) {
-      generation_params.cfg_renorm_min = params.cfg_renorm_min();
     }
   }
 }
@@ -216,7 +231,7 @@ DiTRequestParams::DiTRequestParams(const proto::AudioGenerationRequest& request,
   if (request.has_request_id()) {
     request_id = request.request_id();
   } else {
-    request_id = generate_request_id("audiogen-");
+    request_id = generate_audio_generation_request_id();
   }
   x_request_id = x_rid;
   x_request_time = x_rtime;
@@ -248,16 +263,16 @@ DiTRequestParams::DiTRequestParams(const proto::AudioGenerationRequest& request,
   }
 
   // input params — decode prompt audio using the model's sampling rate.
-  const auto& input = request.input();
-  input_params.prompt = input.prompt();
+  const auto& proto_input = request.input();
+  input.prompt = proto_input.prompt();
 
-  if (input.has_prompt_audio()) {
-    decode_prompt_audio(input.prompt_audio(),
+  if (proto_input.has_prompt_audio()) {
+    decode_prompt_audio(proto_input.prompt_audio(),
                         generation_params.audio_sampling_rate,
-                        input_params.prompt_audio);
+                        input.prompt_audio);
   }
-  if (input.has_prompt_text()) {
-    input_params.audio_prompt_text = input.prompt_text();
+  if (proto_input.has_prompt_text()) {
+    input.audio_prompt_text = proto_input.prompt_text();
   }
 }
 
@@ -276,12 +291,7 @@ DiTRequestParams::DiTRequestParams(const proto::VideoGenerationRequest& request,
   generation_params.force_video_output = true;
 
   if (request.has_input()) {
-    const auto& input = request.input();
-    fill_input_params(input_params, input);
-    // Video-only input fields
-    if (input.has_last_image()) {
-      decode_base64_image(input.last_image(), input_params.last_image);
-    }
+    fill_input(input, request.input());
   }
 
   if (request.has_parameters()) {
@@ -314,7 +324,7 @@ DiTRequestParams::DiTRequestParams(const proto::VideoGenerationRequest& request,
 
 bool DiTRequestParams::verify_params(
     std::function<bool(DiTRequestOutput)> callback) const {
-  if (input_params.prompt.empty() && !input_params.prompt_embed.defined()) {
+  if (input.prompt.empty() && !input.prompt_embed.defined()) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "prompt is empty");
     return false;
   }

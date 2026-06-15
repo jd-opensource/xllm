@@ -20,7 +20,7 @@ limitations under the License.
 #include <vector>
 
 namespace xllm {
-struct ModelInputParams;
+struct ForwardInput;
 struct DSACacheInfo;
 struct DSAGroupInfo;
 
@@ -31,7 +31,7 @@ struct DSAMetadata;
 
 // Builder class for DSAMetadata.
 // Builds a complete AttentionMetadata (with dsa_metadata populated) from
-// ModelInputParams and model-specific data.  This replaces the need for a
+// ForwardInput and model-specific data.  This replaces the need for a
 // separate AttentionMetadataBuilder::build() call in DeepSeek V4.
 class DSAMetadataBuilder {
  public:
@@ -46,7 +46,7 @@ class DSAMetadataBuilder {
   //   caches_info: per-layer cache specs [layer_id][cache_idx]
   //   group_infos: per-group info [group_id]
   static AttentionMetadata build(
-      const ModelInputParams& params,
+      const ForwardInput& params,
       const torch::Tensor& positions,
       const torch::Tensor& dsa_cos_sin,
       const std::vector<std::vector<DSACacheInfo>>& caches_info,
@@ -57,7 +57,7 @@ class DSAMetadataBuilder {
  private:
   // Build DSA-specific fields into dsa_metadata.
   static void build_dsa_fields(
-      const ModelInputParams& params,
+      const ForwardInput& params,
       const torch::Tensor& positions,
       const torch::Tensor& dsa_cos_sin,
       const torch::Tensor& dsa_c4_cos_sin,
@@ -112,13 +112,13 @@ class DSAMetadataBuilder {
                                 torch::Tensor& out_slots);
 
   // Build actual_seq_lengths_kv and actual_seq_lengths_query.
-  static void build_seq_lengths(const ModelInputParams& params,
+  static void build_seq_lengths(const ForwardInput& params,
                                 const torch::Device& target_device,
                                 int32_t batch_size,
                                 DSAMetadata& dsa_metadata);
 
   // Build input_positions, c4_pad_positions, c128_pad_positions.
-  static void build_positions(const ModelInputParams& params,
+  static void build_positions(const ForwardInput& params,
                               int32_t batch_size,
                               DSAMetadata& dsa_metadata);
 };

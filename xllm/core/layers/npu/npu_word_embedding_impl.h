@@ -27,7 +27,7 @@ limitations under the License.
 #include <functional>
 
 #include "atb/atb_infer.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "loader/word_embedding_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"

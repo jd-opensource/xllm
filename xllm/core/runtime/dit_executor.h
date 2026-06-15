@@ -25,7 +25,7 @@ limitations under the License.
 #include "forward_params.h"
 #include "framework/batch/dit_batch.h"
 #include "framework/model/dit_model.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/request/dit_request_state.h"
 #include "runtime/options.h"
 

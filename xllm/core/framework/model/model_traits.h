@@ -21,9 +21,12 @@ limitations under the License.
 #include <type_traits>
 #include <utility>
 
+#include "runtime/forward_params.h"
+
 namespace xllm {
-struct ModelInputParams;
+struct ForwardInput;
 struct ModelGraphMetadataState;
+class KVCache;
 
 namespace layer {
 class LmHead;
@@ -146,7 +149,7 @@ struct has_prepare_graph_forward_metadata<
     std::void_t<decltype(std::declval<T>()->prepare_graph_forward_metadata(
         std::declval<ModelGraphMetadataState*>(),
         std::declval<const torch::Tensor&>(),
-        std::declval<ModelInputParams&>()))>> : std::true_type {};
+        std::declval<ForwardInput&>()))>> : std::true_type {};
 
 template <typename T, typename = void>
 struct has_pooler : std::false_type {};
@@ -156,6 +159,28 @@ struct has_pooler<T,
                   std::void_t<decltype(std::declval<T>()->pooler(
                       std::declval<const torch::Tensor&>(),
                       std::declval<const torch::Tensor&>()))>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_forward_input : std::false_type {};
+
+template <typename T>
+struct has_forward_input<T,
+                         std::void_t<decltype(std::declval<T>()->forward(
+                             std::declval<const ForwardInput&>(),
+                             std::declval<std::vector<KVCache>&>()))>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_legacy_forward_input : std::false_type {};
+
+template <typename T>
+struct has_legacy_forward_input<T,
+                                std::void_t<decltype(std::declval<T>()->forward(
+                                    std::declval<const torch::Tensor&>(),
+                                    std::declval<const torch::Tensor&>(),
+                                    std::declval<std::vector<KVCache>&>(),
+                                    std::declval<const ForwardInput&>()))>>
     : std::true_type {};
 
 #if defined(USE_NPU)

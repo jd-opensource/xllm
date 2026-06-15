@@ -27,7 +27,7 @@ limitations under the License.
 
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model_context.h"
 #if defined(USE_NPU)
 #include "core/layers/npu/npu_siglip_encoder_layer_impl.h"

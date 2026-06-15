@@ -25,7 +25,7 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "runtime/executor.h"

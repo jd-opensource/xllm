@@ -20,6 +20,7 @@ limitations under the License.
 #include "dit_forward_params.h"
 #include "forward_params.h"
 #include "params_utils.h"
+#include "runtime/forward_params.h"
 #include "util/shared_memory_manager.h"
 
 namespace xllm {

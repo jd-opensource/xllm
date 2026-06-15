@@ -26,6 +26,7 @@ limitations under the License.
 #include "framework/parallel_state/parallel_state.h"
 #include "options.h"
 #include "platform/device.h"
+#include "runtime/forward_params.h"
 #include "util/threadpool.h"
 #include "worker_impl.h"
 
