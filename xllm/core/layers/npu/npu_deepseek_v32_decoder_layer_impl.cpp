@@ -43,6 +43,8 @@ namespace layer {
 
 namespace {
 constexpr int kQProjBLinearIndex = 1;
+constexpr int kIndexerWqBLinearIndex = 6;
+constexpr int kIndexerProjLinearIndex = 8;
 constexpr int kTranspose = 1;
 constexpr int kNotTranspose = 0;
 
@@ -99,12 +101,28 @@ std::optional<std::string> get_layer_quant_desc(
   return resolved->second;
 }
 
+std::optional<std::string> get_optional_layer_quant_desc(
+    const QuantArgs& quant_args,
+    int32_t layer_id,
+    const std::string& local_prefix) {
+  const std::string prefix =
+      "model.layers." + std::to_string(layer_id) + "." + local_prefix;
+  auto quant_desc = quant_args.get_quant_method(prefix, "weight");
+  if (!quant_desc.has_value()) {
+    return std::nullopt;
+  }
+  return normalize_quant_type(quant_desc.value());
+}
+
 int quant_desc_to_linear_desc(const std::optional<std::string>& quant_desc,
                               int default_desc) {
   if (!quant_desc.has_value()) {
     return default_desc;
   }
   const std::string quant_type = normalize_quant_type(quant_desc.value());
+  if (quant_type == "float") {
+    return static_cast<int>(LinearTypeV2::FLOAT16);
+  }
   if (quant_type == "w8a8_dynamic") {
     return static_cast<int>(LinearTypeV2::W8A8_DYNAMIC);
   }
@@ -133,10 +151,22 @@ std::vector<int> resolve_attn_linear_quant_types(const QuantArgs& quant_args,
   const int o_desc = quant_desc_to_linear_desc(
       get_layer_quant_desc(quant_args, layer_id, {"self_attn.o_proj"}),
       w8a8_desc);
+  const int indexer_wq_b_desc = quant_desc_to_linear_desc(
+      get_optional_layer_quant_desc(
+          quant_args, layer_id, "self_attn.indexer.wq_b"),
+      fp16_desc);
   CHECK_EQ(q_a_desc, kv_a_desc)
       << "DeepSeek V32 currently requires self_attn.q_a_proj and "
       << "self_attn.kv_a_proj_with_mqa to share the same quant_desc.";
-  return {q_a_desc, q_b_desc, kv_a_desc, fp16_desc, fp16_desc, o_desc};
+  return {q_a_desc,
+          q_b_desc,
+          kv_a_desc,
+          fp16_desc,
+          fp16_desc,
+          o_desc,
+          indexer_wq_b_desc,
+          fp16_desc,
+          fp16_desc};
 }
 }  // namespace
 
@@ -365,6 +395,7 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
       prefill_param_.isBF16,
       decode_param_.isBF16,
       attn_linear_quant_types_,
+      skip_topk_,
       ::xllm::LoadConfig::get_instance().enable_manual_loader()
           ? LoadMode::kManual
           : LoadMode::kEager);
@@ -433,8 +464,9 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
       attn_linear_quant_types_[kQProjBLinearIndex] ==
           static_cast<int>(LinearTypeV2::W8A8_DYNAMIC)) {
     param.attnLinearTransposeType[kQProjBLinearIndex] = kNotTranspose;
-    // Keep the static path on the legacy 6-entry vector. The extra entries are
-    // only for DSA indexer no-quant linears when q_b uses dynamic no-transpose.
+  }
+  if (attn_linear_quant_types_.size() > kIndexerWqBLinearIndex &&
+      param.attnLinearTransposeType.size() <= kIndexerProjLinearIndex) {
     param.attnLinearTransposeType.insert(param.attnLinearTransposeType.end(),
                                          {kTranspose, kTranspose, kTranspose});
   }
@@ -644,6 +676,9 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_quantization_parameters(
     param.packQuantType = {static_cast<int>(PackType::ALL_FP),
                            static_cast<int>(PackType::ALL_FP)};
     param.attnLinearQuantType = {static_cast<int>(LinearType::FP),
+                                 static_cast<int>(LinearType::FP),
+                                 static_cast<int>(LinearType::FP),
+                                 static_cast<int>(LinearType::FP),
                                  static_cast<int>(LinearType::FP),
                                  static_cast<int>(LinearType::FP),
                                  static_cast<int>(LinearType::FP),

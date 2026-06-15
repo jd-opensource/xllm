@@ -37,6 +37,7 @@ class DeekseekV32DecoderLoader : public BaseLoader {
                            bool prefill_isBF16,
                            bool decode_isBF16,
                            const std::vector<int>& attn_linear_quant_types,
+                           bool skip_topk,
                            LoadMode mode = LoadMode::kEager);
 
   void load_state_dict(const StateDict& state_dict) override;
@@ -107,6 +108,9 @@ class DeekseekV32DecoderLoader : public BaseLoader {
 
   bool use_quant_weight_mapping() const;
   bool is_attn_dynamic_desc(int index) const;
+  bool is_attn_quant_desc(int index) const;
+  bool should_skip_indexer_weight(const std::string& name) const;
+  void reset_skipped_indexer_weights();
 
   int get_w4a8_expert_shard_dim(const std::string& suffix) const;
 
@@ -162,6 +166,7 @@ class DeekseekV32DecoderLoader : public BaseLoader {
   int32_t decode_worldSize_;
   bool prefill_isBF16_;
   bool decode_isBF16_;
+  bool skip_topk_;
   // Compatibility vector: entries may be legacy LinearType or new LinearDesc.
   std::vector<int> attn_linear_quant_types_;
   std::mutex shared_experts_mutex_;
