@@ -151,6 +151,8 @@ class ProfileManager {
 
   void warmup_prefill_for_graph();
 
+  void warmup_decode_for_graph();
+
   void warmup_unified_for_graph();
 
   bool check_if_satisfy_slo(int32_t num_tokens, int32_t tpot_slo_ms);

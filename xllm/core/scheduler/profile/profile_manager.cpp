@@ -931,6 +931,11 @@ void ProfileManager::warmup_for_graph() {
     warmup_prefill_for_graph();
     return;
   }
+  if (plan == GraphWarmupPlan::DECODE_ONLY) {
+    LOG(INFO) << "DECODE graph warmup: decode buckets only";
+    warmup_decode_for_graph();
+    return;
+  }
 
   warmup_unified_for_graph();
 }
@@ -947,12 +952,15 @@ void ProfileManager::warmup_prefill_for_graph() {
 }
 
 void ProfileManager::warmup_unified_for_graph() {
+  warmup_prefill_for_graph();
+  warmup_decode_for_graph();
+}
+
+void ProfileManager::warmup_decode_for_graph() {
   auto& model_args = engine_->model_args();
   int32_t max_context_len = model_args.max_position_embeddings();
   int32_t max_seqs_per_batch = options_.max_seqs_per_batch();
   int32_t decode_seq_len = std::min(16, max_context_len);
-
-  warmup_prefill_for_graph();
 
   std::vector<int32_t> decode_batch_sizes =
       graph_decode_buckets(max_seqs_per_batch, options_.dp_size());

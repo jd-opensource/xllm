@@ -28,6 +28,7 @@ class Sequence;
 enum class GraphWarmupPlan : int8_t {
   UNIFIED = 0,
   PREFILL_ONLY = 1,
+  DECODE_ONLY = 2,
 };
 
 GraphWarmupPlan graph_warmup_plan(InstanceRole role);

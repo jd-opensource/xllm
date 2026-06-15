@@ -36,6 +36,9 @@ GraphWarmupPlan graph_warmup_plan(InstanceRole role) {
   if (role == InstanceRole::PREFILL) {
     return GraphWarmupPlan::PREFILL_ONLY;
   }
+  if (role == InstanceRole::DECODE) {
+    return GraphWarmupPlan::DECODE_ONLY;
+  }
 
   return GraphWarmupPlan::UNIFIED;
 }

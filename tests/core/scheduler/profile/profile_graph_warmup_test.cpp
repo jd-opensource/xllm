@@ -95,9 +95,13 @@ TEST(GraphWarmupTest, PrefillRoleUsesPrefillOnlyPlan) {
 
 TEST(GraphWarmupTest, NonPrefillRolesUseUnifiedPlan) {
   EXPECT_EQ(graph_warmup_plan(InstanceRole::DEFAULT), GraphWarmupPlan::UNIFIED);
-  EXPECT_EQ(graph_warmup_plan(InstanceRole::DECODE), GraphWarmupPlan::UNIFIED);
   EXPECT_EQ(graph_warmup_plan(InstanceRole::MIX), GraphWarmupPlan::UNIFIED);
   EXPECT_EQ(graph_warmup_plan(InstanceRole::INVALID), GraphWarmupPlan::UNIFIED);
+}
+
+TEST(GraphWarmupTest, DecodeRoleUsesDecodeOnlyPlan) {
+  EXPECT_EQ(graph_warmup_plan(InstanceRole::DECODE),
+            GraphWarmupPlan::DECODE_ONLY);
 }
 
 TEST(GraphWarmupTest, FormatsWarmupProgress) {
