@@ -248,6 +248,7 @@ void validate_config(const std::string& model_type) {
   SchedulerConfig& scheduler_config = SchedulerConfig::get_instance();
   ParallelConfig& parallel_config = ParallelConfig::get_instance();
   DisaggPDConfig& disagg_pd_config = DisaggPDConfig::get_instance();
+  SpeculativeConfig& speculative_config = SpeculativeConfig::get_instance();
 
   if (model_config.backend().empty()) {
     LOG(FATAL) << "Model is not supported currently, model type: "
@@ -260,6 +261,14 @@ void validate_config(const std::string& model_type) {
   }
   if (model_config.max_encoder_cache_size() < 0) {
     LOG(FATAL) << "max_encoder_cache_size must be >= 0.";
+  }
+  if (model_type == "glm_moe_dsa" && parallel_config.dp_size() > 1 &&
+      speculative_config.num_speculative_tokens() > 0 &&
+      speculative_config.speculative_algorithm() == "MTP" &&
+      scheduler_config.enable_schedule_overlap()) {
+    LOG(FATAL) << "dp_size > 1, MTP speculative decoding, and "
+                  "enable_schedule_overlap cannot be enabled at the same "
+                  "time. Please disable enable_schedule_overlap.";
   }
 #if defined(USE_MLU)
   // Disable enable_schedule_overlap for VLM models on MLU backend
