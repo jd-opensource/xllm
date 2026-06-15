@@ -136,9 +136,20 @@ void clear_ready_events(ForwardInput& input) {
   input.metadata_ready_event.reset();
 }
 
-bool should_reuse_mtp_topk_indices(const ModelArgs& model_args) {
-  return model_args.index_share_for_mtp_iteration() &&
-         model_args.index_n_heads() > 0 && model_args.index_topk() > 0;
+bool should_reuse_mtp_topk_indices(const ModelArgs& model_args,
+                                   bool enable_schedule_overlap) {
+  const bool reuse_enabled = model_args.index_share_for_mtp_iteration() &&
+                             model_args.index_n_heads() > 0 &&
+                             model_args.index_topk() > 0;
+  if (enable_schedule_overlap && reuse_enabled) {
+    LOG_FIRST_N(WARNING, 1)
+        << "Disable MTP DSA top-k reuse across draft steps when "
+           "schedule overlap is enabled. The draft model will recompute top-k "
+           "for sharing layers to avoid using stale asynchronous top-k "
+           "buffers.";
+    return false;
+  }
+  return reuse_enabled;
 }
 
 torch::Tensor select_mtp_topk_indices_for_next_step(
@@ -936,7 +947,8 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
   prepare_draft_extend_inputs(input, last_states, current_draft_input);
   draft_outputs.reserve(num_speculative_tokens);
   const bool reuse_mtp_topk_indices =
-      should_reuse_mtp_topk_indices(draft_impl_->context_.get_model_args());
+      should_reuse_mtp_topk_indices(draft_impl_->context_.get_model_args(),
+                                    enable_schedule_overlap());
   torch::Tensor mtp_topk_indices;
   for (int32_t draft_idx = 0; draft_idx < num_speculative_tokens; ++draft_idx) {
     if (reuse_mtp_topk_indices) {
