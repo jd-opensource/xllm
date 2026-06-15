@@ -1,10 +1,10 @@
-# 使用 xLLM 在 Ascend A3设备 推理 GLM-5.0-W8A8 基座模型
+# 使用 xLLM 在 Ascend A3设备 推理 GLM-5/5.1/5.2 - W8A8/W4A8/BF16 基座模型
 
 + 源码地址：https://github.com/jd-opensource/xllm
 
 + 国内可用: https://gitcode.com/xLLM-AI/xllm
 
-+ 权重下载: [modelscope-GLM-5-W8A8](https://www.modelscope.cn/models/Eco-Tech/GLM-5-W8A8-xLLM/files)
++ 权重下载: [modelscope-GLM-5-W8A8](https://www.modelscope.cn/models/Eco-Tech/GLM-5-W8A8-xLLM-0403/files)
   
 ## 1.拉取镜像环境
 
@@ -48,9 +48,8 @@ sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host 
 ```bash
 git clone https://github.com/jd-opensource/xllm
 cd xllm 
-git checkout preview/glm-5
-git submodule init
-git submodule update
+git checkout preview/glm-5.2
+git submodule update --init --recursive
 ```
 
 下载安装依赖:
@@ -77,22 +76,17 @@ python -c "import torch_npu
 for i in range(16):torch_npu.npu.set_device(i)"
 ```
 
+### 启动前CHECK
+
+若权重为W4A8，模型config中需要确认有字段："quantize": "w4a8_dynamic"
+若权重为W8A8，模型config中需要确认有字段："quantize": "w8a8_dynamic"
+(后续导出的mtp权重也遵守该规则，如GLM5.2的mtp权重一般不量化，此时要保证没有quantize字段或值为空)
+
 ### 环境变量
 
 ```bash
 ##### 1， 配置依赖路径相关环境变量
-# export PYTHON_INCLUDE_PATH="$(python3 -c 'from sysconfig import get_paths; print(get_paths()["include"])')"
-# export PYTHON_LIB_PATH="$(python3 -c 'from sysconfig import get_paths; print(get_paths()["include"])')"
-# export PYTORCH_NPU_INSTALL_PATH=/usr/local/libtorch_npu/
-# export PYTORCH_INSTALL_PATH="$(python3 -c 'import torch, os; print(os.path.dirname(os.path.abspath(torch.__file__)))')"
-# export LIBTORCH_ROOT="$(python3 -c 'import torch, os; print(os.path.dirname(os.path.abspath(torch.__file__)))')"
-
-# export LD_LIBRARY_PATH=/usr/local/Ascend/ascend-toolkit/latest/opp/vendors/xllm/op_api/lib/:$LD_LIBRARY_PATH
-# export LD_LIBRARY_PATH=/usr/local/libtorch_npu/lib:$LD_LIBRARY_PATH
 export LD_PRELOAD=/usr/lib64/libjemalloc.so.2:$LD_PRELOAD
-
-# source /usr/local/Ascend/ascend-toolkit/set_env.sh
-# source /usr/local/Ascend/nnal/atb/set_env.sh
 
 ##### 2， 配置日志相关环境变量
 rm -rf /root/ascend/log/
@@ -113,24 +107,23 @@ export ATB_CONVERT_NCHW_TO_AND=1
 export ATB_LAUNCH_KERNEL_WITH_TILING=1
 export ATB_OPERATION_EXECUTE_ASYNC=2
 export ATB_CONTEXT_WORKSPACE_SIZE=0
-export INF_NAN_MODE_ENABLE=1
 export HCCL_EXEC_TIMEOUT=300
 export HCCL_CONNECT_TIMEOUT=300
 export HCCL_OP_EXPANSION_MODE="AIV"
 export HCCL_IF_BASE_PORT=2864
 ```
 
-## 启动命令 - GLM-5 （W8A8权重可单机拉起）
+## 启动命令 - GLM-5.2-W4A8
 
 ```bash
 BATCH_SIZE=256
 #推理最大batch数量
 XLLM_PATH="./myxllm/xllm/build/xllm/core/server/xllm"
 #推理入口文件路径（上一步中编译产物）
-MODEL_PATH=/path/to/GLM-5-W8A8/
-#模型路径（此处为int8量化的Glm-5）
-DRAFT_MODEL_PATH=/path/to/GLM-5-W8A8/GLM-5-W8A8-MTP/
-#Glm-5 导出的mtp权重
+MODEL_PATH=/path/to/GLM-5.2-W4A8/
+#模型路径（此处为int4量化的Glm-5.2）
+DRAFT_MODEL_PATH=/path/to/GLM-5.2-W4A8-MTP/
+#Glm-5/2 导出的mtp权重（后面有导出指导）
 
 MASTER_NODE_ADDR="11.87.49.110:10015"
 LOCAL_HOST="11.87.49.110"
@@ -145,7 +138,9 @@ do
   PORT=$((START_PORT + i))
   DEVICE=$((START_DEVICE + i))
   LOG_FILE="$LOG_DIR/node_$i.log"
-  nohup numactl -C $((DEVICE*40))-$((DEVICE*40+39)) $XLLM_PATH \
+  #可选：numactl绑核
+  #nohup numactl -C $((DEVICE*40))-$((DEVICE*40+39)) $XLLM_PATH \
+  nohup $XLLM_PATH \
     --model $MODEL_PATH \
     --port $PORT \
     --devices="npu:$DEVICE" \
@@ -157,23 +152,22 @@ do
     --max_seqs_per_batch=32 \
     --block_size=128 \
     --enable_prefix_cache=false \
-    --enable_chunked_prefill=true \
+    --enable_chunked_prefill=false \
     --communication_backend="hccl" \
-    --enable_schedule_overlap=true \
+    --enable_schedule_overlap=false \
     --enable_graph=true \
-    --enable_graph_mode_decode_no_padding=true \
     --draft_model=$DRAFT_MODEL_PATH \
     --draft_devices="npu:$DEVICE" \
-    --num_speculative_tokens=1 \
-    --ep_size=8 \
-    --dp_size=1 \
+    --num_speculative_tokens=3 \
+    --ep_size=16 \
+    --dp_size=2 \
     > $LOG_FILE 2>&1 &
 done
 
 # numactl -C xxxxx          亲和性绑核(NUMA亲和性查询命令： npu-smi info -t topo)
 #--max_memory_utilization   单卡最大显存占用比例
 #--max_tokens_per_batch     单batch最大token数  （主要限制prefill）
-#--max_seqs_per_batch       单batch最大请求数   （主要限制decoe）
+#--max_seqs_per_batch       单batch最大请求数   （主要限制decode）
 #--communication_backend    通信backend 可选(hccl / lccl) 此处建议hccl
 #--enable_schedule_overlap  开启异步调度
 #--enable_prefix_cache      开启prefix_cache
@@ -229,13 +223,12 @@ for (( i=0; i<$LOCAL_NODES; i++ ))do
     --max_seqs_per_batch=4 \
     --block_size=128 \
     --enable_prefix_cache=false \
-    --enable_chunked_prefill=true \
+    --enable_chunked_prefill=false \
     --communication_backend="hccl" \
-    --enable_schedule_overlap=true \
+    --enable_schedule_overlap=false \
     --enable_graph=true \
-    --enable_graph_mode_decode_no_padding=true \
-    --ep_size=16 \
-    --dp_size=1 \
+    --ep_size=32 \
+    --dp_size=4 \
     --rank_tablefile=/yourPath/ranktable.json \
     > $LOG_FILE 2>&1 &
 done
@@ -269,13 +262,12 @@ for (( i=0; i<$LOCAL_NODES; i++ ))do
     --max_seqs_per_batch=4 \
     --block_size=128 \
     --enable_prefix_cache=false \
-    --enable_chunked_prefill=true \
+    --enable_chunked_prefill=false \
     --communication_backend="hccl" \
-    --enable_schedule_overlap=true \
+    --enable_schedule_overlap=false \
     --enable_graph=true \
-    --enable_graph_mode_decode_no_padding=true \
-    --ep_size=16 \
-    --dp_size=1 \
+    --ep_size=32 \
+    --dp_size=4 \
     --rank_tablefile=/yourPath/ranktable.json \
     > $LOG_FILE 2>&1 &
 done
@@ -284,6 +276,7 @@ done
 #### ranktable样例
 
  ranktable配置指导：https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/hccl/hcclug/hcclug_000014.html
+ （注意A2与A3的ranktable格式差异）
 
 ```json
 {
@@ -346,43 +339,26 @@ numactl -C $((DEVICE*12))-$((DEVICE*12+11))
 
 表示该进程绑在对应亲和的核上，可根据机器具体情况修改绑定的核id
 
-## EX3.Glm-5 权重量化 
+## EX3.Glm-5 权重量化 (GLM5.2 量化指导待更新)
 
 ### 安装msmodelslim
 
 ```bash
-git clone https://gitcode.com/shenxiaolong/msmodelslim.git 
+pip install transformers==5.2.0
+
+git clone https://gitcode.com/Ascend/msmodelslim.git
 cd msmodelslim
 bash install.sh
 ```
-
-### 修改tokenizer_config.json
-
+### 量化执行
 ```bash
-  "extra_special_tokens" 
-    改成 "additional_special_tokens"
-
-  "tokenizer_class": "TokenizersBackend" 
-    改成 "tokenizer_class": "PreTrainedTokenizer"
-```
-
-### 基于GLM-5-BF16 权重量化W8A8权重
-
-```bash
-### 预处理mtp相关权重
-python example/GLM5/extract_mtp.py --model-dir ${model_path}
-
-#指定transformers版本
-pip install transformers==4.48.2
-
-#量化执行（生成量化权重）
-msmodelslim quant  --model_path ${model_path}  --save_path ${save_path}  --model_type DeepSeek-V3.2  --quant_type w8a8  --trust_remote_code True
-
-#拷贝chat_template文件
-cp ${model_path}/chat_template.jinja ${save_path}
-
-#量化mtp权重导出（用于xllm推理）
-python example/GLM5/export_mtp.py --input-dir  ${int8_save_path} --output-dir  ${mtp_save_path}
+msmodelslim quant \
+  --model_path ${MODEL_PATH} \
+  --save_path ${SAVE_PATH} \
+  --device npu:0 \
+  --model_type GLM-5 \
+  --quant_type w8a8 \
+  --trust_remote_code True
 ```
 
 ## PD分离
