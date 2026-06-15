@@ -29,9 +29,9 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/model_args.h"
-#include "core/framework/model/model_input_params.h"
 #include "core/platform/device.h"
 #include "core/runtime/dcu_graph_executor_impl.h"
+#include "core/runtime/forward_params.h"
 #include "core/runtime/options.h"
 
 namespace xllm {
@@ -110,20 +110,17 @@ class FakeSimpleCausalLM final : public CausalLM {
     }
   }
 
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& params) override {
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) override {
     (void)kv_caches;
-    (void)params;
 
-    auto token_ids = tokens.to(torch::kInt64);
+    auto token_ids = forward_input.token_ids.to(torch::kInt64);
     auto x = embedding_->forward(token_ids).to(torch::kBFloat16);
     auto y = proj_->forward(x);
 
-    auto pos_bias =
-        positions.to(y.scalar_type()).reshape({positions.size(0), 1}) *
-        static_cast<double>(0.001);
+    auto pos_bias = forward_input.positions.to(y.scalar_type())
+                        .reshape({forward_input.positions.size(0), 1}) *
+                    static_cast<double>(0.001);
 
     return ModelOutput(y + pos_bias);
   }
@@ -187,13 +184,13 @@ runtime::Options MakeRuntimeOptions(int32_t max_seqs_per_batch = 8) {
   return options;
 }
 
-ModelInputParams MakeDecodeParams(const torch::Device& device,
-                                  int32_t num_tokens,
-                                  int32_t kv_len = 4) {
+ForwardInput MakeDecodeInput(const torch::Device& device,
+                             int32_t num_tokens,
+                             int32_t kv_len = 4) {
   CHECK_GT(num_tokens, 0);
   CHECK_GT(kv_len, 0);
 
-  ModelInputParams p;
+  ForwardInput p;
 
   p.meta.batch_forward_type = BatchForwardType::DECODE;
   p.meta.num_sequences = num_tokens;
@@ -243,11 +240,10 @@ ModelInputParams MakeDecodeParams(const torch::Device& device,
   return p;
 }
 
-ModelInputParams MakePrefillParams(const torch::Device& device,
-                                   int32_t num_tokens) {
+ForwardInput MakePrefillInput(const torch::Device& device, int32_t num_tokens) {
   CHECK_GT(num_tokens, 0);
 
-  ModelInputParams p;
+  ForwardInput p;
 
   p.meta.batch_forward_type = BatchForwardType::PREFILL;
   p.meta.num_sequences = 1;
@@ -329,7 +325,9 @@ TEST(DcuGraphExecutorTest, DecodeCaptureAndReplay) {
 
   auto tokens = torch::tensor({1, 2, 3}, iopt);
   auto positions = torch::tensor({0, 1, 2}, iopt);
-  auto params = MakeDecodeParams(device, 3);
+  auto params = MakeDecodeInput(device, 3);
+  params.token_ids = tokens;
+  params.positions = positions;
 
   auto kv = MakeKvCaches(device,
                          /*num_pages=*/16,
@@ -337,16 +335,13 @@ TEST(DcuGraphExecutorTest, DecodeCaptureAndReplay) {
                          /*num_kv_heads=*/1,
                          /*head_dim=*/64);
 
-  auto eager_out =
-      model->forward(tokens, positions, kv, params).hidden_states.clone();
+  auto eager_out = model->forward(params, kv).hidden_states.clone();
   DcuSynchronize();
 
-  auto out1 =
-      graph_exec->run(tokens, positions, kv, params).hidden_states.clone();
+  auto out1 = graph_exec->run(params, kv).hidden_states.clone();
   DcuSynchronize();
 
-  auto out2 =
-      graph_exec->run(tokens, positions, kv, params).hidden_states.clone();
+  auto out2 = graph_exec->run(params, kv).hidden_states.clone();
   DcuSynchronize();
 
   EXPECT_TRUE(AllCloseBf16(out1, eager_out))
@@ -386,7 +381,9 @@ TEST(DcuGraphExecutorTest, PrefillFallsBackToEager) {
 
   auto tokens = torch::arange(1, kNumTokens + 1, iopt);
   auto positions = torch::arange(0, kNumTokens, iopt);
-  auto params = MakePrefillParams(device, kNumTokens);
+  auto params = MakePrefillInput(device, kNumTokens);
+  params.token_ids = tokens;
+  params.positions = positions;
 
   auto kv = MakeKvCaches(device,
                          /*num_pages=*/16,
@@ -394,12 +391,10 @@ TEST(DcuGraphExecutorTest, PrefillFallsBackToEager) {
                          /*num_kv_heads=*/1,
                          /*head_dim=*/64);
 
-  auto eager_out =
-      model->forward(tokens, positions, kv, params).hidden_states.clone();
+  auto eager_out = model->forward(params, kv).hidden_states.clone();
   DcuSynchronize();
 
-  auto out =
-      graph_exec->run(tokens, positions, kv, params).hidden_states.clone();
+  auto out = graph_exec->run(params, kv).hidden_states.clone();
   DcuSynchronize();
 
   EXPECT_EQ(out.size(0), kNumTokens);

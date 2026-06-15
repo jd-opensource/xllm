@@ -21,7 +21,7 @@ limitations under the License.
 #include <vector>
 
 namespace xllm {
-struct ModelInputParams;
+struct ForwardInput;
 struct DSACacheInfo;
 struct DSAGroupInfo;
 
@@ -34,7 +34,7 @@ struct DSAMetadata;
 class DSAMetadataBuilderMlu final {
  public:
   static AttentionMetadata build(
-      const ModelInputParams& params,
+      const ForwardInput& forward_input,
       const torch::Tensor& positions,
       const std::vector<std::vector<DSACacheInfo>>& caches_info,
       const std::vector<DSAGroupInfo>& group_infos,
@@ -43,7 +43,7 @@ class DSAMetadataBuilderMlu final {
  private:
   // Build DSA-specific fields into dsa_metadata.
   static void build_dsa_fields(
-      const ModelInputParams& params,
+      const ForwardInput& forward_input,
       const AttentionMetadata& attn_metadata,
       const torch::Tensor& positions,
       const std::vector<std::vector<DSACacheInfo>>& caches_info,
@@ -107,7 +107,7 @@ class DSAMetadataBuilderMlu final {
                              int64_t window_size);
 
   // Build input_positions, c4_pad_positions, c128_pad_positions.
-  static void build_positions(const ModelInputParams& params,
+  static void build_positions(const ForwardInput& forward_input,
                               int32_t batch_size,
                               DSAMetadata& dsa_metadata);
 };

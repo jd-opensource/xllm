@@ -194,51 +194,49 @@ CudaGraphPersistentParam::CudaGraphPersistentParam(
 }
 
 bool CudaGraphPersistentParam::can_use_llm_decode_fast_path(
-    const torch::Tensor& tokens,
-    const torch::Tensor& positions,
-    const ModelInputParams& params) const {
-  if (!params.meta.batch_forward_type.is_decode() ||
-      is_rec_multi_round_mode() || params.has_llmrec_params() ||
-      params.embedding.input_embedding.defined()) {
+    const ForwardInput& forward_input) const {
+  if (!forward_input.meta.batch_forward_type.is_decode() ||
+      is_rec_multi_round_mode() || forward_input.has_llmrec_params() ||
+      forward_input.embedding.input_embedding.defined()) {
     return false;
   }
-  return is_cuda_contiguous_int32_tensor(tokens) &&
-         is_cuda_contiguous_int32_tensor(positions) &&
+  return is_cuda_contiguous_int32_tensor(forward_input.token_ids) &&
+         is_cuda_contiguous_int32_tensor(forward_input.positions) &&
          is_cuda_contiguous_int32_tensor(
-             params.attention.device.new_cache_slots) &&
-         is_cuda_contiguous_int32_tensor(params.attention.device.kv_seq_lens) &&
+             forward_input.attention.device.new_cache_slots) &&
          is_cuda_contiguous_int32_tensor(
-             params.attention.device.paged_kv_indptr) &&
+             forward_input.attention.device.kv_seq_lens) &&
          is_cuda_contiguous_int32_tensor(
-             params.attention.device.paged_kv_indices) &&
+             forward_input.attention.device.paged_kv_indptr) &&
          is_cuda_contiguous_int32_tensor(
-             params.attention.device.paged_kv_last_page_len);
+             forward_input.attention.device.paged_kv_indices) &&
+         is_cuda_contiguous_int32_tensor(
+             forward_input.attention.device.paged_kv_last_page_len);
 }
 
 void CudaGraphPersistentParam::update_llm_decode_metadata_fast_path(
-    const torch::Tensor& tokens,
-    const torch::Tensor& positions,
-    const ModelInputParams& params,
+    const ForwardInput& forward_input,
     uint32_t padded_num_tokens,
     int64_t actual_batch_size,
     int64_t actual_num_tokens) {
   CHECK_GE(actual_batch_size, 0) << "actual_batch_size must be >= 0";
   CHECK_GE(actual_num_tokens, 0) << "actual_num_tokens must be >= 0";
   const int64_t actual_indices_size =
-      params.attention.device.paged_kv_indices.size(0);
+      forward_input.attention.device.paged_kv_indices.size(0);
   xllm::kernel::cuda::LlmDecodeMetadataUpdateParams update_params{
-      .src_tokens = tokens.data_ptr<int32_t>(),
-      .src_positions = positions.data_ptr<int32_t>(),
+      .src_tokens = forward_input.token_ids.data_ptr<int32_t>(),
+      .src_positions = forward_input.positions.data_ptr<int32_t>(),
       .src_new_cache_slots =
-          params.attention.device.new_cache_slots.data_ptr<int32_t>(),
+          forward_input.attention.device.new_cache_slots.data_ptr<int32_t>(),
       .src_kv_seq_lens =
-          params.attention.device.kv_seq_lens.data_ptr<int32_t>(),
+          forward_input.attention.device.kv_seq_lens.data_ptr<int32_t>(),
       .src_paged_kv_indptr =
-          params.attention.device.paged_kv_indptr.data_ptr<int32_t>(),
+          forward_input.attention.device.paged_kv_indptr.data_ptr<int32_t>(),
       .src_paged_kv_indices =
-          params.attention.device.paged_kv_indices.data_ptr<int32_t>(),
+          forward_input.attention.device.paged_kv_indices.data_ptr<int32_t>(),
       .src_paged_kv_last_page_len =
-          params.attention.device.paged_kv_last_page_len.data_ptr<int32_t>(),
+          forward_input.attention.device.paged_kv_last_page_len
+              .data_ptr<int32_t>(),
       .dst_tokens = persistent_tokens_.data_ptr<int32_t>(),
       .dst_positions = persistent_positions_.data_ptr<int32_t>(),
       .dst_new_cache_slots = persistent_new_cache_slots_.data_ptr<int32_t>(),
@@ -310,65 +308,62 @@ size_t CudaGraphPersistentParam::get_persistent_tensor_bytes() const {
   return total;
 }
 
-std::optional<ModelInputParams> CudaGraphPersistentParam::update(
-    const torch::Tensor& tokens,
+std::optional<ForwardInput> CudaGraphPersistentParam::update(
+    const ForwardInput& forward_input,
     const torch::Tensor& k_cache,
     const torch::Tensor& v_cache,
-    const torch::Tensor& positions,
-    const ModelInputParams& params,
     uint32_t padded_num_tokens,
-    bool return_capture_params) {
-  std::optional<ModelInputParams> params_for_capture;
-  if (return_capture_params) {
+    bool return_capture_input) {
+  const torch::Tensor& tokens = forward_input.token_ids;
+  const torch::Tensor& positions = forward_input.positions;
+  std::optional<ForwardInput> input_for_capture;
+  if (return_capture_input) {
     CHECK_GT(padded_num_tokens, 0)
-        << "padded_num_tokens must be > 0 when return_capture_params is true";
-    params_for_capture = std::make_optional<ModelInputParams>(params);
+        << "padded_num_tokens must be > 0 when return_capture_input is true";
+    input_for_capture = forward_input;
+    input_for_capture->token_ids = persistent_tokens(padded_num_tokens);
+    input_for_capture->positions = persistent_positions(padded_num_tokens);
   }
-  // Build attn_metadata with original model_input_params. So we can set actual
+  // Build attn_metadata with original model_input. So we can set actual
   // batch size in plan_info.
   std::shared_ptr<layer::AttentionMetadata> attn_metadata =
       std::make_shared<layer::AttentionMetadata>(
-          layer::AttentionMetadataBuilder::build(params, args_.enable_mla()));
+          layer::AttentionMetadataBuilder::build(forward_input,
+                                                 args_.enable_mla()));
   CHECK(attn_metadata) << "attn_metadata should not be null";
   attn_metadata->enable_cuda_graph = true;
-  auto build_capture_params_if_needed =
-      [&]() -> std::optional<ModelInputParams> {
-    if (!return_capture_params) {
+  auto build_capture_input_if_needed = [&]() -> std::optional<ForwardInput> {
+    if (!return_capture_input) {
       return std::nullopt;
     }
-    CHECK(params_for_capture.has_value())
-        << "params_for_capture should be initialized when "
-           "return_capture_params "
-           "is true";
-    if (params.embedding.input_embedding.defined()) {
-      params_for_capture->embedding.input_embedding =
+    CHECK(input_for_capture.has_value())
+        << "input_for_capture should be initialized when "
+           "return_capture_input is true";
+    if (forward_input.embedding.input_embedding.defined()) {
+      input_for_capture->embedding.input_embedding =
           persistent_embedding(padded_num_tokens);
     }
-    if (!params.embedding.linear_state_ids.empty()) {
-      params_for_capture->embedding.linear_state_ids =
-          params.embedding.linear_state_ids;
-      params_for_capture->embedding.linear_state_indices =
-          persistent_linear_state_indices(params.meta.num_sequences);
+    if (!forward_input.embedding.linear_state_ids.empty()) {
+      input_for_capture->embedding.linear_state_ids =
+          forward_input.embedding.linear_state_ids;
+      input_for_capture->embedding.linear_state_indices =
+          persistent_linear_state_indices(forward_input.meta.num_sequences);
     }
-    params_for_capture->attn_metadata = attn_metadata;
-    return params_for_capture;
+    input_for_capture->attn_metadata = attn_metadata;
+    return input_for_capture;
   };
 
   const uint32_t actual_num_tokens = tokens.size(0);
-  const int64_t actual_batch_size = params.meta.num_sequences;
+  const int64_t actual_batch_size = forward_input.meta.num_sequences;
   const bool use_llm_decode_fast_path =
-      can_use_llm_decode_fast_path(tokens, positions, params);
+      can_use_llm_decode_fast_path(forward_input);
 
   // Copy data from input parameters to persistent graph tensors
   if (use_llm_decode_fast_path) {
     VLOG(kGraphExecutorLogVerboseLevel)
         << "use fast path for LLM decode metadata update";
-    update_llm_decode_metadata_fast_path(tokens,
-                                         positions,
-                                         params,
-                                         padded_num_tokens,
-                                         actual_batch_size,
-                                         actual_num_tokens);
+    update_llm_decode_metadata_fast_path(
+        forward_input, padded_num_tokens, actual_batch_size, actual_num_tokens);
   } else {
     VLOG(kGraphExecutorLogVerboseLevel)
         << "copy_ tokens: src shape=" << tokens.sizes() << ", dst slice shape=["
@@ -400,25 +395,28 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     // kv_seq_lens is kv_cu_seq_lens in GPU Model.
     VLOG(kGraphExecutorLogVerboseLevel)
         << "copy_ q_seq_lens: src shape="
-        << params.attention.device.q_seq_lens.sizes() << ", dst slice shape=["
-        << actual_batch_size + 1 << "]";
+        << forward_input.attention.device.q_seq_lens.sizes()
+        << ", dst slice shape=[" << actual_batch_size + 1 << "]";
     q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size + 1)
-        .copy_(params.attention.device.q_seq_lens, /*non_blocking=*/true);
+        .copy_(forward_input.attention.device.q_seq_lens,
+               /*non_blocking=*/true);
 
     VLOG(kGraphExecutorLogVerboseLevel)
         << "copy_ kv_seq_lens: src shape="
-        << params.attention.device.kv_seq_lens.sizes() << ", dst slice shape=["
-        << actual_batch_size + 1 << "]";
+        << forward_input.attention.device.kv_seq_lens.sizes()
+        << ", dst slice shape=[" << actual_batch_size + 1 << "]";
     kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size + 1)
-        .copy_(params.attention.device.kv_seq_lens, /*non_blocking=*/true);
+        .copy_(forward_input.attention.device.kv_seq_lens,
+               /*non_blocking=*/true);
 
     VLOG(kGraphExecutorLogVerboseLevel)
         << "copy_ new_cache_slots: src shape="
-        << params.attention.device.new_cache_slots.sizes()
+        << forward_input.attention.device.new_cache_slots.sizes()
         << ", dst slice shape=[" << actual_num_tokens << "]";
     persistent_new_cache_slots_
         .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
-        .copy_(params.attention.device.new_cache_slots, /*non_blocking=*/true);
+        .copy_(forward_input.attention.device.new_cache_slots,
+               /*non_blocking=*/true);
     if (padded_num_tokens > actual_num_tokens) {
       persistent_new_cache_slots_
           .slice(/*dim=*/0,
@@ -441,15 +439,17 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   }
 
   if (!is_rec_multi_round_mode() &&
-      !params.embedding.linear_state_ids.empty()) {
-    if (params.embedding.linear_state_indices.defined()) {
+      !forward_input.embedding.linear_state_ids.empty()) {
+    if (forward_input.embedding.linear_state_indices.defined()) {
       persistent_linear_state_indices_
           .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-          .copy_(params.embedding.linear_state_indices, /*non_blocking=*/true);
+          .copy_(forward_input.embedding.linear_state_indices,
+                 /*non_blocking=*/true);
     } else {
       persistent_linear_state_indices_
           .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-          .copy_(torch::tensor(params.embedding.linear_state_ids, torch::kInt)
+          .copy_(torch::tensor(forward_input.embedding.linear_state_ids,
+                               torch::kInt)
                      .to(device_),
                  /*non_blocking=*/true);
     }
@@ -459,10 +459,11 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   // expanded to batch_size * beam_width rows while num_sequences still tracks
   // the logical request count. Use the tensor's real row count here.
   const int64_t actual_block_table_batch =
-      is_rec_multi_round_mode() ? params.attention.device.block_tables.size(0)
-                                : actual_batch_size;
+      is_rec_multi_round_mode()
+          ? forward_input.attention.device.block_tables.size(0)
+          : actual_batch_size;
   const int64_t actual_block_table_len =
-      params.attention.device.block_tables.size(1);
+      forward_input.attention.device.block_tables.size(1);
   torch::Tensor slice_persistent_block_tables =
       persistent_block_tables_
           .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_block_table_batch)
@@ -470,16 +471,17 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
 
   VLOG(kGraphExecutorLogVerboseLevel)
       << "copy_ block_tables: src shape="
-      << params.attention.device.block_tables.sizes()
+      << forward_input.attention.device.block_tables.sizes()
       << ", dst slice shape=" << slice_persistent_block_tables.sizes();
-  slice_persistent_block_tables.copy_(params.attention.device.block_tables,
-                                      /*non_blocking=*/true);
+  slice_persistent_block_tables.copy_(
+      forward_input.attention.device.block_tables,
+      /*non_blocking=*/true);
   if (!attn_metadata->is_prefill || args_.enable_mla()) {
     attn_metadata->block_table = slice_persistent_block_tables;
   }
 
   // Update persistent embedding from input_embedding if available
-  const auto& embedding = params.embedding.input_embedding;
+  const auto& embedding = forward_input.embedding.input_embedding;
   if (embedding.defined()) {
     const int64_t embedding_tokens = embedding.size(0);
 
@@ -504,7 +506,8 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   }
 
   const bool is_decode_with_llmrec =
-      params.meta.batch_forward_type.is_decode() && params.has_llmrec_params();
+      forward_input.meta.batch_forward_type.is_decode() &&
+      forward_input.has_llmrec_params();
   const bool use_two_stage_decode =
       !::xllm::RecConfig::get_instance().enable_xattention_one_stage() &&
       is_decode_with_llmrec;
@@ -539,19 +542,22 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   bool use_tensor_core =
       xllm::kernel::cuda::should_use_tensor_core(dtype, n_heads, n_kv_heads);
   if (use_two_stage_decode) {
-    if (params.attention.device.q_seq_lens.defined() &&
-        params.attention.device.q_seq_lens.numel() > 0) {
-      const int64_t q_numel = params.attention.device.q_seq_lens.numel();
+    if (forward_input.attention.device.q_seq_lens.defined() &&
+        forward_input.attention.device.q_seq_lens.numel() > 0) {
+      const int64_t q_numel = forward_input.attention.device.q_seq_lens.numel();
       q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/q_numel)
-          .copy_(params.attention.device.q_seq_lens, /*non_blocking=*/true);
+          .copy_(forward_input.attention.device.q_seq_lens,
+                 /*non_blocking=*/true);
       attn_metadata->q_cu_seq_lens = q_seq_lens(/*actual_batch_size=*/q_numel);
     }
 
-    if (params.attention.device.kv_seq_lens.defined() &&
-        params.attention.device.kv_seq_lens.numel() > 0) {
-      const int64_t kv_numel = params.attention.device.kv_seq_lens.numel();
+    if (forward_input.attention.device.kv_seq_lens.defined() &&
+        forward_input.attention.device.kv_seq_lens.numel() > 0) {
+      const int64_t kv_numel =
+          forward_input.attention.device.kv_seq_lens.numel();
       kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/kv_numel)
-          .copy_(params.attention.device.kv_seq_lens, /*non_blocking=*/true);
+          .copy_(forward_input.attention.device.kv_seq_lens,
+                 /*non_blocking=*/true);
       attn_metadata->kv_cu_seq_lens =
           kv_seq_lens(/*actual_batch_size=*/kv_numel);
       if (kv_numel > 1) {
@@ -565,7 +571,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     attn_metadata->qo_indptr = torch::Tensor();
 
     // Update plan_info if attn_metadata exists and enable_cuda_graph is true.
-    const auto& llmrec_params = *params.llmrec_params();
+    const auto& llmrec_params = *forward_input.llmrec_params();
     auto cache = attn_metadata->xattention_two_stage_decode_cache.value();
     CHECK(cache.q_cu_seq_lens_shared.defined())
         << "q_cu_seq_lens_shared must be initialized in rec worker";
@@ -676,7 +682,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
         /*causal=*/false,
         use_tensor_core,
         /*is_shared_stage_plan*/ false);
-    return build_capture_params_if_needed();
+    return build_capture_input_if_needed();
   }
   if (use_llm_decode_fast_path) {
     const uint32_t slot_mapping_tokens =
@@ -697,15 +703,15 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     attn_metadata->qo_indptr =
         persistent_decode_qo_indptr(static_cast<uint32_t>(actual_batch_size));
   } else {
-    CHECK(params.attention.device.paged_kv_indptr.defined())
+    CHECK(forward_input.attention.device.paged_kv_indptr.defined())
         << "paged_kv_indptr should not be null";
     VLOG(kGraphExecutorLogVerboseLevel)
         << "copy_ paged_kv_indptr: src shape="
-        << params.attention.device.paged_kv_indptr.sizes()
+        << forward_input.attention.device.paged_kv_indptr.sizes()
         << ", dst slice shape=[" << (actual_batch_size + 1) << "]";
     if (VLOG_IS_ON(kGraphExecutorLogVerboseLevel)) {
       torch::Tensor paged_kv_indptr_cpu =
-          params.attention.device.paged_kv_indptr.to(torch::kCPU);
+          forward_input.attention.device.paged_kv_indptr.to(torch::kCPU);
       VLOG(kGraphExecutorLogVerboseLevel)
           << "copy_ paged_kv_indptr: src values=" << paged_kv_indptr_cpu;
     }
@@ -713,31 +719,33 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
         .slice(/*dim=*/0,
                /*start=*/0,
                /*end=*/actual_batch_size + 1)
-        .copy_(params.attention.device.paged_kv_indptr, /*non_blocking=*/true);
-    CHECK(params.attention.device.paged_kv_indices.defined())
+        .copy_(forward_input.attention.device.paged_kv_indptr,
+               /*non_blocking=*/true);
+    CHECK(forward_input.attention.device.paged_kv_indices.defined())
         << "paged_kv_indices should not be null";
     const int64_t actual_indices_size =
-        params.attention.device.paged_kv_indices.size(0);
+        forward_input.attention.device.paged_kv_indices.size(0);
     VLOG(kGraphExecutorLogVerboseLevel)
         << "copy_ paged_kv_indices: src shape="
-        << params.attention.device.paged_kv_indices.sizes()
+        << forward_input.attention.device.paged_kv_indices.sizes()
         << ", dst slice shape=[" << actual_indices_size << "]";
     persistent_paged_kv_indices_
         .slice(/*dim=*/0,
                /*start=*/0,
                /*end=*/actual_indices_size)
-        .copy_(params.attention.device.paged_kv_indices, /*non_blocking=*/true);
-    CHECK(params.attention.device.paged_kv_last_page_len.defined())
+        .copy_(forward_input.attention.device.paged_kv_indices,
+               /*non_blocking=*/true);
+    CHECK(forward_input.attention.device.paged_kv_last_page_len.defined())
         << "paged_kv_last_page_len should not be null";
     VLOG(kGraphExecutorLogVerboseLevel)
         << "copy_ paged_kv_last_page_len: src shape="
-        << params.attention.device.paged_kv_last_page_len.sizes()
+        << forward_input.attention.device.paged_kv_last_page_len.sizes()
         << ", dst slice shape=[" << actual_batch_size << "]";
     persistent_paged_kv_last_page_len_
         .slice(/*dim=*/0,
                /*start=*/0,
                /*end=*/actual_batch_size)
-        .copy_(params.attention.device.paged_kv_last_page_len,
+        .copy_(forward_input.attention.device.paged_kv_last_page_len,
                /*non_blocking=*/true);
     attn_metadata->kv_seq_lens =
         torch::diff(kv_seq_lens(/*actual_batch_size=*/actual_batch_size + 1));
@@ -823,22 +831,21 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
                 : 0);
   }
 
-  // Return ModelInputParams with persistent buffer references if requested
-  return build_capture_params_if_needed();
+  // Return ForwardInput with persistent buffer references if requested
+  return build_capture_input_if_needed();
 }
 
 // CudaGraph implementation
 bool CudaGraph::capture(CausalLM* model,
                         const ModelArgs& args,
                         const runtime::Options& options,
-                        const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        const ModelInputParams& params,
+                        const ForwardInput& forward_input,
                         std::vector<KVCache>& kv_cache,
                         uint32_t bucket_num_tokens,
                         const at::cuda::MempoolId_t& pool,
                         TorchMemPool* pool_ptr) {
   padded_num_tokens_ = bucket_num_tokens;
+  const torch::Tensor& tokens = forward_input.token_ids;
   const uint32_t actual_num_tokens = tokens.size(0);
   CHECK_GE(padded_num_tokens_, actual_num_tokens)
       << "bucket_num_tokens >= actual_num_tokens";
@@ -854,7 +861,7 @@ bool CudaGraph::capture(CausalLM* model,
             device_index_);
     capture_lock_guard.emplace(capture_lock);
   }
-  // Use the returned ModelInputParams for graph capture
+  // Use the returned ForwardInput for graph capture
   // Always use capture stream for plan/update + capture + forward.
   at::cuda::CUDAStream original_stream =
       at::cuda::getCurrentCUDAStream(device_index_);
@@ -876,19 +883,16 @@ bool CudaGraph::capture(CausalLM* model,
       << "CUDA graph capture requires at least one full-attention KV cache";
   const torch::Tensor& k_cache = full_attention_cache->first;
   const torch::Tensor& v_cache = full_attention_cache->second;
-  auto graph_params_opt =
-      persistent_param_.update(tokens,
+  auto graph_input_opt =
+      persistent_param_.update(forward_input,
                                k_cache,
                                v_cache,
-                               positions,
-                               params,
                                padded_num_tokens_,
-                               /*return_capture_params=*/true);
+                               /*return_capture_input=*/true);
 
-  // Use the returned ModelInputParams for graph capture
-  CHECK(graph_params_opt.has_value())
-      << "update() should return ModelInputParams when "
-         "return_capture_params=true";
+  // Use the returned ForwardInput for graph capture
+  CHECK(graph_input_opt.has_value())
+      << "update() should return ForwardInput when return_capture_input=true";
 
   LOG(INFO) << "CUDA graph capture begin, bucket_num_tokens: "
             << bucket_num_tokens << ", actual_num_tokens: " << actual_num_tokens
@@ -899,10 +903,8 @@ bool CudaGraph::capture(CausalLM* model,
     // Warmup: execute forward once without capture to initialize cuBLAS handles
     // and other CUDA resources. This is necessary because these resources
     // cannot be created during CUDA graph capture mode.
-    model->forward(persistent_param_.persistent_tokens(padded_num_tokens_),
-                   persistent_param_.persistent_positions(padded_num_tokens_),
-                   kv_cache,
-                   graph_params_opt.value());
+    ForwardInput warmup_input = graph_input_opt.value();
+    model->forward(warmup_input, kv_cache);
 
     // MemPoolContext has been deprecated in torch >= 2.8
 #if TORCH_VERSION_MAJOR <= 2 && TORCH_VERSION_MINOR <= 7
@@ -918,11 +920,8 @@ bool CudaGraph::capture(CausalLM* model,
     GlobalCaptureInstance::get_instance().begin_capture(pool);
 
     // Execute forward pass - attention operations will be captured separately
-    auto forward_result = model->forward(
-        persistent_param_.persistent_tokens(padded_num_tokens_),
-        persistent_param_.persistent_positions(padded_num_tokens_),
-        kv_cache,
-        graph_params_opt.value());
+    ForwardInput graph_input = graph_input_opt.value();
+    auto forward_result = model->forward(graph_input, kv_cache);
 
     // Store result in persistent buffer
     persistent_param_.set_hidden_states(forward_result.hidden_states);
@@ -970,11 +969,8 @@ bool CudaGraph::capture(CausalLM* model,
     graph_.capture_begin(pool, cudaStreamCaptureModeThreadLocal);
 
     // Execute forward pass - CUDA graph will capture this
-    auto forward_result = model->forward(
-        persistent_param_.persistent_tokens(padded_num_tokens_),
-        persistent_param_.persistent_positions(padded_num_tokens_),
-        kv_cache,
-        graph_params_opt.value());
+    ForwardInput graph_input = graph_input_opt.value();
+    auto forward_result = model->forward(graph_input, kv_cache);
 
     // Store result in persistent buffer
     persistent_param_.set_hidden_states(forward_result.hidden_states);
@@ -1001,10 +997,9 @@ bool CudaGraph::capture(CausalLM* model,
   return true;
 }
 
-ModelOutput CudaGraph::replay(const torch::Tensor& tokens,
-                              const torch::Tensor& positions,
-                              std::vector<KVCache>& kv_cache,
-                              const ModelInputParams& params) {
+ModelOutput CudaGraph::replay(const ForwardInput& forward_input,
+                              std::vector<KVCache>& kv_cache) {
+  const torch::Tensor& tokens = forward_input.token_ids;
   const uint32_t actual_num_tokens = tokens.size(0);
   CHECK_LE(actual_num_tokens, padded_num_tokens_)
       << "num_tokens mismatch: expected <= " << padded_num_tokens_ << ", got "
@@ -1032,51 +1027,45 @@ ModelOutput CudaGraph::replay(const torch::Tensor& tokens,
 
   if (is_piecewise_) {
     // Piecewise replay mode (for prefill)
-    // Need to get updated params with attn_metadata for attention replay
-    auto updated_params_opt =
-        persistent_param_.update(tokens,
+    // Need to get updated ForwardInput with attn_metadata for attention replay.
+    auto updated_input_opt =
+        persistent_param_.update(forward_input,
                                  k_cache,
                                  v_cache,
-                                 positions,
-                                 params,
                                  padded_num_tokens_,
-                                 /*return_capture_params=*/true);
-    CHECK(updated_params_opt.has_value())
-        << "update() should return ModelInputParams for piecewise replay";
+                                 /*return_capture_input=*/true);
+    CHECK(updated_input_opt.has_value())
+        << "update() should return ForwardInput for piecewise replay";
 
-    const auto& updated_params = updated_params_opt.value();
+    const auto& updated_input = updated_input_opt.value();
     CHECK(piecewise_graph_.num_runners() > 0)
         << "Piecewise graph must have attention runners";
-    CHECK(updated_params.attn_metadata)
+    CHECK(updated_input.attn_metadata)
         << "attn_metadata is required for piecewise replay";
-    CHECK(updated_params.attn_metadata->plan_info)
+    CHECK(updated_input.attn_metadata->plan_info)
         << "plan_info is required for piecewise replay";
 
     VLOG(kGraphExecutorLogVerboseLevel)
         << "CudaGraph::replay() piecewise replay with uri="
-        << updated_params.attn_metadata->plan_info->uri
-        << ", plan_info.defined="
-        << updated_params.attn_metadata->plan_info->plan_info.defined();
+        << updated_input.attn_metadata->plan_info->uri << ", plan_info.defined="
+        << updated_input.attn_metadata->plan_info->plan_info.defined();
 
     // Build AttentionReplayParams from updated attn_metadata
     ::xllm::kernel::cuda::AttentionReplayParams replay_params;
     replay_params.actual_num_tokens = actual_num_tokens;
-    replay_params.plan_info =
-        updated_params.attn_metadata->plan_info->plan_info;
-    replay_params.q_cu_seq_lens = updated_params.attn_metadata->q_cu_seq_lens;
-    replay_params.kv_cu_seq_lens = updated_params.attn_metadata->kv_cu_seq_lens;
+    replay_params.plan_info = updated_input.attn_metadata->plan_info->plan_info;
+    replay_params.q_cu_seq_lens = updated_input.attn_metadata->q_cu_seq_lens;
+    replay_params.kv_cu_seq_lens = updated_input.attn_metadata->kv_cu_seq_lens;
 
     // Replay piecewise graphs and attention runners
     piecewise_graph_.replay(replay_params);
   } else {
     // Normal replay mode (for decode)
-    persistent_param_.update(tokens,
+    persistent_param_.update(forward_input,
                              k_cache,
                              v_cache,
-                             positions,
-                             params,
                              padded_num_tokens_,
-                             /*return_capture_params=*/false);
+                             /*return_capture_input=*/false);
     graph_.replay();
   }
 
@@ -1382,12 +1371,11 @@ ModelOutput CudaGraphExecutorImpl::attach_aux_hidden_states_if_needed(
   return ModelOutput(hidden_states);
 }
 
-ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
-                                       const torch::Tensor& positions,
-                                       std::vector<KVCache>& kv_caches,
-                                       const ModelInputParams& params) {
-  const bool is_prefill = params.meta.batch_forward_type.is_prefill();
-  const bool is_decode = params.meta.batch_forward_type.is_decode();
+ModelOutput CudaGraphExecutorImpl::run(const ForwardInput& forward_input,
+                                       std::vector<KVCache>& kv_caches) {
+  const torch::Tensor& tokens = forward_input.token_ids;
+  const bool is_prefill = forward_input.meta.batch_forward_type.is_prefill();
+  const bool is_decode = forward_input.meta.batch_forward_type.is_decode();
 
   // Get actual num_tokens from tokens shape
   const uint32_t n_tokens = tokens.size(/*dim=*/0);
@@ -1405,7 +1393,7 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
           << " exceeds max_tokens_for_graph_mode ("
           << max_tokens_for_graph_mode_ << "), falling back to eager mode";
       COUNTER_INC(num_model_execution_total_eager);
-      return model_->forward(tokens, positions, kv_caches, params);
+      return model_->forward(forward_input, kv_caches);
     }
 
     // Check if piecewise graph exists for this bucket
@@ -1414,7 +1402,7 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
       // Replay existing piecewise graph
       VLOG(kGraphExecutorLogVerboseLevel)
           << "CudaGraphExecutorImpl::run() in prefill piecewise replay mode";
-      auto result = it->second->replay(tokens, positions, kv_caches, params);
+      auto result = it->second->replay(forward_input, kv_caches);
       return attach_aux_hidden_states_if_needed(result.hidden_states, n_tokens);
     }
 
@@ -1439,9 +1427,7 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
     bool capture_success = graph->capture(model_,
                                           args_,
                                           options_,
-                                          tokens,
-                                          positions,
-                                          params,
+                                          forward_input,
                                           kv_caches,
                                           bucket_num_tokens,
                                           mem_pool,
@@ -1459,8 +1445,8 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
 
       // Run replay after capture so first request uses same execution path as
       // subsequent requests.
-      auto result = prefill_graphs_[bucket_num_tokens]->replay(
-          tokens, positions, kv_caches, params);
+      auto result =
+          prefill_graphs_[bucket_num_tokens]->replay(forward_input, kv_caches);
       return attach_aux_hidden_states_if_needed(result.hidden_states, n_tokens);
     }
 
@@ -1478,21 +1464,22 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
   // Prefill without piecewise graph: use eager mode
   if (is_prefill) {
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(forward_input, kv_caches);
   }
 
   // Decode phase with full graph
   if (is_decode) {
     // Check if conditions are suitable for graph execution (replay or capture)
     const auto max_seq_len = args_.max_position_embeddings();
-    const bool seq_len_supported = params.meta.kv_max_seq_len <= max_seq_len;
+    const bool seq_len_supported =
+        forward_input.meta.kv_max_seq_len <= max_seq_len;
 
     // Early return if conditions are not suitable for graph operations
     if (!seq_len_supported) {
       LOG(WARNING) << "Not suitable for CUDA graph operations, falling back to "
                       "eager mode.";
       COUNTER_INC(num_model_execution_total_eager);
-      return model_->forward(tokens, positions, kv_caches, params);
+      return model_->forward(forward_input, kv_caches);
     }
 
     // Check if captured graph exists for this bucket num_tokens
@@ -1501,7 +1488,7 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
       // Replay the existing graph
       VLOG(kGraphExecutorLogVerboseLevel)
           << "CudaGraphExecutorImpl::run() in decode replay mode";
-      auto result = it->second->replay(tokens, positions, kv_caches, params);
+      auto result = it->second->replay(forward_input, kv_caches);
       return attach_aux_hidden_states_if_needed(result.hidden_states, n_tokens);
     }
 
@@ -1525,9 +1512,7 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
     bool capture_success = graph->capture(model_,
                                           args_,
                                           options_,
-                                          tokens,
-                                          positions,
-                                          params,
+                                          forward_input,
                                           kv_caches,
                                           bucket_num_tokens,
                                           mem_pool,
@@ -1545,8 +1530,8 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
 
       // Run replay after capture so first request uses same execution path as
       // subsequent requests.
-      auto result = graphs_[bucket_num_tokens]->replay(
-          tokens, positions, kv_caches, params);
+      auto result =
+          graphs_[bucket_num_tokens]->replay(forward_input, kv_caches);
       return attach_aux_hidden_states_if_needed(result.hidden_states, n_tokens);
     }
 
@@ -1563,7 +1548,7 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
   LOG(ERROR) << "Failed to capture CUDA graph for bucket num_tokens: "
              << bucket_num_tokens;
   COUNTER_INC(num_model_execution_total_eager);
-  return model_->forward(tokens, positions, kv_caches, params);
+  return model_->forward(forward_input, kv_caches);
 }
 
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]

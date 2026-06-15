@@ -28,7 +28,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "core/framework/config/model_config.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
 #include "options.h"
@@ -54,22 +54,16 @@ bool EmbedVLMWorkerImpl::init_model(ModelContext& context) {
 }
 
 std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
-    const ForwardInput& input) {
+    const ForwardInput& forward_input) {
   torch::DeviceGuard device_guard(device_);
   auto ret = device_.synchronize_default_stream();
 
   Timer timer;
 
-  // TODO to adapt multi stream parallel later, just use [0] temporarily
-  // all tensors should be on the same device as model
-  auto flatten_tokens = input.token_ids.to(device_);
-  auto flatten_positions = input.positions.to(device_);
-  auto params = input.input_params.to(device_);
-  auto sampling_params = input.sampling_params.to(device_, dtype_);
+  auto& sampling_params = forward_input.sampling_params;
 
   // call model executor forward to get hidden states
-  auto model_output = model_executor_->forward(
-      flatten_tokens, flatten_positions, kv_caches_, params);
+  auto model_output = model_executor_->forward(forward_input, kv_caches_);
   auto hidden_states = model_output.hidden_states;
   ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
@@ -82,7 +76,7 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   ForwardOutput output;
   SampleOutput sample_output;
   if (sampling_params.selected_token_idxes.defined() &&
-      input.sampling_params.is_embeddings) {
+      forward_input.sampling_params.is_embeddings) {
     auto embeddings =
         model_->pooler(hidden_states, sampling_params.selected_token_idxes);
     sample_output.embeddings = embeddings;
@@ -90,7 +84,7 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
     // so that the user could receive embeddings of images and texts
     if (::xllm::ModelConfig::get_instance()
             .enable_return_mm_full_embeddings()) {
-      auto q_seq_len_vec = input.input_params.attention.host.q_seq_lens;
+      auto q_seq_len_vec = forward_input.attention.host.q_seq_lens;
       sample_output.mm_embeddings.reserve(q_seq_len_vec.size());
       int32_t token_start_idx = 0;
       for (auto seq_len : q_seq_len_vec) {

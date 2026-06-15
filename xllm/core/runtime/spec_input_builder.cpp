@@ -20,7 +20,7 @@ limitations under the License.
 #include <algorithm>
 #include <limits>
 
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "runtime/forward_params.h"
 #include "util/tensor_helper.h"
 
@@ -40,16 +40,16 @@ Slice<int32_t> tensor_slice(const torch::Tensor& tensor) {
   return {tensor.data_ptr<int32_t>(), static_cast<size_t>(tensor.numel())};
 }
 
-Slice<int32_t> get_token_ids(const ForwardInput& input) {
-  return tensor_slice(input.token_ids_host);
+Slice<int32_t> get_token_ids(const ForwardInput& forward_input) {
+  return tensor_slice(forward_input.token_ids_host);
 }
 
-Slice<int32_t> get_positions(const ForwardInput& input) {
-  return tensor_slice(input.positions_host);
+Slice<int32_t> get_positions(const ForwardInput& forward_input) {
+  return tensor_slice(forward_input.positions_host);
 }
 
-Slice<int32_t> get_kv_seq_lens(const ForwardInput& input) {
-  return input.input_params.attention.host.kv_seq_lens;
+Slice<int32_t> get_kv_seq_lens(const ForwardInput& forward_input) {
+  return forward_input.attention.host.kv_seq_lens;
 }
 
 // Resolves a row token from either input token_ids[seq_id] or row.token_id.
@@ -199,27 +199,39 @@ void update_kv_seq_lens_and_max(std::vector<int32_t>& kv_seq_lens_vec,
   append_seq_len_by_layout(kv_seq_lens_vec, kv_len);
 }
 
-DecodeRowContext make_decode_row_context(const ForwardInput& input) {
+int32_t get_q_seq_len_by_layout(const AttentionHostInput& attention,
+                                int32_t seq_idx) {
+#if defined(USE_NPU)
+  CHECK_LT(seq_idx, static_cast<int32_t>(attention.q_seq_lens.size()))
+      << "seq_idx out of range";
+  return attention.q_seq_lens[seq_idx];
+#else
+  CHECK_LT(seq_idx + 1, static_cast<int32_t>(attention.q_seq_lens.size()))
+      << "seq_idx out of range";
+  return attention.q_seq_lens[seq_idx + 1] - attention.q_seq_lens[seq_idx];
+#endif
+}
+
+DecodeRowContext make_decode_row_context(const ForwardInput& forward_input) {
   DecodeRowContext ctx;
-  ctx.num_sequences = input.input_params.meta.num_sequences;
+  ctx.num_sequences = forward_input.meta.num_sequences;
   CHECK_GE(ctx.num_sequences, 0) << "invalid num_sequences";
 
-  if (input.token_ids_host.defined()) {
-    ctx.token_ids = get_token_ids(input);
+  if (forward_input.token_ids_host.defined()) {
+    ctx.token_ids = get_token_ids(forward_input);
   }
-  CHECK(input.positions_host.defined())
+  CHECK(forward_input.positions_host.defined())
       << "positions_host must be defined for decode row build";
-  ctx.positions = get_positions(input);
+  ctx.positions = get_positions(forward_input);
   CHECK_GE(static_cast<int32_t>(ctx.positions.size()), ctx.num_sequences)
       << "positions size is smaller than num_sequences, positions_size="
       << ctx.positions.size() << ", num_sequences=" << ctx.num_sequences;
 
-  ctx.kv_seq_lens = get_kv_seq_lens(input);
-  if (!input.input_params.multi_block_tables.empty()) {
+  ctx.kv_seq_lens = get_kv_seq_lens(forward_input);
+  if (!forward_input.multi_block_tables.empty()) {
     ctx.multi_block_tables_owner.reserve(
-        input.input_params.multi_block_tables.size());
-    for (const torch::Tensor& block_table :
-         input.input_params.multi_block_tables) {
+        forward_input.multi_block_tables.size());
+    for (const torch::Tensor& block_table : forward_input.multi_block_tables) {
       torch::Tensor cpu_block_table = block_table.device().is_cpu()
                                           ? block_table
                                           : block_table.to(torch::kCPU);
@@ -229,10 +241,10 @@ DecodeRowContext make_decode_row_context(const ForwardInput& input) {
     return ctx;
   }
 
-  CHECK(input.input_params.attention.host.block_tables.defined())
+  CHECK(forward_input.attention.host.block_tables.defined())
       << "host block_tables must be defined for decode row build";
   ctx.block_tables_owner =
-      input.input_params.attention.host.block_tables.contiguous();
+      forward_input.attention.host.block_tables.contiguous();
   CHECK_EQ(ctx.block_tables_owner.dim(), 2)
       << "block_tables must be 2D, got " << ctx.block_tables_owner.sizes();
   CHECK_LE(ctx.num_sequences, ctx.block_tables_owner.size(0))
@@ -369,62 +381,63 @@ void append_decode_row_from_last_step(const DecodeRowContext& ctx,
   append_decode_row(ctx, row, block_size, buf);
 }
 
-torch::Tensor build_q_cu_seq_lens_tensor(const ModelInputParams& params,
+torch::Tensor build_q_cu_seq_lens_tensor(const ForwardInput& forward_input,
                                          torch::Device device,
                                          bool include_leading_zero) {
-  CHECK_EQ(params.attention.host.q_seq_lens.empty(),
-           params.attention.host.q_cu_seq_lens.empty())
+  CHECK_EQ(forward_input.attention.host.q_seq_lens.empty(),
+           forward_input.attention.host.q_cu_seq_lens.empty())
       << "q_seq_lens and q_cu_seq_lens must be provided together";
   if (!include_leading_zero) {
-    return torch::tensor(params.attention.host.q_cu_seq_lens,
+    return torch::tensor(forward_input.attention.host.q_cu_seq_lens,
                          torch::dtype(torch::kInt).device(device));
   }
   std::vector<int32_t> q_cu_seq_lens_vec;
-  q_cu_seq_lens_vec.reserve(params.meta.num_sequences + 1);
+  q_cu_seq_lens_vec.reserve(forward_input.meta.num_sequences + 1);
   q_cu_seq_lens_vec.emplace_back(0);
-  for (int32_t i = 0; i < params.meta.num_sequences; ++i) {
-    q_cu_seq_lens_vec.emplace_back(q_cu_seq_lens_vec.back() +
-                                   params.get_q_seq_len(i));
+  for (int32_t i = 0; i < forward_input.meta.num_sequences; ++i) {
+    q_cu_seq_lens_vec.emplace_back(
+        q_cu_seq_lens_vec.back() +
+        get_q_seq_len_by_layout(forward_input.attention.host, i));
   }
   return torch::tensor(q_cu_seq_lens_vec,
                        torch::dtype(torch::kInt).device(device));
 }
 
-void update_input_params(ModelInputParams& input_params,
-                         DecodeBuildBuffers& buf,
-                         int32_t q_max_seq_len,
-                         std::vector<int32_t> q_seq_lens_vec,
-                         std::vector<int32_t> q_cu_seq_lens_vec,
-                         int32_t kv_max_seq_len,
-                         std::vector<int32_t> kv_seq_lens_vec,
-                         bool update_block_tables) {
+void update_input(BatchInputMeta& meta,
+                  AttentionInput& attention,
+                  std::vector<torch::Tensor>& multi_block_tables,
+                  DecodeBuildBuffers& buf,
+                  int32_t q_max_seq_len,
+                  std::vector<int32_t> q_seq_lens_vec,
+                  std::vector<int32_t> q_cu_seq_lens_vec,
+                  int32_t kv_max_seq_len,
+                  std::vector<int32_t> kv_seq_lens_vec,
+                  bool update_block_tables) {
   CHECK_EQ(q_seq_lens_vec.empty(), q_cu_seq_lens_vec.empty())
       << "q_seq_lens and q_cu_seq_lens must be provided together";
-  input_params.meta.q_max_seq_len = q_max_seq_len;
-  input_params.attention.host.q_seq_lens = std::move(q_seq_lens_vec);
-  input_params.attention.host.q_cu_seq_lens = std::move(q_cu_seq_lens_vec);
-  input_params.meta.kv_max_seq_len = kv_max_seq_len;
-  input_params.attention.host.kv_seq_lens = std::move(kv_seq_lens_vec);
-  input_params.attention.host.new_cache_slots =
-      std::move(buf.out_new_cache_slots);
+  meta.q_max_seq_len = q_max_seq_len;
+  attention.host.q_seq_lens = std::move(q_seq_lens_vec);
+  attention.host.q_cu_seq_lens = std::move(q_cu_seq_lens_vec);
+  meta.kv_max_seq_len = kv_max_seq_len;
+  attention.host.kv_seq_lens = std::move(kv_seq_lens_vec);
+  attention.host.new_cache_slots = std::move(buf.out_new_cache_slots);
   if (update_block_tables) {
     if (!buf.out_multi_block_tables.empty()) {
-      input_params.multi_block_tables.clear();
-      input_params.multi_block_tables.reserve(
-          buf.out_multi_block_tables.size());
+      multi_block_tables.clear();
+      multi_block_tables.reserve(buf.out_multi_block_tables.size());
       for (std::vector<std::vector<int32_t>>& manager_tables :
            buf.out_multi_block_tables) {
         pad_2d_vector(manager_tables, /*pad_value=*/-1);
-        input_params.multi_block_tables.emplace_back(
+        multi_block_tables.emplace_back(
             create_2d_tensor(manager_tables, torch::kInt));
       }
-      input_params.attention.host.block_tables = torch::Tensor();
+      attention.host.block_tables = torch::Tensor();
     } else {
-      input_params.attention.host.block_tables =
+      attention.host.block_tables =
           create_flat_2d_tensor(buf.out_block_tables,
                                 buf.out_block_table_rows,
                                 buf.out_block_table_stride);
-      input_params.multi_block_tables.clear();
+      multi_block_tables.clear();
     }
   }
 }

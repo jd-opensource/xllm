@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "framework/sampling/rejection_sampler.h"
+#include "runtime/forward_params.h"
 #include "runtime/llm_worker_impl.h"
 #include "runtime/options.h"
 
@@ -88,11 +89,11 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   };
 
   // prepare work before model execution
-  void prepare_work_before_execute(const ForwardInput& input,
+  void prepare_work_before_execute(const ForwardInput& forward_input,
                                    ForwardInput& new_input) override;
 
   // Common step dispatch: prefill / decode / empty
-  std::optional<ForwardOutput> step(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step(const ForwardInput& forward_input) override;
 
   ForwardInput update_input_by_last_step_output(ForwardInput& inputs) override;
 
@@ -114,7 +115,7 @@ class SpeculativeWorkerImpl : public WorkerImpl {
  protected:
   // Algorithm-specific virtual methods for subclasses to implement
   virtual std::optional<ForwardOutput> step_prefill(
-      const ForwardInput& input) = 0;
+      const ForwardInput& forward_input) = 0;
   virtual std::optional<ForwardOutput> step_decode(
       const ForwardInput& inputs) = 0;
   virtual std::optional<ForwardOutput> step_empty(

@@ -32,7 +32,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/multimodal/mm_visitor.h"
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
 #include "models/vlm/mposition/mposition.h"
@@ -895,87 +895,86 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   }
   forward_input.positions_host = forward_input.positions;
 
-  auto& input_params = forward_input.input_params;
-  input_params.meta.batch_forward_type = state_.batch_forward_type;
-  input_params.meta.num_sequences = static_cast<int32_t>(num_sequences_);
-  input_params.meta.kv_max_seq_len = state_.max_seq_len;
-  input_params.meta.q_max_seq_len = state_.q_max_seq_len;
-  input_params.attention.device.kv_seq_lens =
+  forward_input.meta.batch_forward_type = state_.batch_forward_type;
+  forward_input.meta.num_sequences = static_cast<int32_t>(num_sequences_);
+  forward_input.meta.kv_max_seq_len = state_.max_seq_len;
+  forward_input.meta.q_max_seq_len = state_.q_max_seq_len;
+  forward_input.attention.device.kv_seq_lens =
       torch::tensor(state_.seq_lens, torch::kInt);
-  input_params.attention.device.kv_cache_tokens_nums =
+  forward_input.attention.device.kv_cache_tokens_nums =
       torch::tensor(state_.kv_cache_tokens_nums, torch::kInt);
-  input_params.attention.device.q_seq_lens =
+  forward_input.attention.device.q_seq_lens =
       torch::tensor(state_.q_seq_lens, torch::kInt);
   std::vector<int32_t> q_cu_seq_lens =
       build_q_cu_seq_lens_vec(state_.q_seq_lens);
-  input_params.attention.device.q_cu_seq_lens =
+  forward_input.attention.device.q_cu_seq_lens =
       torch::tensor(q_cu_seq_lens, torch::kInt);
-  input_params.attention.host.kv_cache_tokens_nums =
+  forward_input.attention.host.kv_cache_tokens_nums =
       std::move(state_.kv_cache_tokens_nums);
-  input_params.attention.host.kv_seq_lens = std::move(state_.seq_lens);
-  input_params.attention.host.q_cu_seq_lens = std::move(q_cu_seq_lens);
-  input_params.attention.host.q_seq_lens = std::move(state_.q_seq_lens);
-  input_params.attention.device.new_cache_slots =
+  forward_input.attention.host.kv_seq_lens = std::move(state_.seq_lens);
+  forward_input.attention.host.q_cu_seq_lens = std::move(q_cu_seq_lens);
+  forward_input.attention.host.q_seq_lens = std::move(state_.q_seq_lens);
+  forward_input.attention.device.new_cache_slots =
       torch::tensor(state_.new_token_slot_ids, torch::kInt);
 
   // for flashinfer
-  input_params.attention.device.paged_kv_indptr =
+  forward_input.attention.device.paged_kv_indptr =
       torch::tensor(state_.paged_kv_indptr, torch::kInt);
-  input_params.attention.device.paged_kv_indices =
+  forward_input.attention.device.paged_kv_indices =
       torch::tensor(state_.paged_kv_indices, torch::kInt);
-  input_params.attention.device.paged_kv_last_page_len =
+  forward_input.attention.device.paged_kv_last_page_len =
       torch::tensor(state_.paged_kv_last_page_len, torch::kInt);
 
   // Setup multimodal data
-  input_params.multimodal.mm_data.batch(mm_data_vec_);
+  forward_input.multimodal.mm_data.batch(mm_data_vec_);
 
   // Setup block tables
   util::pad_2d_vector(state_.block_tables_vec, /*pad_value=*/0);
-  input_params.attention.device.block_tables =
+  forward_input.attention.device.block_tables =
       create_2d_tensor(state_.block_tables_vec, torch::kInt);
-  input_params.attention.host.block_tables =
-      input_params.attention.device.block_tables;
+  forward_input.attention.host.block_tables =
+      forward_input.attention.device.block_tables;
 
   // Setup multi block tables for DeepSeek V4
   for (auto& mgr_tables : state_.multi_block_tables) {
     util::pad_2d_vector(mgr_tables, /*pad_value=*/-1);
-    input_params.multi_block_tables.push_back(
+    forward_input.multi_block_tables.push_back(
         create_2d_tensor(mgr_tables, torch::kInt));
   }
 
   if (input_embeddings_vec_.size() != 0) {
-    input_params.embedding.input_embedding = torch::cat(input_embeddings_vec_);
+    forward_input.embedding.input_embedding = torch::cat(input_embeddings_vec_);
   }
 
-  input_params.embedding.embedding_ids = std::move(state_.embedding_ids);
-  input_params.embedding.linear_state_ids = std::move(state_.linear_state_ids);
-  if (!input_params.embedding.linear_state_ids.empty()) {
-    input_params.embedding.linear_state_indices =
-        torch::tensor(input_params.embedding.linear_state_ids, torch::kInt);
+  forward_input.embedding.embedding_ids = std::move(state_.embedding_ids);
+  forward_input.embedding.linear_state_ids = std::move(state_.linear_state_ids);
+  if (!forward_input.embedding.linear_state_ids.empty()) {
+    forward_input.embedding.linear_state_indices =
+        torch::tensor(forward_input.embedding.linear_state_ids, torch::kInt);
   }
-  input_params.embedding.request_ids = std::move(state_.request_ids);
-  input_params.embedding.extra_token_ids = std::move(state_.extra_token_ids);
+  forward_input.embedding.request_ids = std::move(state_.request_ids);
+  forward_input.embedding.extra_token_ids = std::move(state_.extra_token_ids);
   if (!state_.mtp_shifted_token_ids.empty()) {
     // Write both the upstream "root" path (consumed by non-CP MTP code paths
     // and by the existing shm serializer) and the CP-specific embedding path
     // (consumed by cp_input_partition + mtp_worker_impl). Both tensors share
     // storage via from_blob; the cost is one extra tensor handle, not a copy.
     auto mtp_tensor = torch::tensor(state_.mtp_shifted_token_ids, torch::kInt);
-    input_params.embedding.mtp_shifted_token_ids = mtp_tensor;
-    input_params.mtp_shifted_token_ids = mtp_tensor;
+    forward_input.embedding.mtp_shifted_token_ids = mtp_tensor;
+    forward_input.mtp_shifted_token_ids = mtp_tensor;
   }
   if (!state_.mtp_bootstrap_embeddings.empty()) {
     CHECK_EQ(state_.mtp_bootstrap_row_idxes.size(),
              state_.mtp_bootstrap_embeddings.size());
-    input_params.embedding.mtp_bootstrap_row_idxes =
+    forward_input.embedding.mtp_bootstrap_row_idxes =
         std::move(state_.mtp_bootstrap_row_idxes);
-    input_params.embedding.mtp_bootstrap_embeddings =
+    forward_input.embedding.mtp_bootstrap_embeddings =
         torch::cat(state_.mtp_bootstrap_embeddings, /*dim=*/0);
     for (Sequence* sequence : sequences_) {
       sequence->clear_mtp_bootstrap_embedding();
     }
   }
-  input_params.meta.batch_id = batch_id_;
+  forward_input.meta.batch_id = batch_id_;
 
   forward_input.transfer_kv_infos = std::move(state_.transfer_kv_infos);
   process_swap_block_infos(forward_input);
@@ -1003,7 +1002,6 @@ void BatchInputBuilder::process_swap_block_infos(ForwardInput& forward_input) {
     return;
   }
 
-  auto& input_params = forward_input.input_params;
   auto& swap_blocks = *swap_block_transfer_infos_;
   if (::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel()) {
     std::sort(swap_blocks.begin(),
@@ -1012,35 +1010,35 @@ void BatchInputBuilder::process_swap_block_infos(ForwardInput& forward_input) {
                 return a.src_block_id < b.src_block_id;
               });
 #if defined(USE_CUDA)
-    input_params.block_copy.swap_blocks.insert(
-        input_params.block_copy.swap_blocks.end(),
+    forward_input.block_copy.swap_blocks.insert(
+        forward_input.block_copy.swap_blocks.end(),
         swap_blocks.begin(),
         swap_blocks.end());
     const BlockCopyKernelInputData kernel_input =
         build_block_copy_kernel_input_data(swap_blocks,
                                            /*detect_overlap=*/true);
     if (!kernel_input.has_overlap) {
-      input_params.block_copy.src_block_indices =
+      forward_input.block_copy.src_block_indices =
           build_pinned_int_tensor(kernel_input.src_indices);
-      input_params.block_copy.dst_block_indices =
+      forward_input.block_copy.dst_block_indices =
           build_pinned_int_tensor(kernel_input.dst_indices);
-      input_params.block_copy.cum_sum =
+      forward_input.block_copy.cum_sum =
           build_pinned_int_tensor(kernel_input.cum_sum);
     }
 #else
     const BlockCopyKernelInputData kernel_input =
         build_block_copy_kernel_input_data(swap_blocks,
                                            /*detect_overlap=*/false);
-    input_params.block_copy.src_block_indices =
+    forward_input.block_copy.src_block_indices =
         build_pinned_int_tensor(kernel_input.src_indices);
-    input_params.block_copy.dst_block_indices =
+    forward_input.block_copy.dst_block_indices =
         build_pinned_int_tensor(kernel_input.dst_indices);
-    input_params.block_copy.cum_sum =
+    forward_input.block_copy.cum_sum =
         build_pinned_int_tensor(kernel_input.cum_sum);
 #endif
   } else {
-    input_params.block_copy.swap_blocks.insert(
-        input_params.block_copy.swap_blocks.end(),
+    forward_input.block_copy.swap_blocks.insert(
+        forward_input.block_copy.swap_blocks.end(),
         swap_blocks.begin(),
         swap_blocks.end());
   }

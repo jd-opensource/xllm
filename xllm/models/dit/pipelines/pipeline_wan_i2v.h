@@ -72,29 +72,32 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
     register_module("video_processor_", video_processor_);
   }
 
-  DiTForwardOutput forward(const DiTForwardInput& input) {
-    const auto& generation_params = input.generation_params;
+  DiTForwardOutput forward(const DiTForwardInput& forward_input) {
+    const auto& generation_params = forward_input.generation_params;
 
     int64_t seed = generation_params.seed > 0 ? generation_params.seed : 42;
-    auto images = input.images.defined() ? std::make_optional(input.images)
-                                         : std::nullopt;
-    auto last_images = input.last_images.defined()
-                           ? std::make_optional(input.last_images)
+    auto images = forward_input.images.defined()
+                      ? std::make_optional(forward_input.images)
+                      : std::nullopt;
+    auto last_images = forward_input.last_images.defined()
+                           ? std::make_optional(forward_input.last_images)
                            : std::nullopt;
-    auto prompts = std::make_optional(input.prompts);
+    auto prompts = std::make_optional(forward_input.prompts);
 
-    auto negative_prompts = input.negative_prompts.empty()
-                                ? std::nullopt
-                                : std::make_optional(input.negative_prompts);
+    auto negative_prompts =
+        forward_input.negative_prompts.empty()
+            ? std::nullopt
+            : std::make_optional(forward_input.negative_prompts);
 
-    auto latents = input.latents.defined() ? std::make_optional(input.latents)
-                                           : std::nullopt;
-    auto prompt_embeds = input.prompt_embeds.defined()
-                             ? std::make_optional(input.prompt_embeds)
+    auto latents = forward_input.latents.defined()
+                       ? std::make_optional(forward_input.latents)
+                       : std::nullopt;
+    auto prompt_embeds = forward_input.prompt_embeds.defined()
+                             ? std::make_optional(forward_input.prompt_embeds)
                              : std::nullopt;
     auto negative_prompt_embeds =
-        input.negative_prompt_embeds.defined()
-            ? std::make_optional(input.negative_prompt_embeds)
+        forward_input.negative_prompt_embeds.defined()
+            ? std::make_optional(forward_input.negative_prompt_embeds)
             : std::nullopt;
 
     auto output = forward_impl(images,
@@ -115,7 +118,7 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
                                generation_params.max_sequence_length);
 
     DiTForwardOutput out;
-    out.tensors = torch::chunk(output, input.batch_size);
+    out.tensors = torch::chunk(output, forward_input.batch_size);
     return out;
   }
 

@@ -62,14 +62,16 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   start_expert_id_ = ep_rank * num_experts_per_rank_;
 
   if (topk_method == "noaux_tc") {
-    e_score_correction_bias_ = register_parameter(
-        "e_score_correction_bias", torch::empty({num_experts}, options),
-	/*requires_grad*/false);
+    e_score_correction_bias_ =
+        register_parameter("e_score_correction_bias",
+                           torch::empty({num_experts}, options),
+                           /*requires_grad*/ false);
   }
 
   gate_ = register_module(
       "gate_proj",
-      ReplicatedLinear(hidden_size_, num_experts, /*bias*/false, quant_args, options));
+      ReplicatedLinear(
+          hidden_size_, num_experts, /*bias*/ false, quant_args, options));
 
   if (n_shared_experts_ > 0) {
     ProcessGroup* shared_expert_pg;
@@ -86,7 +88,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
                         DenseMLP(hidden_size_,
                                  intermediate_size * n_shared_experts_,
                                  is_gated_,
-                                 /*bias*/false,
+                                 /*bias*/ false,
                                  hidden_act_,
                                  /*enable_result_reduction=*/true,
                                  quant_args,
@@ -188,10 +190,12 @@ torch::Tensor FusedMoEImpl::select_experts(
   // Compute global offset for local expert subset
   int64_t global_offset = 0;
   if (start_expert_id_ > 0) {
-    global_offset = expert_sizes.slice(0, 0, start_expert_id_).sum().item<int64_t>();
+    global_offset =
+        expert_sizes.slice(0, 0, start_expert_id_).sum().item<int64_t>();
   }
   int64_t local_total =
-      expert_sizes.slice(0, start_expert_id_, start_expert_id_ + num_experts_per_rank_)
+      expert_sizes
+          .slice(0, start_expert_id_, start_expert_id_ + num_experts_per_rank_)
           .sum()
           .item<int64_t>();
 
@@ -343,7 +347,7 @@ torch::Tensor FusedMoEImpl::forward_experts(
 // forward
 // ---------------------------------------------------------------------------
 torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
-                                    const ModelInputParams& input_params) {
+                                    const ParallelInput& parallel_input) {
   bool is_dp_ep_parallel =
       parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1;
 
@@ -351,14 +355,14 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
   if (is_dp_ep_parallel) {
     input = parallel_state::gather(input,
                                    parallel_args_.dp_local_process_group_,
-                                   input_params.parallel.dp_global_token_nums);
+                                   parallel_input.dp_global_token_nums);
   }
 
   auto router_logits = gate_(input);
   auto output = forward_experts(input, router_logits);
 
   if (is_dp_ep_parallel) {
-    output = get_dp_local_slice(output, input_params, parallel_args_);
+    output = get_dp_local_slice(output, parallel_input, parallel_args_);
   }
 
   return output;

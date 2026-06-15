@@ -20,6 +20,7 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_llama_decoder_layer_impl.h"
 #include "llm_model_base.h"
+#include "runtime/forward_params.h"
 
 // llama2 model compatible with huggingface weights
 namespace xllm::npu::model {
@@ -37,10 +38,10 @@ class LlamaDecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor& sin_pos,
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
-                        ModelInputParams& input_params,
+                        ForwardInput& forward_input,
                         int node_id) {
     return decoder_layer_(
-        x, cos_pos, sin_pos, attn_mask, kv_cache, input_params, node_id);
+        x, cos_pos, sin_pos, attn_mask, kv_cache, forward_input, node_id);
   }
 
   // load the weight from the checkpoint
@@ -145,20 +146,19 @@ class LlamaModelImpl : public torch::nn::Module {
 
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
-  ModelOutput forward(torch::Tensor tokens,
-                      torch::Tensor positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    ForwardInput layer_input = forward_input;
+    torch::Tensor tokens = forward_input.token_ids;
+    torch::Tensor positions = forward_input.positions;
     torch::Tensor h = npu_embed_tokens_(tokens, 0);
     auto cos_pos = cos_pos_.index_select(0, positions);
     auto sin_pos = sin_pos_.index_select(0, positions);
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
     // torch::Tensor max_of_seq =
-    // torch::max(input_params.attention.device.kv_seq_lens); max_seq_len_ =
+    // torch::max(input.attention.device.kv_seq_lens); max_seq_len_ =
     // std::max(max_of_seq.item<int>(), max_seq_len_);
     torch::Tensor max_of_seq =
-        torch::max(input_params.attention.device.kv_seq_lens);
+        torch::max(forward_input.attention.device.kv_seq_lens);
     max_seq_len_ =
         ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()
             ? std::max(max_of_seq.item<int>(), max_seq_len_)
@@ -167,14 +167,15 @@ class LlamaModelImpl : public torch::nn::Module {
         max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
     if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      int batch_size = input_params.attention.host.q_seq_lens.size();
+      const int32_t batch_size =
+          static_cast<int32_t>(forward_input.attention.host.q_seq_lens.size());
       std::vector<torch::Tensor> req_mask_vec;
       req_mask_vec.reserve(batch_size);
 
-      for (int i = 0; i < batch_size; i++) {
-        int start = input_params.attention.host.kv_seq_lens[i] -
-                    input_params.attention.host.q_seq_lens[i];
-        int end = input_params.attention.host.kv_seq_lens[i];
+      for (int32_t i = 0; i < batch_size; i++) {
+        const int32_t start = forward_input.attention.host.kv_seq_lens[i] -
+                              forward_input.attention.host.q_seq_lens[i];
+        const int32_t end = forward_input.attention.host.kv_seq_lens[i];
 
         auto req_mask_slice = attn_mask.slice(0, start, end);
         req_mask_vec.emplace_back(req_mask_slice);
@@ -184,9 +185,15 @@ class LlamaModelImpl : public torch::nn::Module {
     RollingLayerGuard rolling_guard(rolling_mgr_);
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      const int32_t layer_index = i;
+      const int32_t layer_index = static_cast<int32_t>(i);
       rolling_guard.before_layer(layer_index);
-      layer(h, cos_pos, sin_pos, attn_mask, kv_caches[i], input_params_new, i);
+      layer(h,
+            cos_pos,
+            sin_pos,
+            attn_mask,
+            kv_caches[i],
+            layer_input,
+            layer_index);
       rolling_guard.after_layer(layer_index);
     }
     auto hidden_states = norm_(h, 0);

@@ -20,13 +20,13 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "core/framework/config/eplb_config.h"
 #include "layers/common/dp_utils.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 namespace layer {
 namespace {
-bool use_moe_all2all(bool enable_deep_ep,
-                     const ModelInputParams& input_params) {
-  return enable_deep_ep && all_dp_ranks_are_decode(input_params);
+bool use_moe_all2all(bool enable_deep_ep, const ParallelInput& parallel_input) {
+  return enable_deep_ep && all_dp_ranks_are_decode(parallel_input);
 }
 
 bool is_moe_layer(const ModelArgs& model_args, int32_t layer_id) {
@@ -133,13 +133,13 @@ void Qwen3_5DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
 
 torch::Tensor Qwen3_5DecoderLayerImpl::run_moe(
     torch::Tensor x,
-    const ModelInputParams& input_params) {
+    const ForwardInput& forward_input) {
   const bool enable_moe_all2all =
-      use_moe_all2all(enable_deep_ep_, input_params);
+      use_moe_all2all(enable_deep_ep_, forward_input.parallel);
   if (need_dp_moe_gather(parallel_args_, enable_moe_all2all)) {
-    x = gather_dp_tokens(x, input_params, parallel_args_);
+    x = gather_dp_tokens(x, forward_input.parallel, parallel_args_);
     x = moe_mlp_->forward_experts(x, enable_moe_all2all);
-    return get_dp_local_slice(x, input_params, parallel_args_);
+    return get_dp_local_slice(x, forward_input.parallel, parallel_args_);
   }
   return moe_mlp_->forward_experts(x, enable_moe_all2all);
 }
@@ -167,7 +167,7 @@ torch::Tensor Qwen3_5DecoderLayerImpl::forward(
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
-    const ModelInputParams& input_params) {
+    const ForwardInput& forward_input) {
   // Pre-attention norm
   std::tie(x, residual) = apply_norm(input_norm_, x, residual);
 
@@ -184,7 +184,7 @@ torch::Tensor Qwen3_5DecoderLayerImpl::forward(
 
   // MLP/MoE
   if (moe_mlp_) {
-    x = run_moe(x, input_params);
+    x = run_moe(x, forward_input);
   } else {
     x = mlp_->forward(x);
   }

@@ -19,6 +19,7 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_deepseek_v2_decoder_layer_impl.h"
 #include "llm_model_base.h"
+#include "runtime/forward_params.h"
 
 // DeepSeek v2 compatible with huggingface weights
 // ref to:
@@ -42,7 +43,7 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor& sin_pos,
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params,
+                        const ForwardInput& forward_input,
                         aclrtEvent* event,
                         std::atomic<bool>* event_flag) {
     return decoder_layer_(x,
@@ -50,7 +51,7 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
                           sin_pos,
                           attn_mask,
                           kv_cache,
-                          input_params,
+                          forward_input,
                           event,
                           event_flag);
   }
@@ -148,10 +149,10 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     num_experts_per_tok_ = model_args.num_experts_per_tok();
   }
 
-  ModelOutput forward(torch::Tensor tokens,
-                      torch::Tensor positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    torch::Tensor tokens = forward_input.token_ids;
+    torch::Tensor positions = forward_input.positions;
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
@@ -159,7 +160,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       }
     }
 
-    auto inputs_embeds = input_params.embedding.input_embedding;
+    auto inputs_embeds = forward_input.embedding.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
@@ -173,9 +174,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
     torch::Tensor attn_mask;
     if (::xllm::KVCacheConfig::get_instance().enable_prefix_cache() &&
-        !input_params.meta.batch_forward_type.is_decode()) {
+        !forward_input.meta.batch_forward_type.is_decode()) {
       attn_mask = attn_mask_.get_attn_mask(512, dtype_, device_);
-    } else if (input_params.meta.batch_forward_type.is_prefill()) {
+    } else if (forward_input.meta.batch_forward_type.is_prefill()) {
       attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
     } else if (num_speculative_tokens_ > 0) {
       // TODO :the judgement of gen_free_mask need more check
@@ -187,12 +188,12 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.parallel.layer_synchronizer != nullptr) {
-        event = input_params.parallel.layer_synchronizer->get_event(i);
+      if (forward_input.parallel.layer_synchronizer != nullptr) {
+        event = forward_input.parallel.layer_synchronizer->get_event(i);
         event_flag =
-            input_params.parallel.layer_synchronizer->get_event_flag(i);
+            forward_input.parallel.layer_synchronizer->get_event_flag(i);
       }
-      if (!input_params.synchronize_layer(i)) {
+      if (!forward_input.synchronize_layer(i)) {
         return ModelOutput();
       }
 
@@ -204,7 +205,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
             sin_pos,
             attn_mask,
             kv_caches[i],
-            input_params,
+            forward_input,
             event,
             event_flag);
       rolling_guard.after_layer(layer_index);

@@ -76,14 +76,13 @@ torch::Tensor FusedMoEImpl::select_experts_base(
     std::tie(expand_hidden_states, hidden_states_scale) =
         xllm::kernel::scaled_quantize(scaled_quantize_params);
   } else {
-    xllm::kernel::MoeExpandInputParams moe_expand_input_params;
-    moe_expand_input_params.input = hidden_states_2d;
-    moe_expand_input_params.gather_index = gather_idx;
-    moe_expand_input_params.cusum_token_count = cusum_token_count;
-    moe_expand_input_params.start_expert_id = start_expert_id_;
-    moe_expand_input_params.expert_size = expert_size;
-    expand_hidden_states =
-        xllm::kernel::moe_expand_input(moe_expand_input_params);
+    xllm::kernel::MoeExpandInputParams moe_expand_input;
+    moe_expand_input.input = hidden_states_2d;
+    moe_expand_input.gather_index = gather_idx;
+    moe_expand_input.cusum_token_count = cusum_token_count;
+    moe_expand_input.start_expert_id = start_expert_id_;
+    moe_expand_input.expert_size = expert_size;
+    expand_hidden_states = xllm::kernel::moe_expand_input(moe_expand_input);
   }
 
   // collect the selected tensor

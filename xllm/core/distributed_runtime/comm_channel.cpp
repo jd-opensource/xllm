@@ -267,9 +267,9 @@ bool CommChannel::pull_kv_blocks(
 }
 
 void CommChannel::execute_model_async(
-    const ForwardInput& input,
+    const ForwardInput& forward_input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
-  execute_model_with_brpc(input, promise);
+  execute_model_with_brpc(forward_input, promise);
 }
 
 bool CommChannel::process_group_test() {
@@ -547,11 +547,11 @@ bool CommChannel::get_active_activation_memory_async(
 }
 
 bool CommChannel::execute_model_with_brpc(
-    const ForwardInput& input,
+    const ForwardInput& forward_input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
   proto::ForwardInput pb_forward_input;
   auto* packed_input = pb_forward_input.mutable_packed_input();
-  if (!forward_input_to_packed_proto(input, packed_input)) {
+  if (!forward_input_to_packed_proto(forward_input, packed_input)) {
     LOG(ERROR) << "failed to pack ForwardInput for remote execution";
     promise.setValue(std::optional<RawForwardOutput>(std::nullopt));
     return false;

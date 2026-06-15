@@ -29,7 +29,7 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model_context.h"
 #include "core/framework/parallel_state/npu_dp_ep_padding.h"
 #include "core/layers/common/attention_mask.h"
@@ -40,6 +40,7 @@ limitations under the License.
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/npu/npu_word_embedding_impl.h"
 #include "models/model_registry.h"
+#include "runtime/forward_params.h"
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
 
 namespace xllm::npu::model {
@@ -91,10 +92,11 @@ class MtpModelImplBase : public torch::nn::Module {
 
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
-  virtual ModelOutput forward(torch::Tensor tokens,
-                              torch::Tensor positions,
-                              std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) {
+  virtual ModelOutput forward(const ForwardInput& forward_input,
+                              std::vector<KVCache>& kv_caches) {
+    torch::Tensor tokens = forward_input.token_ids;
+    torch::Tensor positions = forward_input.positions;
+    ForwardInput modified_input = forward_input;
     if (dp_size_ > 1 && (!tokens.defined() || tokens.numel() == 0)) {
       auto options =
           torch::TensorOptions().dtype(torch::kInt32).device(device_);
@@ -104,7 +106,7 @@ class MtpModelImplBase : public torch::nn::Module {
 
     torch::Tensor h = embed_tokens_(tokens, 0);
     torch::Tensor enorm = enorm_(h, 0);
-    torch::Tensor input_embedding = input_params.embedding.input_embedding;
+    torch::Tensor input_embedding = forward_input.embedding.input_embedding;
     if (input_embedding.defined()) {
       h = input_embedding;
     }
@@ -130,16 +132,16 @@ class MtpModelImplBase : public torch::nn::Module {
     torch::Tensor attn_mask;
     // TODO(liangzhiwei20): support prefix cache for deepseek .
     if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      int num_sequences = input_params.meta.num_sequences;
+      int num_sequences = forward_input.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
         req_mask_vec.reserve(num_sequences);
 
         for (int j = 0; j < num_sequences; j++) {
           auto mask = attn_mask_.gen_append_mask(
-              input_params.attention.host.q_seq_lens[j],
-              input_params.attention.host.kv_seq_lens[j],
-              input_params.meta.kv_max_seq_len,
+              forward_input.attention.host.q_seq_lens[j],
+              forward_input.attention.host.kv_seq_lens[j],
+              forward_input.meta.kv_max_seq_len,
               h.dtype().toScalarType(),
               h.device());
           req_mask_vec.emplace_back(mask);
@@ -152,7 +154,7 @@ class MtpModelImplBase : public torch::nn::Module {
       }
     } else if (model_type_ == "deepseek_v3" &&
                ::xllm::KVCacheConfig::get_instance().enable_prefix_cache() &&
-               !input_params.meta.batch_forward_type.is_decode()) {
+               !forward_input.meta.batch_forward_type.is_decode()) {
       attn_mask =
           attn_mask_.get_attn_mask(512, h.dtype().toScalarType(), h.device());
     } else {
@@ -167,24 +169,22 @@ class MtpModelImplBase : public torch::nn::Module {
         torch::TensorOptions().dtype(torch::kInt32).device(tokens.device()));
 
     // TODO(liangzhiwei20): MTP need more support for layer wise copy.
-    if (input_params.parallel.layer_wise_load_synchronizer != nullptr) {
+    if (modified_input.parallel.layer_wise_load_synchronizer != nullptr) {
       LOG(FATAL) << "MTP not support layer wise copy!";
     }
 
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
-    input_params_new.expert.expert_array = expert_array;
+    modified_input.expert.expert_array = expert_array;
 
-    torch::Tensor prev_topk_indices = input_params_new.dsa_topk_indices;
+    torch::Tensor prev_topk_indices = modified_input.dsa_topk_indices;
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.parallel.layer_synchronizer != nullptr) {
-        event = input_params.parallel.layer_synchronizer->get_event(i);
+      if (modified_input.parallel.layer_synchronizer != nullptr) {
+        event = modified_input.parallel.layer_synchronizer->get_event(i);
         event_flag =
-            input_params.parallel.layer_synchronizer->get_event_flag(i);
+            modified_input.parallel.layer_synchronizer->get_event_flag(i);
       }
-      if (!input_params.synchronize_layer(i)) {
+      if (!modified_input.synchronize_layer(i)) {
         return ModelOutput();
       }
 
@@ -202,7 +202,7 @@ class MtpModelImplBase : public torch::nn::Module {
                     sin_pos,
                     attn_mask,
                     kv_caches[i],
-                    input_params_new,
+                    modified_input,
                     prev_topk_indices,
                     layer_index,
                     event,
@@ -280,7 +280,7 @@ class MtpModelImplBase : public torch::nn::Module {
                              torch::Tensor& sin_pos,
                              torch::Tensor& attn_mask,
                              KVCache& kv_cache,
-                             const ModelInputParams& input_params,
+                             const ForwardInput& forward_input,
                              torch::Tensor&,
                              int32_t,
                              aclrtEvent* event,
@@ -290,7 +290,7 @@ class MtpModelImplBase : public torch::nn::Module {
           sin_pos,
           attn_mask,
           kv_cache,
-          input_params,
+          forward_input,
           event,
           event_flag);
   }
@@ -339,11 +339,9 @@ class MtpForCausalLMImplBase : public torch::nn::Module {
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   // returns: [num_tokens, hidden_size]
-  virtual ModelOutput forward(const torch::Tensor& tokens,
-                              const torch::Tensor& positions,
-                              std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) {
-    return model_(tokens, positions, kv_caches, input_params);
+  virtual ModelOutput forward(const ForwardInput& forward_input,
+                              std::vector<KVCache>& kv_caches) {
+    return model_->forward(forward_input, kv_caches);
   }
 
   // hidden_states: [num_tokens, hidden_size]

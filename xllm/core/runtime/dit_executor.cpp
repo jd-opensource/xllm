@@ -28,8 +28,8 @@ DiTForwardInput DiTExecutor::prepare_inputs(DiTBatch& batch) {
   return batch.prepare_forward_input();
 }
 
-DiTForwardOutput DiTExecutor::forward(const DiTForwardInput& input) {
-  return model_->forward(input);
+DiTForwardOutput DiTExecutor::forward(const DiTForwardInput& forward_input) {
+  return model_->forward(forward_input);
 }
 
 }  // namespace xllm

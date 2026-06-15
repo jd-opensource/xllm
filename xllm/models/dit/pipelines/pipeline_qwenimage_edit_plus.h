@@ -26,7 +26,7 @@ limitations under the License.
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/dit_cache/dit_cache.h"
 #include "core/framework/dit_model_loader.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model_context.h"
 #include "core/framework/request/dit_request_state.h"
 #include "core/framework/state_dict/state_dict.h"
@@ -284,9 +284,9 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
     return std::make_pair(latents, image_latents);
   }
 
-  DiTForwardOutput forward(const DiTForwardInput& input) {
+  DiTForwardOutput forward(const DiTForwardInput& forward_input) {
     torch::NoGradGuard no_grad;
-    const auto& generation_params = input.generation_params;
+    const auto& generation_params = forward_input.generation_params;
     auto height = generation_params.height;
     auto width = generation_params.width;
     auto true_cfg_scale = generation_params.true_cfg_scale;
@@ -296,20 +296,20 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
     auto max_sequence_length = generation_params.max_sequence_length;
     auto seed = generation_params.seed >= 0 ? generation_params.seed : 42;
 
-    auto prompts = input.prompts;
-    auto negative_prompts = input.negative_prompts;
-    auto latents = input.latents;
+    auto prompts = forward_input.prompts;
+    auto negative_prompts = forward_input.negative_prompts;
+    auto latents = forward_input.latents;
     if (latents.defined()) {
       latents = latents.to(options_.device(), dtype_);
     }
 
-    auto prompt_embeds = input.prompt_embeds;
+    auto prompt_embeds = forward_input.prompt_embeds;
     if (prompt_embeds.defined()) {
       prompt_embeds = prompt_embeds.to(options_.device(), dtype_);
     }
     torch::Tensor prompt_embeds_mask;
 
-    auto negative_prompt_embeds = input.negative_prompt_embeds;
+    auto negative_prompt_embeds = forward_input.negative_prompt_embeds;
     if (negative_prompt_embeds.defined()) {
       negative_prompt_embeds =
           negative_prompt_embeds.to(options_.device(), dtype_);
@@ -317,18 +317,18 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
     torch::Tensor negative_prompt_embeds_mask;
 
     if (::xllm::DiTConfig::get_instance().dit_debug_print()) {
-      input.debug_print();
+      forward_input.debug_print();
     }
 
-    if (input.images_list.empty()) {
+    if (forward_input.images_list.empty()) {
       LOG(FATAL) << "QwenImageEditPlus pipeline expected to have "
                  << "image inputs in images_list";
     }
 
     std::vector<torch::Tensor> image_list;
-    image_list.reserve(input.images_list.size());
+    image_list.reserve(forward_input.images_list.size());
 
-    for (const auto& images : input.images_list) {
+    for (const auto& images : forward_input.images_list) {
       auto img = images.to(options_.device(), dtype_);
       if (img.dim() != 4) {
         LOG(ERROR)

@@ -18,14 +18,16 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
 #include "layers/common/attention_metadata.h"
 #include "musa_layer_base.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
+struct ForwardInput;
+
 namespace layer {
 class Qwen3DecoderLayerImpl : public torch::nn::Module {
  public:
@@ -40,7 +42,7 @@ class Qwen3DecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor& positions,
                         const AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params);
+                        const ForwardInput& forward_input);
 
  private:
   std::vector<std::shared_ptr<MUSALayerBaseImpl>> layers_;

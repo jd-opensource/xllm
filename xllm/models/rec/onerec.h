@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/framework/model/rec_causal_lm.h"
 #include "models/model_registry.h"
 #include "models/rec/rec_model_base.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -38,17 +39,17 @@ class OneRecModelImpl : public torch::nn::Module {
     shared_ = register_module("shared", layer::WordEmbedding(context));
   }
 
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    const torch::Tensor& tokens = forward_input.token_ids;
+    const torch::Tensor& positions = forward_input.positions;
     if (!tokens.defined()) {
       return ModelOutput();
     }
     (void)positions;
     (void)kv_caches;
 
-    const auto* onerec_params = input_params.onerec_params();
+    const auto* onerec_params = forward_input.onerec_params();
 
     const bool is_encoder_forward =
         (onerec_params != nullptr) && onerec_params->is_encoder_forward;
@@ -95,7 +96,7 @@ class OneRecModelImpl : public torch::nn::Module {
   }
 
   torch::Tensor build_hidden_states(const torch::Tensor& tokens,
-                                    const OneRecModelInputParams* onerec_params,
+                                    const OneRecInput* onerec_params,
                                     bool is_encoder_forward) {
     if (tokens.numel() == 0) {
       return torch::empty({0, hidden_size_}, options_);
@@ -122,8 +123,7 @@ class OneRecModelImpl : public torch::nn::Module {
     return torch::Tensor();
   }
 
-  torch::Tensor resolve_cross_context(
-      const OneRecModelInputParams* onerec_params) const {
+  torch::Tensor resolve_cross_context(const OneRecInput* onerec_params) const {
     if (onerec_params == nullptr) {
       return torch::Tensor();
     }

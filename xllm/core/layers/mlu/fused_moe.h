@@ -21,7 +21,7 @@ limitations under the License.
 #include <utility>
 
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
@@ -60,8 +60,8 @@ class FusedMoEImpl : public torch::nn::Module {
       const std::optional<torch::Tensor>& input_ids = std::nullopt);
   torch::Tensor forward_shared(const torch::Tensor& hidden_states);
   torch::Tensor forward(const torch::Tensor& hidden_states,
-                        const ModelInputParams& input_params);
-  virtual void load_state_dict(const StateDict& state_dict);
+                        const ParallelInput& parallel_input);
+  void load_state_dict(const StateDict& state_dict);
   void verify_loaded_weights() const;
   bool has_shared() const { return static_cast<bool>(shared_experts_); }
   void init_async(const torch::Tensor& hidden_states) {

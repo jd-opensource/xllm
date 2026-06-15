@@ -20,7 +20,7 @@ limitations under the License.
 #include <tuple>
 
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "layers/common/attention_metadata.h"
 
 namespace xllm {

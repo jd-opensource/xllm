@@ -36,6 +36,7 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
+#include "runtime/forward_params.h"
 #include "runtime/worker.h"
 #include "runtime/worker_client.h"
 #include "runtime/xservice_client.h"

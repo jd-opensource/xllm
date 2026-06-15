@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <tuple>
 
+#include "runtime/forward_params.h"
 #include "xllm/core/kernels/ops_api.h"
 
 namespace xllm {
@@ -508,7 +509,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     const torch::Tensor& hidden_states,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
-    const ModelInputParams& input_params) {
+    const ForwardInput& forward_input) {
   // Save original hidden_states size for potential padding later
   const int64_t original_num_tokens = hidden_states.size(0);
   auto [qkvz_padded, ba_padded] =
@@ -542,29 +543,29 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   torch::Device device = mixed_qkv.device();
   torch::Tensor conv_weight = conv1d_->weight();
   torch::Tensor logical_state_indices =
-      get_linear_state_indices(input_params, device);
+      get_linear_state_indices(forward_input, device);
   const int64_t checkpoint_stride =
       get_checkpoint_stride(conv_cache, ssm_cache);
   torch::Tensor linear_state_base_indices =
       build_linear_state_base_indices(logical_state_indices, checkpoint_stride);
-  const bool use_spec_verify = input_params.is_spec_verify;
+  const bool use_spec_verify = forward_input.is_spec_verify;
   const bool is_any_prefill =
       attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
 
   if (!use_spec_verify && is_any_prefill) {
     torch::IntArrayRef num_accepted_tokens_opt;
     std::vector<int64_t> linear_state_indices_vec(
-        input_params.embedding.linear_state_ids.begin(),
-        input_params.embedding.linear_state_ids.end());
+        forward_input.embedding.linear_state_ids.begin(),
+        forward_input.embedding.linear_state_ids.end());
     torch::Tensor conv_input = reshape_qkvz_unpad(attn_metadata, mixed_qkv);
     mixed_qkv = xllm::kernel::causal_conv1d(
         conv_input,
         conv_weight,
         conv_cache,
         std::optional<torch::Tensor>(),  // bias (no bias for qwen3)
-        torch::IntArrayRef(input_params.parallel.query_start_loc),
+        torch::IntArrayRef(forward_input.parallel.query_start_loc),
         torch::IntArrayRef(linear_state_indices_vec),
-        torch::IntArrayRef(input_params.parallel.has_initial_state),
+        torch::IntArrayRef(forward_input.parallel.has_initial_state),
         num_accepted_tokens_opt,
         1,   // activation_mode
         -1,  // pad_slot_id
@@ -574,7 +575,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     mixed_qkv = reshape_qkvz_with_pad(attn_metadata, mixed_qkv);
     mixed_qkv = mixed_qkv.transpose(1, 2);
   } else if (use_spec_verify) {
-    CHECK(input_params.num_accepted_tokens.defined())
+    CHECK(forward_input.num_accepted_tokens.defined())
         << "num_accepted_tokens must be populated for Qwen3.5 spec verify";
     torch::Tensor conv_weight_for_update =
         conv_weight.transpose(0, 1).contiguous();
@@ -583,7 +584,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
         run_spec_verify_conv(pre_conv_mixed_qkv,
                              conv_cache,
                              logical_state_indices,
-                             input_params.num_accepted_tokens.to(device),
+                             forward_input.num_accepted_tokens.to(device),
                              attn_metadata.q_cu_seq_lens,
                              conv_weight_for_update,
                              conv_kernel_size_);
@@ -651,7 +652,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   // Apply chunked or recurrent gated-delta attention and update caches.
   if (use_spec_verify) {
     torch::Tensor spec_num_accepted_tokens = expand_sequence_tensor_to_batch(
-        input_params.num_accepted_tokens.to(device, torch::kInt32),
+        forward_input.num_accepted_tokens.to(device, torch::kInt32),
         batch_size,
         "num_accepted_tokens");
     torch::Tensor spec_linear_state_base_indices =
@@ -720,12 +721,12 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     // Shape: [batch_size, num_heads, head_k_dim, head_v_dim]
     torch::Tensor initial_state_tensor =
         torch::index_select(ssm_cache, 0, linear_state_base_indices);
-    CHECK_EQ(input_params.parallel.has_initial_state.size(),
-             input_params.embedding.linear_state_ids.size())
+    CHECK_EQ(forward_input.parallel.has_initial_state.size(),
+             forward_input.embedding.linear_state_ids.size())
         << "has_initial_state must be sequence-scoped.";
-    for (size_t i = 0; i < input_params.parallel.has_initial_state.size();
+    for (size_t i = 0; i < forward_input.parallel.has_initial_state.size();
          ++i) {
-      if (input_params.parallel.has_initial_state[i] == 0) {
+      if (forward_input.parallel.has_initial_state[i] == 0) {
         initial_state_tensor.select(0, static_cast<int64_t>(i)).fill_(0.0);
       }
     }
@@ -870,12 +871,12 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::reshape_qkvz_unpad(
 }
 
 torch::Tensor Qwen3GatedDeltaNetBaseImpl::get_linear_state_indices(
-    const ModelInputParams& input_params,
+    const ForwardInput& forward_input,
     const torch::Device& device) const {
-  CHECK(!input_params.embedding.linear_state_ids.empty())
+  CHECK(!forward_input.embedding.linear_state_ids.empty())
       << "linear_state_ids must be populated for gated delta net";
-  if (input_params.embedding.linear_state_indices.defined()) {
-    auto indices = input_params.embedding.linear_state_indices;
+  if (forward_input.embedding.linear_state_indices.defined()) {
+    auto indices = forward_input.embedding.linear_state_indices;
     if (indices.device() != device || indices.scalar_type() != torch::kInt) {
       indices =
           indices.to(torch::TensorOptions().dtype(torch::kInt).device(device),
@@ -885,7 +886,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::get_linear_state_indices(
     return indices.contiguous();
   }
   return torch::tensor(
-      input_params.embedding.linear_state_ids,
+      forward_input.embedding.linear_state_ids,
       torch::TensorOptions().dtype(torch::kInt).device(device));
 }
 

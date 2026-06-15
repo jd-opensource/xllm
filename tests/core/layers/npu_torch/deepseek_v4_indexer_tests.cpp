@@ -16,10 +16,11 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/quant_args.h"
 #include "layers/common/dsa_metadata_builder.h"
 #include "layers/npu_torch/deepseek_v4_indexer.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 namespace layer {
@@ -70,14 +71,14 @@ TEST_F(DeepseekV4IndexerTest, ConstructorAndMetadataWorks) {
 }
 
 TEST_F(DeepseekV4IndexerTest, DsaTokenSlotsTrackCurrentDecodeStep) {
-  ModelInputParams params;
-  params.meta.batch_forward_type = BatchForwardType::DECODE;
-  params.meta.num_sequences = 2;
-  params.attention.host.kv_seq_lens = {5, 8};
-  params.attention.host.q_seq_lens = {1, 1};
-  params.attention.device.new_cache_slots =
+  ForwardInput forward_input;
+  forward_input.meta.batch_forward_type = BatchForwardType::DECODE;
+  forward_input.meta.num_sequences = 2;
+  forward_input.attention.host.kv_seq_lens = {5, 8};
+  forward_input.attention.host.q_seq_lens = {1, 1};
+  forward_input.attention.device.new_cache_slots =
       torch::tensor({10, 20}, torch::kInt32);
-  params.multi_block_tables = {
+  forward_input.multi_block_tables = {
       torch::tensor({{0}, {1}}, torch::kInt32),
       torch::tensor({{0}, {1}}, torch::kInt32),
   };
@@ -93,7 +94,7 @@ TEST_F(DeepseekV4IndexerTest, DsaTokenSlotsTrackCurrentDecodeStep) {
   }};
 
   auto metadata = DSAMetadataBuilder::build(
-      params, positions, torch::Tensor(), caches_info, group_infos);
+      forward_input, positions, torch::Tensor(), caches_info, group_infos);
 
   ASSERT_TRUE(metadata.dsa_metadata != nullptr);
   const auto& dsa = *metadata.dsa_metadata;
@@ -108,16 +109,16 @@ TEST_F(DeepseekV4IndexerTest, DsaTokenSlotsTrackCurrentDecodeStep) {
 }
 
 TEST_F(DeepseekV4IndexerTest, DsaSwaBlockTableUsesLogicalColumnsWithoutWrap) {
-  ModelInputParams params;
-  params.meta.batch_forward_type = BatchForwardType::DECODE;
-  params.meta.num_sequences = 1;
-  params.attention.host.kv_seq_lens = {1537};
-  params.attention.host.q_seq_lens = {1};
-  params.meta.q_max_seq_len = 1;
-  params.meta.kv_max_seq_len = 1537;
-  params.attention.device.new_cache_slots =
+  ForwardInput forward_input;
+  forward_input.meta.batch_forward_type = BatchForwardType::DECODE;
+  forward_input.meta.num_sequences = 1;
+  forward_input.attention.host.kv_seq_lens = {1537};
+  forward_input.attention.host.q_seq_lens = {1};
+  forward_input.meta.q_max_seq_len = 1;
+  forward_input.meta.kv_max_seq_len = 1537;
+  forward_input.attention.device.new_cache_slots =
       torch::tensor({10 * 128}, torch::kInt32);
-  params.multi_block_tables = {
+  forward_input.multi_block_tables = {
       torch::tensor({{10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}},
                     torch::kInt32),
   };
@@ -131,7 +132,7 @@ TEST_F(DeepseekV4IndexerTest, DsaSwaBlockTableUsesLogicalColumnsWithoutWrap) {
   }};
 
   auto metadata = DSAMetadataBuilder::build(
-      params, positions, torch::Tensor(), caches_info, group_infos);
+      forward_input, positions, torch::Tensor(), caches_info, group_infos);
 
   ASSERT_TRUE(metadata.dsa_metadata != nullptr);
   const auto& dsa = *metadata.dsa_metadata;
@@ -149,20 +150,20 @@ TEST_F(DeepseekV4IndexerTest, DsaSwaBlockTableUsesLogicalColumnsWithoutWrap) {
 }
 
 TEST_F(DeepseekV4IndexerTest, DsaDummyAttentionUsesPositionDevice) {
-  ModelInputParams params;
-  params.meta.batch_forward_type = BatchForwardType::DECODE;
-  params.meta.num_sequences = 1;
-  params.meta.q_max_seq_len = 0;
-  params.meta.kv_max_seq_len = 0;
-  params.attention.host.kv_seq_lens = {0};
-  params.attention.host.q_seq_lens = {0};
+  ForwardInput forward_input;
+  forward_input.meta.batch_forward_type = BatchForwardType::DECODE;
+  forward_input.meta.num_sequences = 1;
+  forward_input.meta.q_max_seq_len = 0;
+  forward_input.meta.kv_max_seq_len = 0;
+  forward_input.attention.host.kv_seq_lens = {0};
+  forward_input.attention.host.q_seq_lens = {0};
 
   const auto positions = torch::empty({0}, torch::kInt64);
   const std::vector<DSAGroupInfo> group_infos;
   const std::vector<std::vector<DSACacheInfo>> caches_info;
 
   auto metadata = DSAMetadataBuilder::build(
-      params, positions, torch::Tensor(), caches_info, group_infos);
+      forward_input, positions, torch::Tensor(), caches_info, group_infos);
 
   EXPECT_TRUE(metadata.is_dummy);
   EXPECT_TRUE(metadata.slot_mapping.defined());

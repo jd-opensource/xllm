@@ -27,7 +27,7 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/state_dict/state_dict.h"
 #include "runtime/dit_worker_impl.h"
 #include "runtime/eagle3_worker_impl.h"

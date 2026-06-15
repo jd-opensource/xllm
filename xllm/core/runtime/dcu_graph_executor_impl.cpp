@@ -158,12 +158,12 @@ DcuGraphPersistentParam::DcuGraphPersistentParam(
       0, max_seqs_per_batch + 1, torch::dtype(torch::kInt32).device(device));
 }
 
-std::optional<ModelInputParams> DcuGraphPersistentParam::update(
+std::optional<ForwardInput> DcuGraphPersistentParam::update(
     const torch::Tensor& tokens,
     const torch::Tensor& positions,
-    const ModelInputParams& params,
+    const ForwardInput& forward_input,
     uint32_t padded_num_tokens,
-    bool return_capture_params,
+    bool return_capture_input,
     uint32_t graph_max_seq_len) {
   const uint32_t actual_num_tokens =
       static_cast<uint32_t>(tokens.size(/*dim=*/0));
@@ -177,17 +177,18 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
 
   const uint32_t padding_needed = padded_num_tokens - actual_num_tokens;
 
-  std::optional<ModelInputParams> params_for_capture;
-  if (return_capture_params) {
-    params_for_capture = std::make_optional<ModelInputParams>(params);
+  std::optional<ForwardInput> input_for_capture;
+  if (return_capture_input) {
+    input_for_capture = std::make_optional<ForwardInput>(forward_input);
   }
 
   std::shared_ptr<layer::AttentionMetadata> attn_metadata =
       std::make_shared<layer::AttentionMetadata>(
-          layer::AttentionMetadataBuilder::build(params, args_.enable_mla()));
+          layer::AttentionMetadataBuilder::build(forward_input,
+                                                 args_.enable_mla()));
   CHECK(attn_metadata) << "attn_metadata should not be null";
   attn_metadata->enable_cuda_graph = true;
-  if (params.meta.batch_forward_type.is_decode()) {
+  if (forward_input.meta.batch_forward_type.is_decode()) {
     // Flash decode receives max_seq_len as a scalar kernel argument. Full graph
     // replay cannot update that scalar, so capture with a bucketed upper bound
     // instead of the first decode step's exact kv_max_seq_len.
@@ -196,39 +197,39 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
                                      : args_.max_position_embeddings();
   }
 
-  const auto build_capture_params_if_needed =
-      [&]() -> std::optional<ModelInputParams> {
-    if (!return_capture_params) {
+  const auto build_capture_input_if_needed =
+      [&]() -> std::optional<ForwardInput> {
+    if (!return_capture_input) {
       return std::nullopt;
     }
 
-    CHECK(params_for_capture.has_value())
-        << "params_for_capture should exist when return_capture_params=true";
+    CHECK(input_for_capture.has_value())
+        << "input_for_capture should exist when return_capture_input=true";
 
-    params_for_capture->enable_graph = true;
-    params_for_capture->attn_metadata = attn_metadata;
+    input_for_capture->enable_graph = true;
+    input_for_capture->attn_metadata = attn_metadata;
 
-    params_for_capture->attention.device.q_seq_lens =
+    input_for_capture->attention.device.q_seq_lens =
         attn_metadata->q_cu_seq_lens;
-    params_for_capture->attention.device.kv_seq_lens =
+    input_for_capture->attention.device.kv_seq_lens =
         attn_metadata->kv_cu_seq_lens;
-    params_for_capture->attention.device.new_cache_slots =
+    input_for_capture->attention.device.new_cache_slots =
         attn_metadata->slot_mapping;
-    params_for_capture->attention.device.block_tables =
+    input_for_capture->attention.device.block_tables =
         attn_metadata->block_table;
-    params_for_capture->attention.device.paged_kv_indptr =
+    input_for_capture->attention.device.paged_kv_indptr =
         attn_metadata->paged_kv_indptr;
-    params_for_capture->attention.device.paged_kv_indices =
+    input_for_capture->attention.device.paged_kv_indices =
         attn_metadata->paged_kv_indices;
-    params_for_capture->attention.device.paged_kv_last_page_len =
+    input_for_capture->attention.device.paged_kv_last_page_len =
         attn_metadata->paged_kv_last_page_len;
 
-    if (params.embedding.input_embedding.defined()) {
-      params_for_capture->embedding.input_embedding =
+    if (forward_input.embedding.input_embedding.defined()) {
+      input_for_capture->embedding.input_embedding =
           input_embeds_.slice(0, 0, padded_num_tokens);
     }
 
-    return params_for_capture;
+    return input_for_capture;
   };
 
   tokens_.slice(0, 0, actual_num_tokens).copy_(tokens, /*non_blocking=*/true);
@@ -245,8 +246,9 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
 
   const uint32_t graph_batch_size = padded_num_tokens;
 
-  std::vector<int32_t> q_seq_lens_vec(params.attention.host.q_seq_lens);
-  std::vector<int32_t> kv_seq_lens_vec(params.attention.host.kv_seq_lens);
+  std::vector<int32_t> q_seq_lens_vec(forward_input.attention.host.q_seq_lens);
+  std::vector<int32_t> kv_seq_lens_vec(
+      forward_input.attention.host.kv_seq_lens);
 
   if (!q_seq_lens_vec.empty()) {
     extend_q_cu_seq_lens(&q_seq_lens_vec, padding_needed, num_decoding_tokens_);
@@ -267,14 +269,15 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
           .copy_(q_seq_lens_diff, /*non_blocking=*/true);
       attn_metadata->q_seq_lens = q_seq_lens_values(q_seq_lens_diff.size(0));
     }
-  } else if (params.attention.device.q_seq_lens.defined()) {
-    q_seq_lens_.slice(0, 0, params.attention.device.q_seq_lens.size(0))
-        .copy_(params.attention.device.q_seq_lens, /*non_blocking=*/true);
+  } else if (forward_input.attention.device.q_seq_lens.defined()) {
+    q_seq_lens_.slice(0, 0, forward_input.attention.device.q_seq_lens.size(0))
+        .copy_(forward_input.attention.device.q_seq_lens,
+               /*non_blocking=*/true);
 
-    attn_metadata->q_cu_seq_lens =
-        q_seq_lens_.slice(0, 0, params.attention.device.q_seq_lens.size(0));
+    attn_metadata->q_cu_seq_lens = q_seq_lens_.slice(
+        0, 0, forward_input.attention.device.q_seq_lens.size(0));
 
-    if (params.attention.device.q_seq_lens.size(0) > 1) {
+    if (forward_input.attention.device.q_seq_lens.size(0) > 1) {
       auto q_seq_lens_diff = torch::diff(attn_metadata->q_cu_seq_lens);
       q_seq_lens_values_.slice(0, 0, q_seq_lens_diff.size(0))
           .copy_(q_seq_lens_diff, /*non_blocking=*/true);
@@ -302,14 +305,15 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
           .copy_(kv_seq_lens_diff, /*non_blocking=*/true);
       attn_metadata->kv_seq_lens = kv_seq_lens_values(kv_seq_lens_diff.size(0));
     }
-  } else if (params.attention.device.kv_seq_lens.defined()) {
-    kv_seq_lens_.slice(0, 0, params.attention.device.kv_seq_lens.size(0))
-        .copy_(params.attention.device.kv_seq_lens, /*non_blocking=*/true);
+  } else if (forward_input.attention.device.kv_seq_lens.defined()) {
+    kv_seq_lens_.slice(0, 0, forward_input.attention.device.kv_seq_lens.size(0))
+        .copy_(forward_input.attention.device.kv_seq_lens,
+               /*non_blocking=*/true);
 
-    attn_metadata->kv_cu_seq_lens =
-        kv_seq_lens_.slice(0, 0, params.attention.device.kv_seq_lens.size(0));
+    attn_metadata->kv_cu_seq_lens = kv_seq_lens_.slice(
+        0, 0, forward_input.attention.device.kv_seq_lens.size(0));
 
-    if (params.attention.device.kv_seq_lens.size(0) > 1) {
+    if (forward_input.attention.device.kv_seq_lens.size(0) > 1) {
       auto kv_seq_lens_diff = torch::diff(attn_metadata->kv_cu_seq_lens);
       kv_seq_lens_values_.slice(0, 0, kv_seq_lens_diff.size(0))
           .copy_(kv_seq_lens_diff, /*non_blocking=*/true);
@@ -317,12 +321,13 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
     }
   }
 
-  if (params.attention.device.new_cache_slots.defined()) {
-    const uint32_t src_size =
-        static_cast<uint32_t>(params.attention.device.new_cache_slots.size(0));
+  if (forward_input.attention.device.new_cache_slots.defined()) {
+    const uint32_t src_size = static_cast<uint32_t>(
+        forward_input.attention.device.new_cache_slots.size(0));
 
     new_cache_slots_.slice(0, 0, src_size)
-        .copy_(params.attention.device.new_cache_slots, /*non_blocking=*/true);
+        .copy_(forward_input.attention.device.new_cache_slots,
+               /*non_blocking=*/true);
 
     if (padded_num_tokens > src_size) {
       new_cache_slots_.slice(0, src_size, padded_num_tokens).fill_(-1);
@@ -331,14 +336,16 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
     attn_metadata->slot_mapping = new_cache_slots(padded_num_tokens);
   }
 
-  if (params.attention.device.block_tables.defined()) {
-    const int64_t actual_rows = params.attention.device.block_tables.size(0);
-    const int64_t actual_cols = params.attention.device.block_tables.size(1);
+  if (forward_input.attention.device.block_tables.defined()) {
+    const int64_t actual_rows =
+        forward_input.attention.device.block_tables.size(0);
+    const int64_t actual_cols =
+        forward_input.attention.device.block_tables.size(1);
 
     auto block_table_slice =
         block_table_.slice(0, 0, actual_rows).slice(1, 0, actual_cols);
 
-    block_table_slice.copy_(params.attention.device.block_tables,
+    block_table_slice.copy_(forward_input.attention.device.block_tables,
                             /*non_blocking=*/true);
 
     if (static_cast<uint32_t>(actual_rows) < graph_batch_size) {
@@ -350,27 +357,29 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
     }
   }
 
-  if (params.embedding.input_embedding.defined()) {
+  if (forward_input.embedding.input_embedding.defined()) {
     if (!input_embeds_.defined() || input_embeds_.numel() == 0) {
-      auto shape = params.embedding.input_embedding.sizes().vec();
+      auto shape = forward_input.embedding.input_embedding.sizes().vec();
       shape[0] = FLAGS_max_tokens_per_batch;
       input_embeds_ = torch::zeros(
-          shape, params.embedding.input_embedding.options().device(device_));
+          shape,
+          forward_input.embedding.input_embedding.options().device(device_));
     }
 
-    input_embeds_.slice(0, 0, params.embedding.input_embedding.size(0))
-        .copy_(params.embedding.input_embedding, /*non_blocking=*/true);
+    input_embeds_.slice(0, 0, forward_input.embedding.input_embedding.size(0))
+        .copy_(forward_input.embedding.input_embedding, /*non_blocking=*/true);
 
     if (padding_needed > 0) {
       input_embeds_.slice(0, actual_num_tokens, padded_num_tokens).fill_(0);
     }
   }
 
-  if (params.attention.device.paged_kv_indptr.defined()) {
-    const int64_t indptr_size = params.attention.device.paged_kv_indptr.size(0);
+  if (forward_input.attention.device.paged_kv_indptr.defined()) {
+    const int64_t indptr_size =
+        forward_input.attention.device.paged_kv_indptr.size(0);
 
     paged_kv_indptr_.slice(0, 0, indptr_size)
-        .copy_(params.attention.device.paged_kv_indptr,
+        .copy_(forward_input.attention.device.paged_kv_indptr,
                /*non_blocking=*/true);
 
     if (graph_batch_size + 1 > static_cast<uint32_t>(indptr_size)) {
@@ -386,23 +395,23 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
     attn_metadata->paged_kv_indptr = paged_kv_indptr(graph_batch_size);
   }
 
-  if (params.attention.device.paged_kv_indices.defined()) {
+  if (forward_input.attention.device.paged_kv_indices.defined()) {
     const int64_t indices_size =
-        params.attention.device.paged_kv_indices.size(0);
+        forward_input.attention.device.paged_kv_indices.size(0);
 
     paged_kv_indices_.slice(0, 0, indices_size)
-        .copy_(params.attention.device.paged_kv_indices,
+        .copy_(forward_input.attention.device.paged_kv_indices,
                /*non_blocking=*/true);
 
     attn_metadata->paged_kv_indices = paged_kv_indices_;
   }
 
-  if (params.attention.device.paged_kv_last_page_len.defined()) {
+  if (forward_input.attention.device.paged_kv_last_page_len.defined()) {
     const int64_t len_size =
-        params.attention.device.paged_kv_last_page_len.size(0);
+        forward_input.attention.device.paged_kv_last_page_len.size(0);
 
     paged_kv_last_page_len_.slice(0, 0, len_size)
-        .copy_(params.attention.device.paged_kv_last_page_len,
+        .copy_(forward_input.attention.device.paged_kv_last_page_len,
                /*non_blocking=*/true);
 
     if (graph_batch_size > static_cast<uint32_t>(len_size)) {
@@ -415,13 +424,13 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
 
   attn_metadata->qo_indptr = decode_qo_indptr(graph_batch_size);
 
-  return build_capture_params_if_needed();
+  return build_capture_input_if_needed();
 }
 
 void DcuGraphPersistentParam::update_decode_input_buffer(
     const torch::Tensor& tokens,
     const torch::Tensor& positions,
-    const ModelInputParams& params,
+    const ForwardInput& forward_input,
     uint32_t padded_num_tokens) {
   const uint32_t actual_num_tokens =
       static_cast<uint32_t>(tokens.size(/*dim=*/0));
@@ -447,8 +456,9 @@ void DcuGraphPersistentParam::update_decode_input_buffer(
     positions_.slice(slice_dim, actual_num_tokens, padded_num_tokens).fill_(0);
   }
 
-  std::vector<int32_t> q_seq_lens_vec(params.attention.host.q_seq_lens);
-  std::vector<int32_t> kv_seq_lens_vec(params.attention.host.kv_seq_lens);
+  std::vector<int32_t> q_seq_lens_vec(forward_input.attention.host.q_seq_lens);
+  std::vector<int32_t> kv_seq_lens_vec(
+      forward_input.attention.host.kv_seq_lens);
 
   if (!q_seq_lens_vec.empty()) {
     extend_q_cu_seq_lens(&q_seq_lens_vec, padding_needed, num_decoding_tokens_);
@@ -465,13 +475,14 @@ void DcuGraphPersistentParam::update_decode_input_buffer(
       q_seq_lens_values_.slice(0, 0, q_seq_lens_diff.size(0))
           .copy_(q_seq_lens_diff, /*non_blocking=*/true);
     }
-  } else if (params.attention.device.q_seq_lens.defined()) {
-    q_seq_lens_.slice(0, 0, params.attention.device.q_seq_lens.size(0))
-        .copy_(params.attention.device.q_seq_lens, /*non_blocking=*/true);
+  } else if (forward_input.attention.device.q_seq_lens.defined()) {
+    q_seq_lens_.slice(0, 0, forward_input.attention.device.q_seq_lens.size(0))
+        .copy_(forward_input.attention.device.q_seq_lens,
+               /*non_blocking=*/true);
 
-    if (params.attention.device.q_seq_lens.size(0) > 1) {
-      auto q_seq_lens_diff = torch::diff(q_seq_lens(
-          static_cast<uint32_t>(params.attention.device.q_seq_lens.size(0))));
+    if (forward_input.attention.device.q_seq_lens.size(0) > 1) {
+      auto q_seq_lens_diff = torch::diff(q_seq_lens(static_cast<uint32_t>(
+          forward_input.attention.device.q_seq_lens.size(0))));
       q_seq_lens_values_.slice(0, 0, q_seq_lens_diff.size(0))
           .copy_(q_seq_lens_diff, /*non_blocking=*/true);
     }
@@ -492,37 +503,41 @@ void DcuGraphPersistentParam::update_decode_input_buffer(
       kv_seq_lens_values_.slice(0, 0, kv_seq_lens_diff.size(0))
           .copy_(kv_seq_lens_diff, /*non_blocking=*/true);
     }
-  } else if (params.attention.device.kv_seq_lens.defined()) {
-    kv_seq_lens_.slice(0, 0, params.attention.device.kv_seq_lens.size(0))
-        .copy_(params.attention.device.kv_seq_lens, /*non_blocking=*/true);
+  } else if (forward_input.attention.device.kv_seq_lens.defined()) {
+    kv_seq_lens_.slice(0, 0, forward_input.attention.device.kv_seq_lens.size(0))
+        .copy_(forward_input.attention.device.kv_seq_lens,
+               /*non_blocking=*/true);
 
-    if (params.attention.device.kv_seq_lens.size(0) > 1) {
-      auto kv_seq_lens_diff = torch::diff(kv_seq_lens(
-          static_cast<uint32_t>(params.attention.device.kv_seq_lens.size(0))));
+    if (forward_input.attention.device.kv_seq_lens.size(0) > 1) {
+      auto kv_seq_lens_diff = torch::diff(kv_seq_lens(static_cast<uint32_t>(
+          forward_input.attention.device.kv_seq_lens.size(0))));
       kv_seq_lens_values_.slice(0, 0, kv_seq_lens_diff.size(0))
           .copy_(kv_seq_lens_diff, /*non_blocking=*/true);
     }
   }
 
-  if (params.attention.device.new_cache_slots.defined()) {
-    const uint32_t src_size =
-        static_cast<uint32_t>(params.attention.device.new_cache_slots.size(0));
+  if (forward_input.attention.device.new_cache_slots.defined()) {
+    const uint32_t src_size = static_cast<uint32_t>(
+        forward_input.attention.device.new_cache_slots.size(0));
 
     new_cache_slots_.slice(0, 0, src_size)
-        .copy_(params.attention.device.new_cache_slots, /*non_blocking=*/true);
+        .copy_(forward_input.attention.device.new_cache_slots,
+               /*non_blocking=*/true);
 
     if (padded_num_tokens > src_size) {
       new_cache_slots_.slice(0, src_size, padded_num_tokens).fill_(-1);
     }
   }
 
-  if (params.attention.device.block_tables.defined()) {
-    const int64_t actual_rows = params.attention.device.block_tables.size(0);
-    const int64_t actual_cols = params.attention.device.block_tables.size(1);
+  if (forward_input.attention.device.block_tables.defined()) {
+    const int64_t actual_rows =
+        forward_input.attention.device.block_tables.size(0);
+    const int64_t actual_cols =
+        forward_input.attention.device.block_tables.size(1);
 
     auto block_table_slice =
         block_table_.slice(0, 0, actual_rows).slice(1, 0, actual_cols);
-    block_table_slice.copy_(params.attention.device.block_tables,
+    block_table_slice.copy_(forward_input.attention.device.block_tables,
                             /*non_blocking=*/true);
 
     if (static_cast<uint32_t>(actual_rows) < padded_num_tokens) {
@@ -530,16 +545,17 @@ void DcuGraphPersistentParam::update_decode_input_buffer(
     }
   }
 
-  if (params.embedding.input_embedding.defined()) {
+  if (forward_input.embedding.input_embedding.defined()) {
     if (!input_embeds_.defined() || input_embeds_.numel() == 0) {
-      auto shape = params.embedding.input_embedding.sizes().vec();
+      auto shape = forward_input.embedding.input_embedding.sizes().vec();
       shape[0] = FLAGS_max_tokens_per_batch;
       input_embeds_ = torch::zeros(
-          shape, params.embedding.input_embedding.options().device(device_));
+          shape,
+          forward_input.embedding.input_embedding.options().device(device_));
     }
 
-    input_embeds_.slice(0, 0, params.embedding.input_embedding.size(0))
-        .copy_(params.embedding.input_embedding, /*non_blocking=*/true);
+    input_embeds_.slice(0, 0, forward_input.embedding.input_embedding.size(0))
+        .copy_(forward_input.embedding.input_embedding, /*non_blocking=*/true);
 
     if (padding_needed > 0) {
       input_embeds_.slice(0, actual_num_tokens, padded_num_tokens).fill_(0);
@@ -547,61 +563,62 @@ void DcuGraphPersistentParam::update_decode_input_buffer(
   }
 }
 
-ModelInputParams DcuGraphPersistentParam::init_decode_params(
+ForwardInput DcuGraphPersistentParam::init_decode_input(
     const torch::Tensor& tokens,
     const torch::Tensor& positions,
-    const ModelInputParams& params,
+    const ForwardInput& forward_input,
     uint32_t padded_num_tokens,
     uint32_t graph_max_seq_len) {
-  update_decode_input_buffer(tokens, positions, params, padded_num_tokens);
+  update_decode_input_buffer(
+      tokens, positions, forward_input, padded_num_tokens);
 
-  ModelInputParams decode_params = params;
-  decode_params.enable_graph = true;
-  decode_params.attention.device.q_seq_lens = q_seq_lens(padded_num_tokens + 1);
-  decode_params.attention.device.kv_seq_lens =
+  ForwardInput decode_input = forward_input;
+  decode_input.enable_graph = true;
+  decode_input.attention.device.q_seq_lens = q_seq_lens(padded_num_tokens + 1);
+  decode_input.attention.device.kv_seq_lens =
       kv_seq_lens(padded_num_tokens + 1);
-  decode_params.attention.device.new_cache_slots =
+  decode_input.attention.device.new_cache_slots =
       new_cache_slots(padded_num_tokens);
-  decode_params.attention.device.block_tables = block_tables(padded_num_tokens);
+  decode_input.attention.device.block_tables = block_tables(padded_num_tokens);
 
-  if (params.embedding.input_embedding.defined()) {
-    decode_params.embedding.input_embedding =
+  if (forward_input.embedding.input_embedding.defined()) {
+    decode_input.embedding.input_embedding =
         input_embeds_.slice(0, 0, padded_num_tokens);
   }
 
   auto attn_metadata = std::make_shared<layer::AttentionMetadata>();
-  attn_metadata->q_cu_seq_lens = decode_params.attention.device.q_seq_lens;
-  attn_metadata->kv_cu_seq_lens = decode_params.attention.device.kv_seq_lens;
+  attn_metadata->q_cu_seq_lens = decode_input.attention.device.q_seq_lens;
+  attn_metadata->kv_cu_seq_lens = decode_input.attention.device.kv_seq_lens;
   attn_metadata->q_seq_lens = q_seq_lens_values(padded_num_tokens);
   attn_metadata->kv_seq_lens = kv_seq_lens_values(padded_num_tokens);
-  attn_metadata->block_table = decode_params.attention.device.block_tables;
-  attn_metadata->slot_mapping = decode_params.attention.device.new_cache_slots;
-  attn_metadata->max_query_len = params.meta.q_max_seq_len;
+  attn_metadata->block_table = decode_input.attention.device.block_tables;
+  attn_metadata->slot_mapping = decode_input.attention.device.new_cache_slots;
+  attn_metadata->max_query_len = forward_input.meta.q_max_seq_len;
   attn_metadata->max_seq_len = graph_max_seq_len > 0
                                    ? graph_max_seq_len
                                    : args_.max_position_embeddings();
   attn_metadata->compute_dtype = "float";
   attn_metadata->is_prefill = false;
   attn_metadata->is_chunked_prefill = false;
-  attn_metadata->is_dummy = (params.meta.q_max_seq_len == 0);
+  attn_metadata->is_dummy = (forward_input.meta.q_max_seq_len == 0);
   attn_metadata->is_causal = false;
   attn_metadata->enable_cuda_graph = true;
 
-  if (!params.attention.host.kv_seq_lens.empty()) {
+  if (!forward_input.attention.host.kv_seq_lens.empty()) {
     const bool is_cu_seq_lens =
-        params.attention.host.kv_seq_lens.size() ==
-            static_cast<std::size_t>(params.meta.num_sequences + 1) &&
-        params.attention.host.kv_seq_lens.front() == 0;
+        forward_input.attention.host.kv_seq_lens.size() ==
+            static_cast<std::size_t>(forward_input.meta.num_sequences + 1) &&
+        forward_input.attention.host.kv_seq_lens.front() == 0;
     attn_metadata->total_kv_len =
         is_cu_seq_lens
-            ? params.attention.host.kv_seq_lens.back()
-            : std::accumulate(params.attention.host.kv_seq_lens.begin(),
-                              params.attention.host.kv_seq_lens.end(),
+            ? forward_input.attention.host.kv_seq_lens.back()
+            : std::accumulate(forward_input.attention.host.kv_seq_lens.begin(),
+                              forward_input.attention.host.kv_seq_lens.end(),
                               int64_t{0});
   }
 
-  decode_params.attn_metadata = attn_metadata;
-  return decode_params;
+  decode_input.attn_metadata = attn_metadata;
+  return decode_input;
 }
 
 void DcuGraphPersistentParam::set_hidden_states(const torch::Tensor& value) {
@@ -661,7 +678,7 @@ bool DcuGraph::capture(CausalLM* model,
                        const runtime::Options& options,
                        const torch::Tensor& tokens,
                        const torch::Tensor& positions,
-                       const ModelInputParams& params,
+                       const ForwardInput& forward_input,
                        std::vector<KVCache>& kv_cache,
                        uint32_t bucket_num_tokens,
                        const at::hip::MempoolId_t& pool,
@@ -688,22 +705,30 @@ bool DcuGraph::capture(CausalLM* model,
   std::optional<c10::hip::HIPStreamGuard> stream_guard;
   stream_guard.emplace(capture_stream);
 
-  std::optional<ModelInputParams> graph_params_opt;
+  std::optional<ForwardInput> graph_input_opt;
   if (is_piecewise_) {
-    graph_params_opt = persistent_param_.update(tokens,
-                                                positions,
-                                                params,
-                                                padded_num_tokens_,
-                                                /*return_capture_params=*/true,
-                                                graph_max_seq_len);
+    graph_input_opt = persistent_param_.update(tokens,
+                                               positions,
+                                               forward_input,
+                                               padded_num_tokens_,
+                                               /*return_capture_input=*/true,
+                                               graph_max_seq_len);
   } else {
-    graph_params_opt = persistent_param_.init_decode_params(
-        tokens, positions, params, padded_num_tokens_, graph_max_seq_len);
+    graph_input_opt = persistent_param_.init_decode_input(tokens,
+                                                          positions,
+                                                          forward_input,
+                                                          padded_num_tokens_,
+                                                          graph_max_seq_len);
   }
 
-  CHECK(graph_params_opt.has_value())
-      << "DcuGraphPersistentParam::update should return ModelInputParams "
+  CHECK(graph_input_opt.has_value())
+      << "DcuGraphPersistentParam::update should return ForwardInput "
          "during capture";
+  ForwardInput graph_input = graph_input_opt.value();
+  graph_input.token_ids =
+      persistent_param_.persistent_tokens(padded_num_tokens_);
+  graph_input.positions =
+      persistent_param_.persistent_positions(padded_num_tokens_);
 
   VLOG(1) << "DCU graph capture begin, bucket_num_tokens=" << bucket_num_tokens
           << ", actual_num_tokens=" << actual_num_tokens
@@ -713,20 +738,13 @@ bool DcuGraph::capture(CausalLM* model,
   if (is_piecewise_) {
     // Warmup: execute forward once without capture to initialize hipBLAS
     // handles and other HIP resources that cannot be created during capture.
-    model->forward(persistent_param_.persistent_tokens(padded_num_tokens_),
-                   persistent_param_.persistent_positions(padded_num_tokens_),
-                   kv_cache,
-                   graph_params_opt.value());
+    model->forward(graph_input, kv_cache);
 
     auto& capture = ::xllm::runtime::dcu::GlobalCaptureInstance::get_instance();
 
     capture.begin_capture(pool);
 
-    auto forward_result = model->forward(
-        persistent_param_.persistent_tokens(padded_num_tokens_),
-        persistent_param_.persistent_positions(padded_num_tokens_),
-        kv_cache,
-        graph_params_opt.value());
+    auto forward_result = model->forward(graph_input, kv_cache);
 
     persistent_param_.set_hidden_states(forward_result.hidden_states);
 
@@ -741,11 +759,7 @@ bool DcuGraph::capture(CausalLM* model,
   } else {
     graph_.capture_begin(pool, hipStreamCaptureModeThreadLocal);
 
-    auto forward_result = model->forward(
-        persistent_param_.persistent_tokens(padded_num_tokens_),
-        persistent_param_.persistent_positions(padded_num_tokens_),
-        kv_cache,
-        graph_params_opt.value());
+    auto forward_result = model->forward(graph_input, kv_cache);
 
     persistent_param_.set_hidden_states(forward_result.hidden_states);
 
@@ -769,7 +783,7 @@ bool DcuGraph::capture(CausalLM* model,
 ModelOutput DcuGraph::replay(const torch::Tensor& tokens,
                              const torch::Tensor& positions,
                              std::vector<KVCache>& kv_cache,
-                             const ModelInputParams& params) {
+                             const ForwardInput& forward_input) {
   const uint32_t actual_num_tokens =
       static_cast<uint32_t>(tokens.size(/*dim=*/0));
 
@@ -777,28 +791,27 @@ ModelOutput DcuGraph::replay(const torch::Tensor& tokens,
       << "actual_num_tokens must be <= padded_num_tokens_";
 
   if (is_piecewise_) {
-    auto updated_params =
-        persistent_param_.update(tokens,
-                                 positions,
-                                 params,
-                                 padded_num_tokens_,
-                                 /*return_capture_params=*/true,
-                                 graph_max_seq_len_);
+    auto updated_input = persistent_param_.update(tokens,
+                                                  positions,
+                                                  forward_input,
+                                                  padded_num_tokens_,
+                                                  /*return_capture_input=*/true,
+                                                  graph_max_seq_len_);
 
     CHECK(piecewise_graph_ != nullptr)
         << "piecewise_graph_ should not be null for piecewise replay";
-    CHECK(updated_params.has_value())
-        << "update() should return ModelInputParams for piecewise replay";
-    CHECK(updated_params->attn_metadata)
+    CHECK(updated_input.has_value())
+        << "update() should return ForwardInput for piecewise replay";
+    CHECK(updated_input->attn_metadata)
         << "attn_metadata is required for piecewise replay";
 
     ::xllm::kernel::dcu::AttentionReplayParams runner_params;
     runner_params.actual_num_tokens = actual_num_tokens;
-    runner_params.attn_metadata = updated_params->attn_metadata;
+    runner_params.attn_metadata = updated_input->attn_metadata;
     piecewise_graph_->replay(runner_params);
   } else {
     persistent_param_.update_decode_input_buffer(
-        tokens, positions, params, padded_num_tokens_);
+        tokens, positions, forward_input, padded_num_tokens_);
     graph_.replay();
   }
 
@@ -929,12 +942,12 @@ DcuStream DcuGraphExecutorImpl::get_capture_stream(
   return thread_capture_stream;
 }
 
-ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
-                                      const torch::Tensor& positions,
-                                      std::vector<KVCache>& kv_caches,
-                                      const ModelInputParams& params) {
-  const bool is_prefill = params.meta.batch_forward_type.is_prefill();
-  const bool is_decode = params.meta.batch_forward_type.is_decode();
+ModelOutput DcuGraphExecutorImpl::run(const ForwardInput& forward_input,
+                                      std::vector<KVCache>& kv_caches) {
+  const torch::Tensor& tokens = forward_input.token_ids;
+  const torch::Tensor& positions = forward_input.positions;
+  const bool is_prefill = forward_input.meta.batch_forward_type.is_prefill();
+  const bool is_decode = forward_input.meta.batch_forward_type.is_decode();
 
   VLOG(1) << "DCU executor run: "
           << "is_prefill=" << is_prefill << ", is_decode=" << is_decode
@@ -950,15 +963,17 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
   bool graph_mode =
       is_decode && ::xllm::ExecutionConfig::get_instance().enable_graph();
 
-  if (params.parallel.dp_global_token_nums.size() > 1) {
-    auto max_it = std::max_element(params.parallel.dp_global_token_nums.begin(),
-                                   params.parallel.dp_global_token_nums.end());
-    CHECK(max_it != params.parallel.dp_global_token_nums.end());
+  if (forward_input.parallel.dp_global_token_nums.size() > 1) {
+    auto max_it =
+        std::max_element(forward_input.parallel.dp_global_token_nums.begin(),
+                         forward_input.parallel.dp_global_token_nums.end());
+    CHECK(max_it != forward_input.parallel.dp_global_token_nums.end());
 
     actual_num_tokens = static_cast<uint32_t>(*max_it);
 
-    const auto& dp_is_decode = params.parallel.dp_is_decode;
-    CHECK_EQ(dp_is_decode.size(), params.parallel.dp_global_token_nums.size());
+    const auto& dp_is_decode = forward_input.parallel.dp_is_decode;
+    CHECK_EQ(dp_is_decode.size(),
+             forward_input.parallel.dp_global_token_nums.size());
 
     graph_mode = ::xllm::ExecutionConfig::get_instance().enable_graph() &&
                  std::find(dp_is_decode.begin(), dp_is_decode.end(), 0) ==
@@ -974,7 +989,7 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
               << " exceeds max_tokens_for_graph_mode ("
               << max_tokens_for_graph_mode_ << "), falling back to eager";
       COUNTER_INC(num_model_execution_total_eager);
-      return model_->forward(tokens, positions, kv_caches, params);
+      return model_->forward(forward_input, kv_caches);
     }
     const uint32_t bucket_num_tokens = actual_num_tokens;
     const uint32_t local_actual_tokens =
@@ -986,7 +1001,8 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
               << bucket_num_tokens
               << ", actual_num_tokens=" << local_actual_tokens;
 
-      auto result = it->second->replay(tokens, positions, kv_caches, params);
+      auto result =
+          it->second->replay(tokens, positions, kv_caches, forward_input);
       auto hidden_states =
           result.hidden_states.slice(0, 0, local_actual_tokens);
 
@@ -1007,7 +1023,7 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
                                                 options_,
                                                 tokens,
                                                 positions,
-                                                params,
+                                                forward_input,
                                                 kv_caches,
                                                 bucket_num_tokens,
                                                 graph_pool_,
@@ -1018,13 +1034,13 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
                    << "bucket_num_tokens=" << bucket_num_tokens
                    << ". Falling back to eager.";
       COUNTER_INC(num_model_execution_total_eager);
-      return model_->forward(tokens, positions, kv_caches, params);
+      return model_->forward(forward_input, kv_caches);
     }
 
     prefill_graphs_[bucket_num_tokens] = std::move(graph);
 
     auto result = prefill_graphs_[bucket_num_tokens]->replay(
-        tokens, positions, kv_caches, params);
+        tokens, positions, kv_caches, forward_input);
 
     auto hidden_states = result.hidden_states.slice(0, 0, local_actual_tokens);
 
@@ -1034,29 +1050,29 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
 
   if (!graph_mode || is_prefill) {
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(forward_input, kv_caches);
   }
 
-  if (params.has_llmrec_params()) {
+  if (forward_input.has_llmrec_params()) {
     VLOG(1) << "DCU graph does not support LLMRec/xAttention yet; "
             << "falling back to eager.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(forward_input, kv_caches);
   }
 
   const int64_t max_seq_len = args_.max_position_embeddings();
-  if (params.meta.kv_max_seq_len > max_seq_len) {
+  if (forward_input.meta.kv_max_seq_len > max_seq_len) {
     LOG(WARNING) << "Not suitable for DCU graph: kv_max_seq_len="
-                 << params.meta.kv_max_seq_len
+                 << forward_input.meta.kv_max_seq_len
                  << ", max_seq_len=" << max_seq_len
                  << ". Falling back to eager.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(forward_input, kv_caches);
   }
 
   const uint32_t bucket_num_tokens = get_bucket_num_tokens(actual_num_tokens);
-  const uint32_t graph_max_seq_len =
-      get_graph_max_seq_len(static_cast<uint32_t>(params.meta.kv_max_seq_len));
+  const uint32_t graph_max_seq_len = get_graph_max_seq_len(
+      static_cast<uint32_t>(forward_input.meta.kv_max_seq_len));
   const uint32_t graph_shape_id =
       get_graph_shape_id(bucket_num_tokens, graph_max_seq_len);
   const uint32_t local_actual_tokens =
@@ -1068,7 +1084,8 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
             << ", graph_max_seq_len=" << graph_max_seq_len
             << ", actual_num_tokens=" << local_actual_tokens;
 
-    auto result = it->second->replay(tokens, positions, kv_caches, params);
+    auto result =
+        it->second->replay(tokens, positions, kv_caches, forward_input);
     auto hidden_states = result.hidden_states.slice(0, 0, local_actual_tokens);
 
     return attach_aux_hidden_states_if_needed(hidden_states,
@@ -1086,7 +1103,7 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
                                               options_,
                                               tokens,
                                               positions,
-                                              params,
+                                              forward_input,
                                               kv_caches,
                                               bucket_num_tokens,
                                               graph_pool_,
@@ -1097,13 +1114,13 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
     LOG(WARNING) << "Failed to capture DCU graph for bucket_num_tokens="
                  << bucket_num_tokens << ". Falling back to eager.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(forward_input, kv_caches);
   }
 
   graphs_[graph_shape_id] = std::move(graph);
 
-  auto result =
-      graphs_[graph_shape_id]->replay(tokens, positions, kv_caches, params);
+  auto result = graphs_[graph_shape_id]->replay(
+      tokens, positions, kv_caches, forward_input);
 
   auto hidden_states = result.hidden_states.slice(0, 0, local_actual_tokens);
 

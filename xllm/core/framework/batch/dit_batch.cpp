@@ -50,9 +50,10 @@ namespace xllm {
 DiTForwardInput DiTBatch::prepare_forward_input() {
   CHECK(!request_vec_.empty());
 
-  DiTForwardInput input;
-  input.batch_size = request_vec_.size();
-  input.generation_params = request_vec_[0]->state().generation_params();
+  DiTForwardInput forward_input;
+  forward_input.batch_size = request_vec_.size();
+  forward_input.generation_params =
+      request_vec_[0]->state().generation_params();
 
   std::vector<torch::Tensor> prompt_embeds;
   std::vector<torch::Tensor> pooled_prompt_embeds;
@@ -79,76 +80,79 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
   last_images.reserve(batch_size);
 
   std::vector<torch::Tensor> images_list;
-  size_t images_size = request_vec_[0]->state().input_params().images.size();
+  size_t images_size = request_vec_[0]->state().input().images.size();
   bool images_size_valid = images_size > 0;
   for (const auto& request : request_vec_) {
     const auto& generation_params = request->state().generation_params();
-    if (input.generation_params != generation_params) {
+    if (forward_input.generation_params != generation_params) {
       LOG(WARNING) << " dit generation params not equal";
     }
 
-    const auto& input_params = request->state().input_params();
-    if (!input_params.prompt.empty())
-      input.prompts.emplace_back(input_params.prompt);
+    const auto& request_input = request->state().input();
+    if (!request_input.prompt.empty())
+      forward_input.prompts.emplace_back(request_input.prompt);
 
-    if (!input_params.prompt_2.empty())
-      input.prompts_2.emplace_back(input_params.prompt_2);
+    if (!request_input.prompt_2.empty())
+      forward_input.prompts_2.emplace_back(request_input.prompt_2);
 
-    if (!input_params.negative_prompt.empty())
-      input.negative_prompts.emplace_back(input_params.negative_prompt);
+    if (!request_input.negative_prompt.empty())
+      forward_input.negative_prompts.emplace_back(
+          request_input.negative_prompt);
 
-    if (!input_params.negative_prompt_2.empty())
-      input.negative_prompts_2.emplace_back(input_params.negative_prompt_2);
+    if (!request_input.negative_prompt_2.empty())
+      forward_input.negative_prompts_2.emplace_back(
+          request_input.negative_prompt_2);
 
-    prompt_embeds.emplace_back(input_params.prompt_embed);
-    pooled_prompt_embeds.emplace_back(input_params.pooled_prompt_embed);
+    prompt_embeds.emplace_back(request_input.prompt_embed);
+    pooled_prompt_embeds.emplace_back(request_input.pooled_prompt_embed);
 
-    negative_prompt_embeds.emplace_back(input_params.negative_prompt_embed);
+    negative_prompt_embeds.emplace_back(request_input.negative_prompt_embed);
     negative_pooled_prompt_embeds.emplace_back(
-        input_params.negative_pooled_prompt_embed);
+        request_input.negative_pooled_prompt_embed);
 
-    latents.emplace_back(input_params.latent);
-    masked_image_latents.emplace_back(input_params.masked_image_latent);
+    latents.emplace_back(request_input.latent);
+    masked_image_latents.emplace_back(request_input.masked_image_latent);
 
-    images.emplace_back(input_params.image);
-    mask_images.emplace_back(input_params.mask_image);
-    control_images.emplace_back(input_params.control_image);
-    last_images.emplace_back(input_params.last_image);
+    images.emplace_back(request_input.image);
+    mask_images.emplace_back(request_input.mask_image);
+    control_images.emplace_back(request_input.control_image);
+    last_images.emplace_back(request_input.last_image);
 
-    if (input_params.images.size() != images_size) {
+    if (request_input.images.size() != images_size) {
       images_size_valid = false;
     }
 
     // Voice cloning: prompt_audio is per-request (batch_size==1 in practice).
     // Forward the first defined tensor; multi-batch voice cloning is not
     // supported (different prompt lengths can't be stacked).
-    if (input_params.prompt_audio.defined() && !input.prompt_audio.defined()) {
-      input.prompt_audio = input_params.prompt_audio;
+    if (request_input.prompt_audio.defined() &&
+        !forward_input.prompt_audio.defined()) {
+      forward_input.prompt_audio = request_input.prompt_audio;
     }
-    if (!input_params.audio_prompt_text.empty() &&
-        input.audio_prompt_text.empty()) {
-      input.audio_prompt_text = input_params.audio_prompt_text;
+    if (!request_input.audio_prompt_text.empty() &&
+        forward_input.audio_prompt_text.empty()) {
+      forward_input.audio_prompt_text = request_input.audio_prompt_text;
     }
   }
 
-  if (input.prompts.size() != request_vec_.size()) {
-    input.prompts.clear();
+  if (forward_input.prompts.size() != request_vec_.size()) {
+    forward_input.prompts.clear();
   }
 
-  if (input.prompts_2.size() != request_vec_.size()) {
-    input.prompts_2.clear();
+  if (forward_input.prompts_2.size() != request_vec_.size()) {
+    forward_input.prompts_2.clear();
   }
 
-  if (input.negative_prompts.size() != request_vec_.size()) {
-    input.negative_prompts.clear();
+  if (forward_input.negative_prompts.size() != request_vec_.size()) {
+    forward_input.negative_prompts.clear();
   }
 
-  if (input.negative_prompts_2.size() != request_vec_.size()) {
-    input.negative_prompts_2.clear();
+  if (forward_input.negative_prompts_2.size() != request_vec_.size()) {
+    forward_input.negative_prompts_2.clear();
   }
 
   if (check_tensors_valid(images)) {
-    input.images = torch::stack(images);
+    forward_input.images = torch::stack(images);
   }
 
   if (images_size_valid) {
@@ -160,7 +164,7 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
     for (size_t idx = 0; idx < images_size; ++idx) {
       vec.clear();
       for (const auto& req : request_vec_) {
-        vec.emplace_back(req->state().input_params().images[idx]);
+        vec.emplace_back(req->state().input().images[idx]);
       }
       if (!check_tensors_valid(vec)) {
         all_valid = false;
@@ -169,48 +173,48 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
       images_list.emplace_back(torch::stack(vec));
     }
     if (all_valid) {
-      input.images_list = std::move(images_list);
+      forward_input.images_list = std::move(images_list);
     }
   }
 
   if (check_tensors_valid(mask_images)) {
-    input.mask_images = torch::stack(mask_images);
+    forward_input.mask_images = torch::stack(mask_images);
   }
 
   if (check_tensors_valid(control_images)) {
-    input.control_image = torch::stack(control_images);
+    forward_input.control_image = torch::stack(control_images);
   }
 
   if (check_tensors_valid(prompt_embeds)) {
-    input.prompt_embeds = torch::stack(prompt_embeds);
+    forward_input.prompt_embeds = torch::stack(prompt_embeds);
   }
 
   if (check_tensors_valid(pooled_prompt_embeds)) {
-    input.pooled_prompt_embeds = torch::stack(pooled_prompt_embeds);
+    forward_input.pooled_prompt_embeds = torch::stack(pooled_prompt_embeds);
   }
 
   if (check_tensors_valid(negative_prompt_embeds)) {
-    input.negative_prompt_embeds = torch::stack(negative_prompt_embeds);
+    forward_input.negative_prompt_embeds = torch::stack(negative_prompt_embeds);
   }
 
   if (check_tensors_valid(negative_pooled_prompt_embeds)) {
-    input.negative_pooled_prompt_embeds =
+    forward_input.negative_pooled_prompt_embeds =
         torch::stack(negative_pooled_prompt_embeds);
   }
 
   if (check_tensors_valid(latents)) {
-    input.latents = torch::stack(latents);
+    forward_input.latents = torch::stack(latents);
   }
 
   if (check_tensors_valid(masked_image_latents)) {
-    input.masked_image_latents = torch::stack(masked_image_latents);
+    forward_input.masked_image_latents = torch::stack(masked_image_latents);
   }
 
   if (check_tensors_valid(last_images)) {
-    input.last_images = torch::stack(last_images);
+    forward_input.last_images = torch::stack(last_images);
   }
 
-  return input;
+  return forward_input;
 }
 
 void DiTBatch::process_forward_output(const DiTForwardOutput& output) {

@@ -14,6 +14,8 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+
+#include "runtime/forward_params.h"
 #ifdef TORCH_HIGHER_THAN_PTA6
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
@@ -28,7 +30,7 @@ limitations under the License.
 
 #include "atb/atb_infer.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "loader/eagle3_decoder_loader.h"
@@ -42,6 +44,8 @@ limitations under the License.
 #include "xllm_atb_layers/models/eagle3/layer/decoder_layer.h"
 
 namespace xllm {
+struct ForwardInput;
+
 namespace layer {
 
 class NpuEagle3DecoderLayerImpl : public BaseLayer {
@@ -60,7 +64,7 @@ class NpuEagle3DecoderLayerImpl : public BaseLayer {
                         torch::Tensor& sin_pos,
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
-                        ModelInputParams& input_params,
+                        ForwardInput& forward_input,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
                         int node_id = 0);
@@ -79,7 +83,7 @@ class NpuEagle3DecoderLayerImpl : public BaseLayer {
                                torch::Tensor& sin_pos,
                                torch::Tensor& attn_mask,
                                KVCache& kv_cache,
-                               ModelInputParams& input_params,
+                               ForwardInput& forward_input,
                                bool is_prefill);
 
   void param_from_args(atb_speed::eagle3::DecoderLayerParam& param,

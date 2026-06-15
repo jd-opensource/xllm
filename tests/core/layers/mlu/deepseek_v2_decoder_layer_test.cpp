@@ -25,7 +25,7 @@ limitations under the License.
 #include "core/framework/config/eplb_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
@@ -64,22 +64,21 @@ class DeepseekV2DecoderLayerTestPeer {
       DeepseekV2DecoderLayerImpl& decoder,
       torch::Tensor x,
       const torch::Tensor& residual,
-      const ModelInputParams& input_params,
+      const ForwardInput& forward_input,
       DeepseekV2AttentionImpl::PostAttnLayout attn_layout,
       bool need_dp_gather,
       bool enable_moe_all2all) {
-    (void)input_params;
+    (void)forward_input;
     (void)need_dp_gather;
     (void)enable_moe_all2all;
     return decoder.build_post_attn_carrier(x, residual, attn_layout);
   }
 
-  static torch::Tensor restore_ffn_output(
-      DeepseekV2DecoderLayerImpl& decoder,
-      torch::Tensor x,
-      const Carrier& carrier,
-      const ModelInputParams& input_params) {
-    (void)input_params;
+  static torch::Tensor restore_ffn_output(DeepseekV2DecoderLayerImpl& decoder,
+                                          torch::Tensor x,
+                                          const Carrier& carrier,
+                                          const ForwardInput& forward_input) {
+    (void)forward_input;
     return decoder.restore_ffn_output(x, carrier);
   }
 
@@ -107,8 +106,9 @@ class DeepseekV2DecoderLayerTestPeer {
 
   static torch::Tensor run_mlp(DeepseekV2DecoderLayerImpl& decoder,
                                torch::Tensor x,
-                               const ModelInputParams& input_params) {
-    return decoder.run_mlp(std::move(x), input_params);
+                               BatchForwardType batch_forward_type) {
+    return decoder.run_mlp(std::move(x),
+                           decoder.can_sp_chunk(batch_forward_type));
   }
 
   static int64_t sp_ffn_chunk(DeepseekV2DecoderLayerImpl& decoder) {
@@ -736,35 +736,35 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     decoder->set_sequence_parallel_context(&sp_ctx_);
   }
 
-  ModelInputParams build_prefill_params(int64_t batch_size, int64_t seq_len) {
-    ModelInputParams input_params;
-    input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
-    input_params.meta.num_sequences = batch_size;
-    input_params.meta.q_max_seq_len = seq_len;
-    input_params.meta.kv_max_seq_len = batch_size * seq_len;
-    input_params.attention.device.q_seq_lens = torch::arange(
+  ForwardInput build_prefill_input(int64_t batch_size, int64_t seq_len) {
+    ForwardInput forward_input;
+    forward_input.meta.batch_forward_type = BatchForwardType::PREFILL;
+    forward_input.meta.num_sequences = batch_size;
+    forward_input.meta.q_max_seq_len = seq_len;
+    forward_input.meta.kv_max_seq_len = batch_size * seq_len;
+    forward_input.attention.device.q_seq_lens = torch::arange(
         0,
         (batch_size + 1) * seq_len,
         seq_len,
         torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
-    input_params.attention.device.kv_seq_lens = torch::arange(
+    forward_input.attention.device.kv_seq_lens = torch::arange(
         0,
         (batch_size + 1) * seq_len,
         seq_len,
         torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
-    input_params.attention.host.q_seq_lens.resize(batch_size, seq_len);
-    input_params.attention.host.kv_seq_lens.resize(batch_size, seq_len);
-    input_params.attention.device.new_cache_slots = torch::arange(
+    forward_input.attention.host.q_seq_lens.resize(batch_size, seq_len);
+    forward_input.attention.host.kv_seq_lens.resize(batch_size, seq_len);
+    forward_input.attention.device.new_cache_slots = torch::arange(
         1,
         batch_size * seq_len + 1,
         torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
-    input_params.attention.device.block_tables = torch::zeros(
+    forward_input.attention.device.block_tables = torch::zeros(
         {batch_size, batch_size * seq_len},
         torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
 
     for (int64_t batch_idx = 0; batch_idx < batch_size; ++batch_idx) {
       const int64_t start = batch_idx * seq_len + 1;
-      input_params.attention.device.block_tables[batch_idx].index_put_(
+      forward_input.attention.device.block_tables[batch_idx].index_put_(
           {torch::indexing::Slice(0, seq_len)},
           torch::arange(start,
                         start + seq_len,
@@ -773,7 +773,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
                             .device(options_.device())));
     }
 
-    return input_params.to(options_.device());
+    return forward_input.to(options_.device());
   }
 
   KVCache build_indexed_cache(torch::Tensor key_cache,
@@ -1048,15 +1048,15 @@ TEST_P(DeepseekV2DecoderCarrierTest,
   const auto& tc = GetParam();
   auto* tp_pg_raw = init_env(tc);
   auto decoder = make_decoder(/*layer_id=*/0);
-  ModelInputParams input_params;
-  input_params.parallel.dp_global_token_nums = tc.dp_global_token_nums;
+  ForwardInput forward_input;
+  forward_input.parallel.dp_global_token_nums = tc.dp_global_token_nums;
   set_tp_full_tokens(tc);
 
   auto carrier = DeepseekV2DecoderLayerTestPeer::build_post_attn_carrier(
       *decoder,
       mat(tc.rows, tc.attn_out),
       mat(tc.rows, tc.residual),
-      input_params,
+      forward_input,
       tc.attn_layout,
       tc.need_dp_gather,
       tc.enable_moe_all2all);
@@ -1092,12 +1092,12 @@ TEST_F(DeepseekV2DecoderLayerTest, BuildPostAttnCarrierPackedLocal) {
       torch::full({2, model_args_.hidden_size()}, 5.0f, hidden_opts());
   sp_pg_->set_allgather_outputs({expected_local_norm, remote_norm});
 
-  ModelInputParams input_params;
+  ForwardInput forward_input;
   auto carrier = DeepseekV2DecoderLayerTestPeer::build_post_attn_carrier(
       *decoder,
       attn_out,
       residual,
-      input_params,
+      forward_input,
       DeepseekV2AttentionImpl::PostAttnLayout::kPackedLocal,
       /*need_dp_gather=*/false,
       /*enable_moe_all2all=*/false);
@@ -1112,7 +1112,7 @@ TEST_F(DeepseekV2DecoderLayerTest, BuildPostAttnCarrierPackedLocal) {
 
 TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputReplicated) {
   auto decoder = make_decoder(/*layer_id=*/0);
-  ModelInputParams input_params;
+  ForwardInput forward_input;
 
   auto attn_out = torch::tensor(
       {{1.0f, 2.0f}, {3.0f, 4.0f}},
@@ -1124,7 +1124,7 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputReplicated) {
       *decoder,
       attn_out,
       residual,
-      input_params,
+      forward_input,
       DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
       /*need_dp_gather=*/false,
       /*enable_moe_all2all=*/false);
@@ -1133,7 +1133,7 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputReplicated) {
       {{100.0f, 200.0f}, {300.0f, 400.0f}},
       torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
   auto restored = DeepseekV2DecoderLayerTestPeer::restore_ffn_output(
-      *decoder, ffn_out, carrier, input_params);
+      *decoder, ffn_out, carrier, forward_input);
 
   auto expected = torch::tensor(
       {{111.0f, 222.0f}, {333.0f, 444.0f}},
@@ -1158,12 +1158,12 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputPackedLocal) {
   sp_pg_->set_allgather_outputs(
       std::vector<torch::Tensor>{expected_local_norm, remote_norm});
 
-  ModelInputParams input_params;
+  ForwardInput forward_input;
   auto carrier = DeepseekV2DecoderLayerTestPeer::build_post_attn_carrier(
       *decoder,
       attn_out,
       residual,
-      input_params,
+      forward_input,
       DeepseekV2AttentionImpl::PostAttnLayout::kPackedLocal,
       /*need_dp_gather=*/false,
       /*enable_moe_all2all=*/false);
@@ -1171,7 +1171,7 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputPackedLocal) {
   auto packed_ffn_out =
       torch::full({3, model_args_.hidden_size()}, 7.0f, hidden_opts());
   auto restored = DeepseekV2DecoderLayerTestPeer::restore_ffn_output(
-      *decoder, packed_ffn_out, carrier, input_params);
+      *decoder, packed_ffn_out, carrier, forward_input);
   test::verify_tensor_close(
       restored,
       torch::full({2, model_args_.hidden_size()}, 10.0f, hidden_opts()));
@@ -1335,32 +1335,32 @@ TEST_F(DeepseekV2DecoderLayerTest, ForwardMixedDpMoEReturnsLocalSlice) {
       2,
       torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
 
-  ModelInputParams input_params;
-  input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
-  input_params.meta.num_sequences = 2;
-  input_params.meta.q_max_seq_len = 1;
-  input_params.meta.kv_max_seq_len = 2;
-  input_params.attention.device.q_seq_lens = torch::tensor(
+  ForwardInput forward_input;
+  forward_input.meta.batch_forward_type = BatchForwardType::PREFILL;
+  forward_input.meta.num_sequences = 2;
+  forward_input.meta.q_max_seq_len = 1;
+  forward_input.meta.kv_max_seq_len = 2;
+  forward_input.attention.device.q_seq_lens = torch::tensor(
       {0, 1, 2},
       torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
-  input_params.attention.device.kv_seq_lens = torch::tensor(
+  forward_input.attention.device.kv_seq_lens = torch::tensor(
       {0, 1, 2},
       torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
-  input_params.attention.host.q_seq_lens = {1, 1};
-  input_params.attention.host.kv_seq_lens = {1, 1};
-  input_params.attention.device.new_cache_slots = torch::arange(
+  forward_input.attention.host.q_seq_lens = {1, 1};
+  forward_input.attention.host.kv_seq_lens = {1, 1};
+  forward_input.attention.device.new_cache_slots = torch::arange(
       1,
       3,
       torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
-  input_params.attention.device.block_tables = torch::tensor(
+  forward_input.attention.device.block_tables = torch::tensor(
       {{1, 0}, {2, 0}},
       torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
-  input_params.parallel.dp_global_token_nums = {2, 1};
-  input_params.parallel.dp_is_decode = {0, 0};
-  input_params = input_params.to(options_.device());
+  forward_input.parallel.dp_global_token_nums = {2, 1};
+  forward_input.parallel.dp_is_decode = {0, 0};
+  forward_input = forward_input.to(options_.device());
 
   auto attn_metadata =
-      AttentionMetadataBuilder::build(input_params, /*enable_mla=*/true);
+      AttentionMetadataBuilder::build(forward_input, /*enable_mla=*/true);
   auto k_cache = torch::zeros(
       {2048, 1, 1, model_args_.qk_rope_head_dim() + model_args_.kv_lora_rank()},
       options_);
@@ -1375,7 +1375,7 @@ TEST_F(DeepseekV2DecoderLayerTest, ForwardMixedDpMoEReturnsLocalSlice) {
                                  positions,
                                  attn_metadata,
                                  kv_cache,
-                                 input_params);
+                                 forward_input);
 
   sync_dev();
 
@@ -1430,12 +1430,12 @@ TEST_F(DeepseekV2DecoderLayerTest, DenseMlpChunkMatchesDirectPrefill) {
                                            {5, model_args_.hidden_size()},
                                            torch::kBFloat16,
                                            options_.device());
-  auto input_params = build_prefill_params(/*batch_size=*/1, /*seq_len=*/5);
+  auto forward_input = build_prefill_input(/*batch_size=*/1, /*seq_len=*/5);
 
   auto expected =
       DeepseekV2DecoderLayerTestPeer::mlp(*decoder)->forward(hidden_states);
   auto actual = DeepseekV2DecoderLayerTestPeer::run_mlp(
-      *decoder, hidden_states, input_params);
+      *decoder, hidden_states, forward_input.meta.batch_forward_type);
 
   sync_dev();
   test::verify_tensor_close(actual, expected, 1e-3, 1e-4);
@@ -1450,13 +1450,13 @@ TEST_F(DeepseekV2DecoderLayerTest, DenseMlpChunkMatchesDirectChunkedPrefill) {
                                            {5, model_args_.hidden_size()},
                                            torch::kBFloat16,
                                            options_.device());
-  auto input_params = build_prefill_params(/*batch_size=*/1, /*seq_len=*/5);
-  input_params.meta.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
+  auto forward_input = build_prefill_input(/*batch_size=*/1, /*seq_len=*/5);
+  forward_input.meta.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
 
   auto expected =
       DeepseekV2DecoderLayerTestPeer::mlp(*decoder)->forward(hidden_states);
   auto actual = DeepseekV2DecoderLayerTestPeer::run_mlp(
-      *decoder, hidden_states, input_params);
+      *decoder, hidden_states, forward_input.meta.batch_forward_type);
 
   sync_dev();
   test::verify_tensor_close(actual, expected, 1e-3, 1e-4);
@@ -1478,9 +1478,9 @@ TEST_P(DeepseekV2DecoderLayerParamTest,
       0,
       kBatchSize * kSeqLen,
       torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
-  auto input_params = build_prefill_params(kBatchSize, kSeqLen);
+  auto forward_input = build_prefill_input(kBatchSize, kSeqLen);
   auto attn_metadata =
-      AttentionMetadataBuilder::build(input_params, /*enable_mla=*/true);
+      AttentionMetadataBuilder::build(forward_input, /*enable_mla=*/true);
   auto kv_cache = build_cache(block_num, /*block_size=*/1);
 
   std::optional<torch::Tensor> residual = std::nullopt;
@@ -1489,7 +1489,7 @@ TEST_P(DeepseekV2DecoderLayerParamTest,
                                  positions,
                                  attn_metadata,
                                  kv_cache,
-                                 input_params);
+                                 forward_input);
 
   sync_dev();
 

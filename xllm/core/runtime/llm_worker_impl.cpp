@@ -34,7 +34,6 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
 #if defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA)
 #include "layers/cuda/flashinfer_workspace.h"
@@ -47,8 +46,9 @@ namespace xllm {
 
 namespace {
 
-void wait_input_ready_events(const ForwardInput& input, const Stream& stream) {
-  CHECK(stream.wait_event(input.metadata_ready_event))
+void wait_input_ready_events(const ForwardInput& forward_input,
+                             const Stream& stream) {
+  CHECK(stream.wait_event(forward_input.metadata_ready_event))
       << "failed to wait ForwardInput metadata ready event";
 }
 
@@ -99,15 +99,15 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::step_no_sync(
-    const ForwardInput& input) {
+    const ForwardInput& forward_input) {
   ForwardInput input_on_device;
-  prepare_work_before_execute(input, input_on_device);
+  prepare_work_before_execute(forward_input, input_on_device);
   std::unique_ptr<Stream> current_stream = device_.current_stream();
   return execute_no_sync_on_stream(input_on_device, *current_stream);
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::execute_no_sync_on_stream(
-    const ForwardInput& input,
+    const ForwardInput& forward_input,
     Stream& compute_stream) {
   const ForwardSyncPolicy sync_policy = ForwardSyncPolicy::NO_SYNC;
   c10::StreamGuard stream_guard = compute_stream.set_stream_guard();
@@ -119,23 +119,24 @@ std::optional<ForwardOutput> LLMWorkerImpl::execute_no_sync_on_stream(
       atb::Context* atb_context =
           const_cast<atb::Context*>(context_.get_atb_context());
       atb_context->SetExecuteStream(current_acl_stream);
-      wait_input_ready_events(input, compute_stream);
-      return step_internal(input, sync_policy);
+      wait_input_ready_events(forward_input, compute_stream);
+      return step_internal(forward_input, sync_policy);
     } else {
       SET_ATB_EXECUTE_STREAM((&compute_stream), device_, context_);
-      wait_input_ready_events(input, compute_stream);
-      return step_internal(input, sync_policy);
+      wait_input_ready_events(forward_input, compute_stream);
+      return step_internal(forward_input, sync_policy);
     }
 #else
-    wait_input_ready_events(input, compute_stream);
-    return step_internal(input, sync_policy);
+    wait_input_ready_events(forward_input, compute_stream);
+    return step_internal(forward_input, sync_policy);
 #endif
   }
-  wait_input_ready_events(input, compute_stream);
-  return step_internal(input, sync_policy);
+  wait_input_ready_events(forward_input, compute_stream);
+  return step_internal(forward_input, sync_policy);
 }
 
-std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
+std::optional<ForwardOutput> LLMWorkerImpl::step(
+    const ForwardInput& forward_input) {
   if (::xllm::LoadConfig::get_instance().enable_manual_loader()) {
 #if defined(USE_NPU)
     if (!enable_schedule_overlap() && options_.backend() == "llm") {
@@ -145,73 +146,73 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
           const_cast<atb::Context*>(context_.get_atb_context());
       atb_context->SetExecuteStream(current_stream);
       std::unique_ptr<Stream> stream = device_.current_stream();
-      wait_input_ready_events(input, *stream);
-      return step_internal(input, ForwardSyncPolicy::LEGACY);
+      wait_input_ready_events(forward_input, *stream);
+      return step_internal(forward_input, ForwardSyncPolicy::LEGACY);
     } else {
       SET_ATB_EXECUTE_STREAM(compute_stream_, device_, context_);
-      wait_input_ready_events(input, *compute_stream_);
-      return step_internal(input, ForwardSyncPolicy::LEGACY);
+      wait_input_ready_events(forward_input, *compute_stream_);
+      return step_internal(forward_input, ForwardSyncPolicy::LEGACY);
     }
 #else
     std::unique_ptr<Stream> stream = device_.current_stream();
-    wait_input_ready_events(input, *stream);
-    return step_internal(input, ForwardSyncPolicy::LEGACY);
+    wait_input_ready_events(forward_input, *stream);
+    return step_internal(forward_input, ForwardSyncPolicy::LEGACY);
 #endif
   }
   std::unique_ptr<Stream> stream = device_.current_stream();
-  wait_input_ready_events(input, *stream);
-  return step_internal(input, ForwardSyncPolicy::LEGACY);
+  wait_input_ready_events(forward_input, *stream);
+  return step_internal(forward_input, ForwardSyncPolicy::LEGACY);
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>>
-LLMWorkerImpl::step_async_no_sync(const ForwardInput& input) {
+LLMWorkerImpl::step_async_no_sync(const ForwardInput& forward_input) {
   CHECK(!enable_schedule_overlap())
       << "step_async_no_sync is only supported for non-overlap workers";
   ForwardInput input_on_device;
 
-  prepare_work_before_execute(input, input_on_device);
+  prepare_work_before_execute(forward_input, input_on_device);
 
   folly::Promise<std::optional<ForwardOutput>> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this,
-                        input = std::move(input_on_device),
+                        forward_input = std::move(input_on_device),
                         promise = std::move(promise)]() mutable {
     if (hierarchy_kv_cache_transfer_ != nullptr) {
-      hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
+      hierarchy_kv_cache_transfer_->set_layer_synchronizer(forward_input);
     }
 
-    const auto output = this->step_no_sync(input);
+    const auto output = this->step_no_sync(forward_input);
     promise.setValue(output);
   });
   return future;
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::step_for_schedule_overlap(
-    const ForwardInput& input) {
-  return execute_no_sync_on_stream(input, *compute_stream_);
+    const ForwardInput& forward_input) {
+  return execute_no_sync_on_stream(forward_input, *compute_stream_);
 }
 
 ForwardInput
 LLMWorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
-    ForwardInput& input) {
+    ForwardInput& forward_input) {
   c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
   CHECK(compute_stream_->wait_event(last_step_output_.ready_event))
       << "failed to wait last step output ready event";
-  return update_input_by_last_step_output(input);
+  return update_input_by_last_step_output(forward_input);
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
-    const ForwardInput& input,
+    const ForwardInput& forward_input,
     ForwardSyncPolicy sync_policy) {
   MULTI_MODEL_STEP_LOCK(::xllm::KVCacheConfig::get_instance().enable_xtensor());
 
   Timer timer;
-  auto& sampling_params = input.sampling_params;
+  auto& sampling_params = forward_input.sampling_params;
 
   std::vector<folly::SemiFuture<bool>> futures;
 
   if (options_.kv_cache_transfer_mode() == "PUSH" &&
-      !input.transfer_kv_infos.empty()) {
+      !forward_input.transfer_kv_infos.empty()) {
 #if defined(USE_NPU)
     std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer =
         std::make_shared<NPULayerSynchronizerImpl>(
@@ -226,23 +227,22 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
             context_.get_model_args().n_layers());
 #endif
 #if defined(USE_NPU) || defined(USE_MLU) || defined(USE_DCU)
-    const_cast<ModelInputParams*>(&(input.input_params))
-        ->parallel.layer_synchronizer = layer_synchronizer;
+    const_cast<ForwardInput&>(forward_input).parallel.layer_synchronizer =
+        layer_synchronizer;
 
-    futures.emplace_back(
-        kv_cache_transfer_->push_kv_blocks_async(input.transfer_kv_infos,
-                                                 context_.get_parallel_args(),
-                                                 layer_synchronizer,
-                                                 is_spec_draft_));
+    futures.emplace_back(kv_cache_transfer_->push_kv_blocks_async(
+        forward_input.transfer_kv_infos,
+        context_.get_parallel_args(),
+        layer_synchronizer,
+        is_spec_draft_));
 #endif
   }
   if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
-    eplb_executor_->eplb_execute(input.input_params.expert.eplb_info);
+    eplb_executor_->eplb_execute(forward_input.expert.eplb_info);
   }
 
   // call model executor forward to get hidden states
-  auto model_output = model_executor_->forward(
-      input.token_ids, input.positions, kv_caches_, input.input_params);
+  auto model_output = model_executor_->forward(forward_input, kv_caches_);
   if (!model_output.hidden_states.defined()) {
     return std::nullopt;
   }
@@ -287,7 +287,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     // in p-d disaggregation scene, all micro batches should be in same
     // prefill/decode stage, so, to judge transfer_kv_infos.empty,
     if (options_.kv_cache_transfer_mode() == "PUSH" &&
-        !input.transfer_kv_infos.empty()) {
+        !forward_input.transfer_kv_infos.empty()) {
       auto results =
           folly::collectAll(futures).within(std::chrono::seconds(60)).get();
       for (const auto& result : results) {
@@ -310,7 +310,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     output.do_sample = sampling_params.do_sample;
     output.logprobs = sampling_params.logprobs;
     output.max_top_logprobs = sampling_params.max_top_logprobs;
-    if (!input.skip_sampling_for_logits_only) {
+    if (!forward_input.skip_sampling_for_logits_only) {
       auto sample_output = sampler_->forward(logits, sampling_params);
 
       // beam search kernel
@@ -338,8 +338,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     } else {
       embeddings = model_output.hidden_states;
     }
-    if (!input.input_params.meta.batch_forward_type.is_decode() &&
-        !is_spec_draft_) {
+    if (!forward_input.meta.batch_forward_type.is_decode() && !is_spec_draft_) {
       // Target prefill keeps the full hidden in `embeddings` for the draft
       // input_embedding. Under CP this is the LOCAL token shard, whose rows
       // cannot be indexed by the CP all-gather-space selected_token_idxes.
@@ -365,7 +364,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
 
   MULTI_MODEL_STEP_UNLOCK();
   if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
-    output.retained_input = std::make_shared<ForwardInput>(input);
+    output.retained_input = std::make_shared<ForwardInput>(forward_input);
     if (enable_schedule_overlap()) {
       output.ready_event = record_current_stream_event(device_);
     }
@@ -374,7 +373,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   auto ret = device_.synchronize_default_stream();
 
   if (options_.kv_cache_transfer_mode() == "PUSH" &&
-      !input.transfer_kv_infos.empty()) {
+      !forward_input.transfer_kv_infos.empty()) {
     auto results =
         folly::collectAll(futures).within(std::chrono::seconds(60)).get();
     for (const auto& result : results) {

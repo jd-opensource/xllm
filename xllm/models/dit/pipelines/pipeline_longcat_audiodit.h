@@ -28,12 +28,12 @@ limitations under the License.
 //   - CFG and APG guidance.
 //
 // Usage (registered as "audiodit"):
-//   DiTForwardInput input;
-//   input.prompts = {"a jazz piano piece"};
-//   input.generation_params.audio_duration_frames = 500;
-//   input.generation_params.audio_steps = 16;
-//   input.generation_params.guidance_scale = 4.0f;
-//   auto output = model->forward(input);
+//   DiTForwardInput forward_input;
+//   forward_input.prompts = {"a jazz piano piece"};
+//   forward_input.generation_params.audio_duration_frames = 500;
+//   forward_input.generation_params.audio_steps = 16;
+//   forward_input.generation_params.guidance_scale = 4.0f;
+//   auto output = model->forward(forward_input);
 //   // output.tensors[0] = waveform (1, num_samples)
 
 #pragma once
@@ -127,12 +127,12 @@ class LongCatAudioDiTPipelineImpl final : public torch::nn::Module {
     text_encoder_ = register_module("text_encoder", UMT5TextEncoder(t5_ctx));
   }
 
-  DiTForwardOutput forward(const DiTForwardInput& input) {
+  DiTForwardOutput forward(const DiTForwardInput& forward_input) {
     torch::NoGradGuard no_grad;
-    const auto& gp = input.generation_params;
+    const auto& gp = forward_input.generation_params;
 
     // Batch size
-    int64_t batch_size = static_cast<int64_t>(input.prompts.size());
+    int64_t batch_size = static_cast<int64_t>(forward_input.prompts.size());
     if (batch_size == 0) {
       batch_size = 1;
     }
@@ -151,8 +151,9 @@ class LongCatAudioDiTPipelineImpl final : public torch::nn::Module {
 
     for (int64_t i = 0; i < batch_size; ++i) {
       const std::string& prompt =
-          (i < static_cast<int64_t>(input.prompts.size())) ? input.prompts[i]
-                                                           : "";
+          (i < static_cast<int64_t>(forward_input.prompts.size()))
+              ? forward_input.prompts[i]
+              : "";
       std::vector<int32_t> tokens;
       if (!tokenizer_->encode(prompt, &tokens, /*add_bos=*/false)) {
         tokens.clear();
@@ -228,9 +229,10 @@ class LongCatAudioDiTPipelineImpl final : public torch::nn::Module {
     torch::Tensor prompt_latent;  // (B, prompt_frames, latent_dim)
     int64_t prompt_dur = 0;
 
-    if (input.prompt_audio.defined() && input.prompt_audio.numel() > 0) {
+    if (forward_input.prompt_audio.defined() &&
+        forward_input.prompt_audio.numel() > 0) {
       std::tie(prompt_latent, prompt_dur) =
-          encode_prompt_audio(input.prompt_audio);
+          encode_prompt_audio(forward_input.prompt_audio);
     } else {
       prompt_latent =
           torch::empty({batch_size, 0, vae_->latent_dim_},
@@ -289,12 +291,12 @@ class LongCatAudioDiTPipelineImpl final : public torch::nn::Module {
       };
 
       // The synthesis text is everything after "prompt_text " prefix.
-      // input.prompts[0] is full_text = prompt_text + " " + text (when voice
-      // cloning) or just text (TTS). audio_prompt_text holds the prompt_text
-      // portion so we can split them.
+      // forward_input.prompts[0] is full_text = prompt_text + " " + text (when
+      // voice cloning) or just text (TTS). audio_prompt_text holds the
+      // prompt_text portion so we can split them.
       const std::string& full_text =
-          input.prompts.empty() ? "" : input.prompts[0];
-      const std::string& prompt_text_part = input.audio_prompt_text;
+          forward_input.prompts.empty() ? "" : forward_input.prompts[0];
+      const std::string& prompt_text_part = forward_input.audio_prompt_text;
 
       // Extract synthesis-only text
       std::string synth_text = full_text;

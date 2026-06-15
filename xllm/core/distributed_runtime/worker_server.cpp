@@ -43,7 +43,7 @@ limitations under the License.
 #include "core/platform/numa_utils.h"
 #endif
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/parallel_state/collective_communicator.h"
 #include "framework/parallel_state/dit_collective_communicator.h"
 #include "framework/parallel_state/mapping_npu.h"

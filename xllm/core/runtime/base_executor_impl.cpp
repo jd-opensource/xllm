@@ -32,12 +32,10 @@ ForwardInput BaseExecutorImpl::prepare_inputs(Batch& batch) {
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());
 }
 
-ModelOutput BaseExecutorImpl::run(const torch::Tensor& tokens,
-                                  const torch::Tensor& positions,
-                                  std::vector<KVCache>& kv_caches,
-                                  const ModelInputParams& params) {
+ModelOutput BaseExecutorImpl::run(const ForwardInput& forward_input,
+                                  std::vector<KVCache>& kv_caches) {
   COUNTER_INC(num_model_execution_total_eager);
-  return model_->forward(tokens, positions, kv_caches, params);
+  return model_->forward(forward_input, kv_caches);
 }
 
 }  // namespace xllm

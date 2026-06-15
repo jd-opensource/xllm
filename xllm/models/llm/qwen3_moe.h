@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "core/framework/model/model_output.h"
+#include "runtime/forward_params.h"
 #if defined(USE_NPU)
 #include "core/common/global_flags.h"
 #include "core/layers/common/attention_mask.h"
@@ -98,18 +99,18 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
 
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
-  ModelOutput forward(torch::Tensor tokens,
-                      torch::Tensor positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) override {
-    ModelInputParams modified_input_params = input_params;
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) override {
+    torch::Tensor tokens = forward_input.token_ids;
+    torch::Tensor positions = forward_input.positions;
+    ForwardInput modified_input = forward_input;
     if (tokens.numel() == 0) {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
       positions = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
     }
-    auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;
+    auto& dp_token_nums = modified_input.parallel.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
-    auto inputs_embeds = input_params.embedding.input_embedding;
+    auto inputs_embeds = forward_input.embedding.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
@@ -117,14 +118,13 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       h = embed_tokens_(tokens);
     }
 
-    auto deep_stacks = input_params.multimodal.deep_stacks;
+    auto deep_stacks = forward_input.multimodal.deep_stacks;
     int deep_stack_size = deep_stacks.size();
-    if (!modified_input_params.attn_metadata) {
-      modified_input_params.attn_metadata =
-          std::make_shared<layer::AttentionMetadata>(
-              get_attention_metadata(modified_input_params, h));
+    if (!modified_input.attn_metadata) {
+      modified_input.attn_metadata = std::make_shared<layer::AttentionMetadata>(
+          get_attention_metadata(modified_input, h));
     }
-    auto& attn_metadata = *(modified_input_params.attn_metadata);
+    auto& attn_metadata = *(modified_input.attn_metadata);
     bool only_prefill =
         (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
     if (positions.dim() == 2 && only_prefill && !mrope_section_.empty()) {
@@ -133,9 +133,8 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
     }
 
     const LlmRecMultiRoundParams* llmrec_params = nullptr;
-    if (is_rec_multi_round_mode() &&
-        modified_input_params.has_llmrec_params()) {
-      llmrec_params = modified_input_params.llmrec_params();
+    if (is_rec_multi_round_mode() && modified_input.has_llmrec_params()) {
+      llmrec_params = modified_input.llmrec_params();
       CHECK_EQ(llmrec_params->full_k_caches.size(), layers_.size())
           << "Rec multi-round mode requires full_k_caches per layer.";
       CHECK_EQ(llmrec_params->full_v_caches.size(), layers_.size())
@@ -166,14 +165,9 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       }
 #endif
       auto& layer = layers_[i];
-      h = layer(h,
-                residual,
-                positions,
-                attn_metadata,
-                kv_caches[i],
-                modified_input_params);
-      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
-                                              h.device())) {
+      h = layer(
+          h, residual, positions, attn_metadata, kv_caches[i], modified_input);
+      if (!modified_input.record_layer(static_cast<uint32_t>(i), h.device())) {
         return ModelOutput();
       }
 
@@ -232,25 +226,25 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
 
  private:
   layer::AttentionMetadata get_attention_metadata(
-      const ModelInputParams& params,
+      const ForwardInput& forward_input,
       const torch::Tensor& h) {
 #if defined(USE_NPU)
-    max_seq_len_ = std::max(params.meta.kv_max_seq_len, max_seq_len_);
+    max_seq_len_ = std::max(forward_input.meta.kv_max_seq_len, max_seq_len_);
     torch::Tensor attn_mask;
     if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      const int32_t max_kv_seq = params.meta.kv_max_seq_len;
-      const int32_t num_sequences = params.meta.num_sequences;
+      const int32_t max_kv_seq = forward_input.meta.kv_max_seq_len;
+      const int32_t num_sequences = forward_input.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
         req_mask_vec.reserve(num_sequences);
 
         for (int32_t j = 0; j < num_sequences; ++j) {
-          auto mask =
-              attn_mask_.gen_append_mask(params.attention.host.q_seq_lens[j],
-                                         params.attention.host.kv_seq_lens[j],
-                                         max_kv_seq,
-                                         h.dtype().toScalarType(),
-                                         h.device());
+          auto mask = attn_mask_.gen_append_mask(
+              forward_input.attention.host.q_seq_lens[j],
+              forward_input.attention.host.kv_seq_lens[j],
+              max_kv_seq,
+              h.dtype().toScalarType(),
+              h.device());
           req_mask_vec.emplace_back(mask);
         }
         attn_mask = torch::cat(req_mask_vec, 0);
@@ -263,9 +257,9 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
           max_seq_len_, h.dtype().toScalarType(), h.device());
     }
     return layer::AttentionMetadataBuilder::build(
-        params, model_args_.enable_mla(), attn_mask);
+        forward_input, model_args_.enable_mla(), attn_mask);
 #else
-    return layer::AttentionMetadataBuilder::build(params,
+    return layer::AttentionMetadataBuilder::build(forward_input,
                                                   model_args_.enable_mla());
 #endif
   }

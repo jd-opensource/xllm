@@ -118,7 +118,7 @@ torch::Tensor FusedMoEImpl::forward_experts(const torch::Tensor& hidden_states,
 }
 
 torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
-                                    const ModelInputParams& /*input_params*/) {
+                                    const ParallelInput& /*parallel_input*/) {
   torch::Tensor router_logits = gate_->forward(hidden_states);
   return forward_experts(hidden_states, router_logits);
 }

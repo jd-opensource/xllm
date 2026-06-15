@@ -26,9 +26,10 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/causal_vlm.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model/model_output.h"
 #include "runtime/executor_impl.h"
+#include "runtime/forward_params.h"
 #include "runtime/options.h"
 
 namespace xllm {
@@ -44,12 +45,10 @@ class VlmExecutorImpl : public ExecutorImpl {
 
   ForwardInput prepare_inputs(Batch& batch) override;
 
-  ModelOutput run(const torch::Tensor& tokens,
-                  const torch::Tensor& positions,
-                  std::vector<KVCache>& kv_caches,
-                  const ModelInputParams& params) override;
+  ModelOutput run(const ForwardInput& forward_input,
+                  std::vector<KVCache>& kv_caches) override;
 
-  virtual MMDict encode(const ModelInputParams& params);
+  virtual MMDict encode(const ForwardInput& forward_input);
 
   // not own
   CausalVLM* model_;

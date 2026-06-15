@@ -32,6 +32,7 @@ limitations under the License.
 #include "models/dit/transformers/transformer_longcat_image.h"
 #include "models/model_registry.h"
 #include "models/vlm/qwen2_5_vl.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -167,38 +168,40 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
     register_module("scheduler", scheduler_);
   }
 
-  DiTForwardOutput forward(const DiTForwardInput& input) {
-    const auto& generation_params = input.generation_params;
+  DiTForwardOutput forward(const DiTForwardInput& forward_input) {
+    const auto& generation_params = forward_input.generation_params;
 
     auto seed = generation_params.seed;
-    auto prompts = std::make_optional(input.prompts);
-    auto prompts_2 = input.prompts_2.empty()
+    auto prompts = std::make_optional(forward_input.prompts);
+    auto prompts_2 = forward_input.prompts_2.empty()
                          ? std::nullopt
-                         : std::make_optional(input.prompts_2);
-    auto negative_prompts = input.negative_prompts.empty()
-                                ? std::nullopt
-                                : std::make_optional(input.negative_prompts);
-    auto negative_prompts_2 =
-        input.negative_prompts_2.empty()
+                         : std::make_optional(forward_input.prompts_2);
+    auto negative_prompts =
+        forward_input.negative_prompts.empty()
             ? std::nullopt
-            : std::make_optional(input.negative_prompts_2);
+            : std::make_optional(forward_input.negative_prompts);
+    auto negative_prompts_2 =
+        forward_input.negative_prompts_2.empty()
+            ? std::nullopt
+            : std::make_optional(forward_input.negative_prompts_2);
 
-    auto latents = input.latents.defined() ? std::make_optional(input.latents)
-                                           : std::nullopt;
-    auto prompt_embeds = input.prompt_embeds.defined()
-                             ? std::make_optional(input.prompt_embeds)
+    auto latents = forward_input.latents.defined()
+                       ? std::make_optional(forward_input.latents)
+                       : std::nullopt;
+    auto prompt_embeds = forward_input.prompt_embeds.defined()
+                             ? std::make_optional(forward_input.prompt_embeds)
                              : std::nullopt;
     auto negative_prompt_embeds =
-        input.negative_prompt_embeds.defined()
-            ? std::make_optional(input.negative_prompt_embeds)
+        forward_input.negative_prompt_embeds.defined()
+            ? std::make_optional(forward_input.negative_prompt_embeds)
             : std::nullopt;
     auto pooled_prompt_embeds =
-        input.pooled_prompt_embeds.defined()
-            ? std::make_optional(input.pooled_prompt_embeds)
+        forward_input.pooled_prompt_embeds.defined()
+            ? std::make_optional(forward_input.pooled_prompt_embeds)
             : std::nullopt;
     auto negative_pooled_prompt_embeds =
-        input.negative_pooled_prompt_embeds.defined()
-            ? std::make_optional(input.negative_pooled_prompt_embeds)
+        forward_input.negative_pooled_prompt_embeds.defined()
+            ? std::make_optional(forward_input.negative_pooled_prompt_embeds)
             : std::nullopt;
 
     std::vector<torch::Tensor> output = forward_(
@@ -548,10 +551,9 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
     const auto& text_encoder_args = context_.get_model_args("text_encoder");
     std::vector<KVCache> kv_caches(text_encoder_args.n_layers());
 
-    ModelInputParams input_params =
-        build_longcat_input_params(tokens_flat, positions_2d, attention_mask);
-    auto model_output = text_encoder_->forward(
-        tokens_flat, positions_2d, kv_caches, input_params);
+    ForwardInput forward_input =
+        build_longcat_input(tokens_flat, positions_2d, attention_mask);
+    auto model_output = text_encoder_->forward(forward_input, kv_caches);
     torch::Tensor hidden_states_flat = model_output.hidden_states;
 
     int64_t hidden_size = hidden_states_flat.size(-1);
@@ -628,12 +630,13 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
   std::string prompt_template_encode_prefix_;
   std::string prompt_template_encode_suffix_;
 
-  // Build ModelInputParams for LongCat-Image text encoding
-  ModelInputParams build_longcat_input_params(
-      const torch::Tensor& tokens,
-      const torch::Tensor& positions,
-      const torch::Tensor& attention_mask) {
-    ModelInputParams params;
+  // Build ForwardInput for LongCat-Image text encoding
+  ForwardInput build_longcat_input(const torch::Tensor& tokens,
+                                   const torch::Tensor& positions,
+                                   const torch::Tensor& attention_mask) {
+    ForwardInput forward_input;
+    forward_input.token_ids = tokens;
+    forward_input.positions = positions;
 
     int64_t actual_seq_len;
     if (positions.dim() == 2) {
@@ -645,25 +648,27 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
     }
 
     if (actual_seq_len > 0) {
-      params.meta.q_max_seq_len = actual_seq_len;
-      params.meta.kv_max_seq_len = actual_seq_len;
+      forward_input.meta.q_max_seq_len = actual_seq_len;
+      forward_input.meta.kv_max_seq_len = actual_seq_len;
       auto cu_seqlens =
           torch::tensor({0, static_cast<int>(actual_seq_len)}, torch::kInt)
               .to(tokens.device());
-      params.attention.device.q_seq_lens = cu_seqlens;
-      params.attention.device.kv_seq_lens = cu_seqlens;
-      params.meta.batch_forward_type = BatchForwardType::PREFILL;
+      forward_input.attention.device.q_seq_lens = cu_seqlens;
+      forward_input.attention.device.kv_seq_lens = cu_seqlens;
+      forward_input.meta.batch_forward_type = BatchForwardType::PREFILL;
     }
 
-    // Let Qwen2_5_VL build multimodal-aware embeddings from tokens and params.
-    params.embedding.input_embedding =
-        text_encoder_->get_input_embeddings(tokens, params);
+    // Let Qwen2_5_VL build multimodal-aware embeddings from tokens and
+    // forward_input.
+    forward_input.embedding.input_embedding =
+        text_encoder_->get_input_embeddings(tokens, forward_input.multimodal);
 
     if (attention_mask.defined() && attention_mask.size(0) > 0) {
-      params.graph.attn_mask = attention_mask.view({-1}).to(torch::kFloat32);
+      forward_input.graph.attn_mask =
+          attention_mask.view({-1}).to(torch::kFloat32);
     }
 
-    return params;
+    return forward_input;
   }
 
   std::vector<torch::Tensor> forward_(

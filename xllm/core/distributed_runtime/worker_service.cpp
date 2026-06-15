@@ -39,18 +39,20 @@ limitations under the License.
 namespace xllm {
 namespace {
 
-int32_t get_num_decode_seqs_for_schedule_overlap(const ForwardInput& input) {
-  if (input.sampling_params.sample_idxes.defined()) {
-    return static_cast<int32_t>(input.sampling_params.sample_idxes.size(0));
+int32_t get_num_decode_seqs_for_schedule_overlap(
+    const ForwardInput& forward_input) {
+  if (forward_input.sampling_params.sample_idxes.defined()) {
+    return static_cast<int32_t>(
+        forward_input.sampling_params.sample_idxes.size(0));
   }
 
-  if (!input.input_host_buffer_has_layout) {
+  if (!forward_input.input_host_buffer_has_layout) {
     return 0;
   }
 
   ForwardInput unpacked_input;
   const bool unpacked = detail::unpack_from_input_host_buffer(
-      input, torch::Device(torch::kCPU), unpacked_input);
+      forward_input, torch::Device(torch::kCPU), unpacked_input);
   if (!unpacked || !unpacked_input.sampling_params.sample_idxes.defined()) {
     return 0;
   }
@@ -122,11 +124,13 @@ torch::Tensor clone_cpu_tensor_view(const torch::Tensor& tensor) {
   return tensor.contiguous().clone();
 }
 
-void stabilize_schedule_overlap_host_views(ForwardInput& input) {
-  input.token_ids_host = clone_cpu_tensor_view(input.token_ids_host);
-  input.positions_host = clone_cpu_tensor_view(input.positions_host);
-  input.input_params.attention.host.block_tables =
-      clone_cpu_tensor_view(input.input_params.attention.host.block_tables);
+void stabilize_schedule_overlap_host_views(ForwardInput& forward_input) {
+  forward_input.token_ids_host =
+      clone_cpu_tensor_view(forward_input.token_ids_host);
+  forward_input.positions_host =
+      clone_cpu_tensor_view(forward_input.positions_host);
+  forward_input.attention.host.block_tables =
+      clone_cpu_tensor_view(forward_input.attention.host.block_tables);
 }
 
 }  // namespace

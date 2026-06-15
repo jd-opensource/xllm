@@ -26,6 +26,7 @@ limitations under the License.
 #include "processors/qwen3_vl_video_processor.h"
 #include "qwen2_5_vl.h"
 #include "qwen3_vl.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -43,10 +44,10 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
         register_module("language_model", Qwen3MoeForCausalLM(context));
   }
 
-  void prepare_encoder_input(const ModelInputParams& input_params,
+  void prepare_encoder_input(const ForwardInput& forward_input,
                              std::optional<Qwen3_VLImageInputs>& image_inputs,
                              std::optional<Qwen3_VLVideoInputs>& video_inputs) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+    const auto& mm_data = forward_input.multimodal.mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
       pixel_values = res.value();
@@ -70,10 +71,10 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
       video_inputs = Qwen3_VLVideoInputs{pixel_values_videos, video_grid_thw};
   }
 
-  MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
+  MMDict get_multimodal_embeddings(const ForwardInput& forward_input) {
     std::optional<Qwen3_VLImageInputs> image_input;
     std::optional<Qwen3_VLVideoInputs> video_input;
-    prepare_encoder_input(input_params, image_input, video_input);
+    prepare_encoder_input(forward_input, image_input, video_input);
 
     MMDict multimodal_embeds;
     auto merge_size = model_args_.mm_image_merge_size();
@@ -141,8 +142,8 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
   }
 
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
-                                     const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+                                     const ForwardInput& forward_input) {
+    const auto& mm_data = forward_input.multimodal.mm_data;
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
     const size_t num_deepstacks =
         model_args_.mm_deepstack_visual_indexes().size();
@@ -168,15 +169,13 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
 
     merge_modality("image|embedding", "image|mask");
     merge_modality("video|embedding", "video|mask");
-    input_params.multimodal.deep_stacks = std::move(deepstack_input_embeds);
+    forward_input.multimodal.deep_stacks = std::move(deepstack_input_embeds);
     return inputs_embeds;
   }
 
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    return language_model_(tokens, positions, kv_caches, input_params);
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    return language_model_->forward(forward_input, kv_caches);
   }
 
   torch::Tensor logits(const torch::Tensor& hidden_states,

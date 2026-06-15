@@ -24,6 +24,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/scheduler_config.h"
+#include "runtime/forward_params.h"
 
 // #include "attn_mask.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
@@ -258,12 +259,12 @@ torch::Tensor NpuQwen2DecoderLayerImpl::forward(torch::Tensor& x,
                                                 torch::Tensor& sin_pos,
                                                 torch::Tensor& attn_mask,
                                                 KVCache& kv_cache,
-                                                ModelInputParams& input_params,
+                                                ForwardInput& forward_input,
                                                 aclrtEvent* event,
                                                 std::atomic<bool>* event_flag,
                                                 int node_id) {
   atb::Status st;
-  if (!input_params.meta.batch_forward_type.is_decode()) {
+  if (!forward_input.meta.batch_forward_type.is_decode()) {
     // mstxRangeId id = mstxRangeStartA("prefill build variant", nullptr);
     build_node_variant_pack(prefill_node_,
                             x,
@@ -271,7 +272,7 @@ torch::Tensor NpuQwen2DecoderLayerImpl::forward(torch::Tensor& x,
                             sin_pos,
                             attn_mask,
                             kv_cache,
-                            input_params,
+                            forward_input,
                             true);
     // mstxRangeEnd(id);
     st = execute_node(prefill_node_, node_id, event, event_flag);
@@ -284,7 +285,7 @@ torch::Tensor NpuQwen2DecoderLayerImpl::forward(torch::Tensor& x,
                             sin_pos,
                             decode_attn_mask_,
                             kv_cache,
-                            input_params,
+                            forward_input,
                             false);
     st = execute_node(decode_node_, node_id + 1000, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
@@ -301,7 +302,7 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
     torch::Tensor& sin_pos,
     at::Tensor& attn_mask,
     KVCache& kv_cache,
-    ModelInputParams& input_params,
+    ForwardInput& forward_input,
     bool is_prefill) {
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensors_;
@@ -317,26 +318,26 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_v_cache());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6) =
       atb_speed::Utils::AtTensor2Tensor(
-          input_params.attention.device.kv_seq_lens);
+          forward_input.attention.device.kv_seq_lens);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6).hostData =
-      input_params.attention.host.kv_seq_lens.data();
+      forward_input.attention.host.kv_seq_lens.data();
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7) = placeholder_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7).hostData =
       placeholder_vec_.data();
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 8) = placeholder_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
       atb_speed::Utils::AtTensor2Tensor(
-          input_params.attention.device.block_tables);
+          forward_input.attention.device.block_tables);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
       atb_speed::Utils::AtTensor2Tensor(
-          input_params.attention.device.new_cache_slots);
+          forward_input.attention.device.new_cache_slots);
   if (is_prefill &&
       ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
         atb_speed::Utils::AtTensor2Tensor(
-            input_params.attention.device.q_seq_lens);
+            forward_input.attention.device.q_seq_lens);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
-        input_params.attention.host.q_seq_lens.data();
+        forward_input.attention.host.q_seq_lens.data();
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {

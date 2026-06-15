@@ -176,56 +176,59 @@ struct DiTForwardInput {
 
   DiTForwardInput to(const torch::Device& device,
                      torch::ScalarType dtype = torch::kBFloat16) const {
-    DiTForwardInput input = *this;
+    DiTForwardInput forward_input = *this;
 
     if (prompt_embeds.defined()) {
-      input.prompt_embeds = prompt_embeds.to(device, dtype);
+      forward_input.prompt_embeds = prompt_embeds.to(device, dtype);
     }
 
     if (pooled_prompt_embeds.defined()) {
-      input.pooled_prompt_embeds = pooled_prompt_embeds.to(device, dtype);
+      forward_input.pooled_prompt_embeds =
+          pooled_prompt_embeds.to(device, dtype);
     }
 
     if (negative_prompt_embeds.defined()) {
-      input.negative_prompt_embeds = negative_prompt_embeds.to(device, dtype);
+      forward_input.negative_prompt_embeds =
+          negative_prompt_embeds.to(device, dtype);
     }
 
     if (negative_pooled_prompt_embeds.defined()) {
-      input.negative_pooled_prompt_embeds =
+      forward_input.negative_pooled_prompt_embeds =
           negative_pooled_prompt_embeds.to(device, dtype);
     }
 
     if (latents.defined()) {
-      input.latents = latents.to(device, dtype);
+      forward_input.latents = latents.to(device, dtype);
     }
 
     if (masked_image_latents.defined()) {
-      input.masked_image_latents = masked_image_latents.to(device, dtype);
+      forward_input.masked_image_latents =
+          masked_image_latents.to(device, dtype);
     }
 
     if (images.defined()) {
-      input.images = images.to(device, dtype);
+      forward_input.images = images.to(device, dtype);
     }
 
     if (mask_images.defined()) {
-      input.mask_images = mask_images.to(device, dtype);
+      forward_input.mask_images = mask_images.to(device, dtype);
     }
 
-    for (auto& img : input.images_list) {
+    for (auto& img : forward_input.images_list) {
       img = img.to(device, dtype);
     }
 
     if (control_image.defined()) {
-      input.control_image = control_image.to(device, dtype);
+      forward_input.control_image = control_image.to(device, dtype);
     }
 
     if (last_images.defined()) {
-      input.last_images = last_images.to(device, dtype);
+      forward_input.last_images = last_images.to(device, dtype);
     }
     if (prompt_audio.defined()) {
-      input.prompt_audio = prompt_audio.to(device, torch::kFloat32);
+      forward_input.prompt_audio = prompt_audio.to(device, torch::kFloat32);
     }
-    return input;
+    return forward_input;
   }
 
   int batch_size = 0;

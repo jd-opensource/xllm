@@ -545,10 +545,10 @@ torch::Tensor FusedMoEImpl::forward_experts(
 }
 
 torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
-                                    const ModelInputParams& input_params) {
+                                    const ParallelInput& parallel_input) {
   // we only support all2all communication for decode stage for now
   bool enable_all2all_communication =
-      enable_deep_ep_ && all_dp_ranks_are_decode(input_params);
+      enable_deep_ep_ && all_dp_ranks_are_decode(parallel_input);
   return forward_experts(
       hidden_states, enable_all2all_communication, std::nullopt);
 }

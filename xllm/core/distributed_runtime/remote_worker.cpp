@@ -30,7 +30,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "core/framework/config/service_config.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/state_dict/state_dict.h"
 #include "runtime/params_utils.h"
 #include "util/hash_util.h"
@@ -166,20 +166,21 @@ RemoteWorker::estimate_kv_cache_capacity_async() {
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>> RemoteWorker::step_async(
-    const ForwardInput& input) {
+    const ForwardInput& forward_input) {
   LOG(FATAL) << "RemoteWorker Method step_async with "
                 "ForwardInput param is UnImplemented.";
   return folly::makeSemiFuture(std::optional<ForwardOutput>(std::nullopt));
 }
 
 folly::SemiFuture<std::optional<RawForwardOutput>>
-RemoteWorker::step_remote_async(const ForwardInput& input) {
+RemoteWorker::step_remote_async(const ForwardInput& forward_input) {
   folly::Promise<std::optional<RawForwardOutput>> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule(
-      [this, input = std::move(input), promise = std::move(promise)]() mutable {
-        channel_->execute_model_async(input, promise);
-      });
+  threadpool_.schedule([this,
+                        forward_input = std::move(forward_input),
+                        promise = std::move(promise)]() mutable {
+    channel_->execute_model_async(forward_input, promise);
+  });
   return future;
 }
 

@@ -20,6 +20,7 @@ limitations under the License.
 #include "dit_forward_params.h"
 #include "forward_params.h"
 #include "params_utils.h"
+#include "runtime/forward_params.h"
 #include "util/shared_memory_manager.h"
 
 namespace xllm {
@@ -103,8 +104,8 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
     return true;
   };
 
-  bool input_write(const ForwardInput& input);
-  void input_read(ForwardInput& input, const torch::Device& device);
+  bool input_write(const ForwardInput& forward_input);
+  void input_read(ForwardInput& forward_input, const torch::Device& device);
   bool raw_output_write(const torch::Tensor& next_tokens,
                         const torch::Tensor& logprobs,
                         const torch::Tensor& top_tokens,

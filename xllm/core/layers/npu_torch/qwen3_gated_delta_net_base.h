@@ -32,6 +32,8 @@ limitations under the License.
 #include "layers/common/rms_norm_gated.h"
 
 namespace xllm {
+struct ForwardInput;
+
 namespace layer {
 
 class Qwen3GatedDeltaNetBaseImpl : public torch::nn::Module {
@@ -48,7 +50,7 @@ class Qwen3GatedDeltaNetBaseImpl : public torch::nn::Module {
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params);
+                        const ForwardInput& forward_input);
 
  protected:
   virtual std::pair<torch::Tensor, torch::Tensor> project_decode_inputs(
@@ -60,7 +62,7 @@ class Qwen3GatedDeltaNetBaseImpl : public torch::nn::Module {
   void load_common_state_dict(const StateDict& state_dict);
   void verify_common_loaded_weights(const std::string& prefix) const;
 
-  torch::Tensor get_linear_state_indices(const ModelInputParams& input_params,
+  torch::Tensor get_linear_state_indices(const ForwardInput& forward_input,
                                          const torch::Device& device) const;
 
   std::pair<torch::Tensor, torch::Tensor> project_padded_inputs(

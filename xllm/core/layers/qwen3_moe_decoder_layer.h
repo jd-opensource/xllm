@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "common/dense_mlp.h"
+#include "runtime/forward_params.h"
 #if defined(USE_MLU)
 #include "layers/mlu/fused_moe.h"
 #elif defined(USE_NPU)
@@ -35,12 +36,14 @@ limitations under the License.
 #include "common/rms_norm.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/state_dict/state_dict.h"
 
 namespace xllm {
+struct ForwardInput;
+struct ParallelInput;
+
 namespace layer {
 
 class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
@@ -55,10 +58,10 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor& positions,
                         const AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params);
+                        const ForwardInput& forward_input);
 
  private:
-  torch::Tensor run_moe(torch::Tensor x, const ModelInputParams& input_params);
+  torch::Tensor run_moe(torch::Tensor x, const ParallelInput& parallel_input);
 
   Qwen2Attention attention_{nullptr};
   DenseMLP mlp_{nullptr};

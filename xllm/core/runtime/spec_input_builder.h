@@ -21,11 +21,12 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "framework/model/model_input_types.h"
+#include "runtime/forward_params.h"
 #include "util/slice.h"
 
 namespace xllm {
 
-struct ModelInputParams;
 struct ForwardInput;
 
 namespace specBuilder {
@@ -35,7 +36,7 @@ struct DecodeBuildMeta {
 };
 
 // Aggregated output vectors produced by row builders.
-// Callers convert these vectors to tensors and write back to input params.
+// Callers convert these vectors to tensors and write back to ForwardInput.
 struct DecodeBuildBuffers {
   DecodeBuildMeta meta;
   std::vector<int32_t> out_token_ids;
@@ -88,7 +89,7 @@ struct TokenWithOffset {
 };
 
 // Builds a reusable row context from ForwardInput host-side fields.
-DecodeRowContext make_decode_row_context(const ForwardInput& input);
+DecodeRowContext make_decode_row_context(const ForwardInput& forward_input);
 
 // Appends one logical decode row into output buffers.
 void append_decode_row(const DecodeRowContext& ctx,
@@ -137,22 +138,23 @@ void update_kv_seq_lens_and_max(std::vector<int32_t>& kv_seq_lens_vec,
                                 int32_t kv_len,
                                 int32_t& kv_max_seq_len);
 
-// Builds q_cu_seq_lens tensor from upstream-provided host values.
-// When include_leading_zero is true, returns query_start_loc-style
-// [0, cumsum...].
-torch::Tensor build_q_cu_seq_lens_tensor(const ModelInputParams& params,
+// Builds q_cu_seq_lens tensor from upstream-provided host values. When
+// include_leading_zero is true, returns query_start_loc-style [0, cumsum...].
+torch::Tensor build_q_cu_seq_lens_tensor(const ForwardInput& forward_input,
                                          torch::Device device = torch::kCPU,
                                          bool include_leading_zero = false);
 
-// Updates common decode-side ModelInputParams fields from built buffers.
-void update_input_params(ModelInputParams& input_params,
-                         DecodeBuildBuffers& buf,
-                         int32_t q_max_seq_len,
-                         std::vector<int32_t> q_seq_lens_vec,
-                         std::vector<int32_t> q_cu_seq_lens_vec,
-                         int32_t kv_max_seq_len,
-                         std::vector<int32_t> kv_seq_lens_vec,
-                         bool update_block_tables = false);
+// Updates common decode-side model input fields from built buffers.
+void update_input(BatchInputMeta& meta,
+                  AttentionInput& attention,
+                  std::vector<torch::Tensor>& multi_block_tables,
+                  DecodeBuildBuffers& buf,
+                  int32_t q_max_seq_len,
+                  std::vector<int32_t> q_seq_lens_vec,
+                  std::vector<int32_t> q_cu_seq_lens_vec,
+                  int32_t kv_max_seq_len,
+                  std::vector<int32_t> kv_seq_lens_vec,
+                  bool update_block_tables = false);
 
 namespace draftProbs {
 

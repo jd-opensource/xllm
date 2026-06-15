@@ -18,6 +18,7 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 #include "deepseek_v2.h"
 #include "layers/common/rotary_embedding_util.h"
+#include "runtime/forward_params.h"
 
 namespace xllm::npu::model {
 
@@ -69,10 +70,10 @@ class JoyAILLMFlashModelImpl : public torch::nn::Module {
     num_experts_per_tok_ = model_args.num_experts_per_tok();
   }
 
-  ModelOutput forward(torch::Tensor tokens,
-                      torch::Tensor positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    torch::Tensor tokens = forward_input.token_ids;
+    torch::Tensor positions = forward_input.positions;
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
@@ -88,9 +89,9 @@ class JoyAILLMFlashModelImpl : public torch::nn::Module {
 
     torch::Tensor attn_mask;
     if (::xllm::KVCacheConfig::get_instance().enable_prefix_cache() &&
-        !input_params.meta.batch_forward_type.is_decode()) {
+        !forward_input.meta.batch_forward_type.is_decode()) {
       attn_mask = attn_mask_.get_attn_mask(512, dtype_, device_);
-    } else if (input_params.meta.batch_forward_type.is_prefill()) {
+    } else if (forward_input.meta.batch_forward_type.is_prefill()) {
       attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
     } else if (num_speculative_tokens_ > 0) {
       // TODO :the judgement of gen_free_mask need more check
@@ -102,12 +103,12 @@ class JoyAILLMFlashModelImpl : public torch::nn::Module {
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.parallel.layer_synchronizer != nullptr) {
-        event = input_params.parallel.layer_synchronizer->get_event(i);
+      if (forward_input.parallel.layer_synchronizer != nullptr) {
+        event = forward_input.parallel.layer_synchronizer->get_event(i);
         event_flag =
-            input_params.parallel.layer_synchronizer->get_event_flag(i);
+            forward_input.parallel.layer_synchronizer->get_event_flag(i);
       }
-      if (!input_params.synchronize_layer(i)) {
+      if (!forward_input.synchronize_layer(i)) {
         return ModelOutput();
       }
 
@@ -119,7 +120,7 @@ class JoyAILLMFlashModelImpl : public torch::nn::Module {
             sin_pos,
             attn_mask,
             kv_caches[i],
-            input_params,
+            forward_input,
             event,
             event_flag);
       rolling_guard.after_layer(layer_index);

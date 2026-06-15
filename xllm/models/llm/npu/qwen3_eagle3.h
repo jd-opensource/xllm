@@ -27,7 +27,7 @@ limitations under the License.
 #include "core/common/interruption_bus.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
@@ -39,6 +39,7 @@ limitations under the License.
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/npu/npu_word_embedding_impl.h"
 #include "models/model_registry.h"
+#include "runtime/forward_params.h"
 
 namespace xllm::npu::model {
 
@@ -63,7 +64,7 @@ class QWen3Eagle3DecoderLayerImpl : public torch::nn::Module {
                                 torch::Tensor& sin_pos,
                                 torch::Tensor& attn_mask,
                                 KVCache& kv_cache,
-                                ModelInputParams& input_params,
+                                ForwardInput& forward_input,
                                 aclrtEvent* event,
                                 std::atomic<bool>* event_flag) {
     return decoder_layer_(hidden_states,
@@ -72,7 +73,7 @@ class QWen3Eagle3DecoderLayerImpl : public torch::nn::Module {
                           sin_pos,
                           attn_mask,
                           kv_cache,
-                          input_params,
+                          forward_input,
                           event,
                           event_flag,
                           layer_id_);
@@ -144,12 +145,11 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
 
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
-  virtual ModelOutput forward(torch::Tensor tokens,
-                              torch::Tensor positions,
-                              std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) {
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
+  virtual ModelOutput forward(const ForwardInput& forward_input,
+                              std::vector<KVCache>& kv_caches) {
+    torch::Tensor tokens = forward_input.token_ids;
+    torch::Tensor positions = forward_input.positions;
+    ForwardInput modified_input = forward_input;
 
     // Handle empty tokens case for dp
     if (dp_size_ > 1 && tokens.numel() == 0) {
@@ -158,10 +158,10 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
     }
 
     torch::Tensor hidden_states = embed_tokens_(tokens, 0);
-    // Get hidden_states_extra from input_params.embedding.input_embedding
+    // Get hidden_states_extra from input.embedding.input_embedding
     // In EAGLE-3, hidden_states_extra comes from verifier layers
     // (3 layers concatenated)
-    torch::Tensor hidden_states_extra = input_params.embedding.input_embedding;
+    torch::Tensor hidden_states_extra = forward_input.embedding.input_embedding;
     if (!hidden_states_extra.defined() || hidden_states_extra.size(0) == 0) {
       LOG(WARNING) << "hidden_states_extra use embedding from tokens.";
       hidden_states_extra = hidden_states;
@@ -182,18 +182,18 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
 
     // Generate attention mask
     torch::Tensor attn_mask;
-    if (!input_params.meta.batch_forward_type.is_decode()) {
+    if (!forward_input.meta.batch_forward_type.is_decode()) {
       if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-        int num_sequences = input_params.meta.num_sequences;
+        int num_sequences = forward_input.meta.num_sequences;
         if (num_sequences > 0) {
           std::vector<torch::Tensor> req_mask_vec;
           req_mask_vec.reserve(num_sequences);
 
           for (int j = 0; j < num_sequences; j++) {
             auto mask = attn_mask_.gen_append_mask(
-                input_params.attention.host.q_seq_lens[j],
-                input_params.attention.host.kv_seq_lens[j],
-                input_params.meta.kv_max_seq_len,
+                forward_input.attention.host.q_seq_lens[j],
+                forward_input.attention.host.kv_seq_lens[j],
+                forward_input.meta.kv_max_seq_len,
                 cos_pos.dtype().toScalarType(),
                 cos_pos.device());
             req_mask_vec.emplace_back(mask);
@@ -210,11 +210,12 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
     aclrtEvent* event{nullptr};
     std::atomic<bool>* event_flag{nullptr};
 
-    if (input_params.parallel.layer_synchronizer != nullptr) {
-      event = input_params.parallel.layer_synchronizer->get_event(0);
-      event_flag = input_params.parallel.layer_synchronizer->get_event_flag(0);
+    if (modified_input.parallel.layer_synchronizer != nullptr) {
+      event = modified_input.parallel.layer_synchronizer->get_event(0);
+      event_flag =
+          modified_input.parallel.layer_synchronizer->get_event_flag(0);
     }
-    if (!input_params.synchronize_layer(0)) {
+    if (!modified_input.synchronize_layer(0)) {
       return ModelOutput();
     }
 
@@ -224,7 +225,7 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
              sin_pos,
              attn_mask,
              kv_caches[0],
-             input_params_new,
+             modified_input,
              event,
              event_flag);
     auto aux_hidden_states = hidden_states.clone();
@@ -322,11 +323,9 @@ class QWen3Eagle3ForCausalLMImpl : public torch::nn::Module {
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   // returns: ModelOutput with hidden_states [num_tokens, hidden_size]
-  virtual ModelOutput forward(const torch::Tensor& tokens,
-                              const torch::Tensor& positions,
-                              std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) {
-    return model_(tokens, positions, kv_caches, input_params);
+  virtual ModelOutput forward(const ForwardInput& forward_input,
+                              std::vector<KVCache>& kv_caches) {
+    return model_->forward(forward_input, kv_caches);
   }
 
   // hidden_states: [num_tokens, hidden_size]

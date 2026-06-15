@@ -46,10 +46,10 @@ ShmChannel::ShmChannel(int dp_group,
             << " and size: " << options.output_shm_size();
 }
 
-bool ShmChannel::execute_model_with_shm(const ForwardInput& input,
+bool ShmChannel::execute_model_with_shm(const ForwardInput& forward_input,
                                         RawForwardOutput& raw_output) {
   if (input_shm_manager_) {
-    bool use_shm_ret = input_shm_manager_->input_write(input);
+    bool use_shm_ret = input_shm_manager_->input_write(forward_input);
     if (!use_shm_ret) {
       enable_shm_ = false;
       LOG(ERROR)
@@ -62,16 +62,16 @@ bool ShmChannel::execute_model_with_shm(const ForwardInput& input,
 }
 
 void ShmChannel::execute_model_async(
-    const ForwardInput& input,
+    const ForwardInput& forward_input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
   if (enable_shm_) {
     RawForwardOutput raw_output;
-    bool shm_success = execute_model_with_shm(input, raw_output);
+    bool shm_success = execute_model_with_shm(forward_input, raw_output);
     if (shm_success) {
       promise.setValue(raw_output);
       return;
     }
   }
-  execute_model_with_brpc(input, promise);
+  execute_model_with_brpc(forward_input, promise);
 }
 }  // namespace xllm

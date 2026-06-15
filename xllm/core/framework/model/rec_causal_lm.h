@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "core/framework/model/causal_lm.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -30,11 +31,9 @@ class RecCausalLMImpl : public RecCausalLM {
   RecCausalLMImpl(Model model, const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& parameters) override {
-    return model_->forward(tokens, positions, kv_caches, parameters);
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) override {
+    return model_->forward(forward_input, kv_caches);
   }
 
   torch::Tensor pooler(const torch::Tensor& hidden_states,

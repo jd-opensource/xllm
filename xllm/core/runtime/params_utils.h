@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/request/sequence.h"
 #include "runtime/forward_params.h"
 #include "worker.pb.h"
@@ -27,7 +27,7 @@ namespace xllm {
 class Stream;
 
 bool forward_input_to_packed_proto(
-    const ForwardInput& input,
+    const ForwardInput& forward_input,
     proto::PackedForwardInput* packed_forward_input);
 
 void packed_proto_to_forward_input(

@@ -14,6 +14,8 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+
+#include "runtime/forward_params.h"
 #ifdef TORCH_HIGHER_THAN_PTA6
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
@@ -28,7 +30,7 @@ limitations under the License.
 
 #include "atb/atb_infer.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "nlohmann/json.hpp"
@@ -41,6 +43,8 @@ limitations under the License.
 #include "xllm_atb_layers/models/llama/layer/decoder_layer.h"
 
 namespace xllm {
+struct ForwardInput;
+
 namespace layer {
 
 class NpuLlamaDecoderLayerImpl : public BaseLayer {
@@ -58,7 +62,7 @@ class NpuLlamaDecoderLayerImpl : public BaseLayer {
                         torch::Tensor& sin_pos,
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
-                        ModelInputParams& input_params,
+                        ForwardInput& forward_input,
                         int node_id = 0);
 
  private:
@@ -68,7 +72,7 @@ class NpuLlamaDecoderLayerImpl : public BaseLayer {
                                torch::Tensor& sin_pos,
                                torch::Tensor& attn_mask,
                                KVCache& kv_cache,
-                               ModelInputParams& input_params,
+                               ForwardInput& forward_input,
                                bool is_prefill);
 
   int64_t init_node(atb_speed::Model::Node& node,

@@ -159,7 +159,7 @@ DeepseekV2DecoderLayerImpl::MoeInputPrepResult
 DeepseekV2DecoderLayerImpl::prepare_moe_inputs(
     torch::Tensor x,
     const torch::Tensor& residual,
-    const ModelInputParams& input_params,
+    const ForwardInput& forward_input,
     DeepseekV2AttentionImpl::PostAttnLayout attn_layout) {
   MoeInputPrepResult result;
   if (!sparse_moe_) {
@@ -169,7 +169,7 @@ DeepseekV2DecoderLayerImpl::prepare_moe_inputs(
     return result;
   }
 
-  result.exec_cfg = sparse_moe_->plan_exec(input_params);
+  result.exec_cfg = sparse_moe_->plan_exec(forward_input.parallel);
   result.use_sp_moe_overlap =
       attn_layout == DeepseekV2AttentionImpl::PostAttnLayout::kPackedLocal &&
       !result.exec_cfg->enable_all2all && !result.exec_cfg->need_dp_gather &&
@@ -194,7 +194,7 @@ DeepseekV2DecoderLayerImpl::prepare_moe_inputs(
   if (result.exec_cfg->enable_all2all || result.exec_cfg->need_dp_gather) {
     result.moe_prep = sparse_moe_->prep_in(std::move(x),
                                            residual,
-                                           input_params,
+                                           forward_input.parallel,
                                            result.exec_cfg.value(),
                                            attn_layout);
     result.ffn_in = result.moe_prep->ffn_in;
@@ -233,9 +233,9 @@ bool DeepseekV2DecoderLayerImpl::can_keep_local_output(
 }
 
 bool DeepseekV2DecoderLayerImpl::can_sp_chunk(
-    const ModelInputParams& input_params) const {
+    const ForwardInput& forward_input) const {
   return sequence_parallel_context_ != nullptr && sp_ffn_chunk_size_ > 0 &&
-         input_params.meta.batch_forward_type.no_decode();
+         forward_input.meta.batch_forward_type.no_decode();
 }
 
 torch::Tensor DeepseekV2DecoderLayerImpl::comm_out(
@@ -257,8 +257,8 @@ torch::Tensor DeepseekV2DecoderLayerImpl::comm_out(
 
 torch::Tensor DeepseekV2DecoderLayerImpl::run_mlp(
     torch::Tensor x,
-    const ModelInputParams& input_params) {
-  if (!can_sp_chunk(input_params) || !x.defined() || x.dim() == 0 ||
+    const ForwardInput& forward_input) {
+  if (!can_sp_chunk(forward_input) || !x.defined() || x.dim() == 0 ||
       x.size(0) <= sp_ffn_chunk_size_) {
     return mlp_(x);
   }
@@ -299,7 +299,7 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
-    const ModelInputParams& input_params,
+    const ForwardInput& forward_input,
     const std::optional<torch::Tensor>&) {
   // Pre-attention norm
   residual = x;
@@ -312,7 +312,7 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
       sequence_parallel_context_ != nullptr && attention_->can_use_sp();
   const auto attn_layout = attention_->post_attn_layout(use_sp_output);
   auto prep = prepare_moe_inputs(
-      std::move(x), residual.value(), input_params, attn_layout);
+      std::move(x), residual.value(), forward_input, attn_layout);
   auto& carrier = prep.carrier;
   auto& moe_prep = prep.moe_prep;
   auto& exec_cfg = prep.exec_cfg;
@@ -328,13 +328,13 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
     }
   }
   if (moe_prep.has_value()) {
-    x = sparse_moe_->gather_in(*moe_prep, input_params);
+    x = sparse_moe_->gather_in(*moe_prep, forward_input.parallel);
   }
 
   // MLP forward
   bool keep_local_output = false;
   const int64_t sp_chunk_size =
-      can_sp_chunk(input_params) ? sp_ffn_chunk_size_ : -1;
+      can_sp_chunk(forward_input) ? sp_ffn_chunk_size_ : -1;
   if (sparse_moe_) {
     auto can_keep_local = [&](ProcessGroup* pg) {
       return carrier.has_value() && can_keep_local_output(*carrier, pg);
@@ -370,7 +370,7 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
   } else {
     keep_local_output =
         can_keep_local_output(*carrier, parallel_args_.tp_group_);
-    x = run_mlp(std::move(x), input_params);
+    x = run_mlp(std::move(x), forward_input);
     x = keep_local_output ? comm_out(x, *carrier, parallel_args_.tp_group_)
                           : reduce_out(x, parallel_args_.tp_group_);
   }
@@ -382,7 +382,7 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
     x = x + skip_src;
   } else if (moe_prep.has_value() &&
              (moe_prep->need_dp_gather || moe_prep->need_tp_pad)) {
-    x = sparse_moe_->merge_out(x, *moe_prep, input_params);
+    x = sparse_moe_->merge_out(x, *moe_prep, forward_input.parallel);
   } else {
     x = restore_ffn_output(x, *carrier);
   }

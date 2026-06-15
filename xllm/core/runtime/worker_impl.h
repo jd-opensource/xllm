@@ -30,7 +30,7 @@ limitations under the License.
 #include "framework/kv_cache_transfer/kv_cache_store.h"
 #include "framework/kv_cache_transfer/kv_cache_transfer.h"
 #include "framework/model/causal_lm.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -40,6 +40,7 @@ limitations under the License.
 #include "framework/xtensor/xtensor.h"
 #include "options.h"
 #include "platform/device.h"
+#include "runtime/forward_params.h"
 #include "util/threadpool.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache_transfer/mooncake_weight_transfer.h"
@@ -111,12 +112,12 @@ class WorkerImpl {
   // prepare work before model execution
   virtual void prepare_work_before_execute(const ForwardInput& inputs,
                                            ForwardInput& processed_inputs);
-  void prepare_work_before_execute_on_stream(const ForwardInput& input,
+  void prepare_work_before_execute_on_stream(const ForwardInput& forward_input,
                                              ForwardInput& processed_input,
                                              Stream& prepare_stream);
 
   // Internal helper shared by worker pipelines before model execution.
-  virtual void apply_kv_block_swaps(const ModelInputParams& input_params);
+  virtual void apply_kv_block_swaps(const BlockCopyInput& block_copy);
 
   virtual std::optional<ForwardOutput> step(const ForwardInput& inputs) = 0;
 
@@ -203,11 +204,11 @@ class WorkerImpl {
  protected:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
   virtual std::optional<ForwardOutput> step_for_schedule_overlap(
-      const ForwardInput& input);
+      const ForwardInput& forward_input);
   virtual ForwardInput update_input_by_last_step_output_for_schedule_overlap(
-      ForwardInput& input);
+      ForwardInput& forward_input);
   // Only used for deepseek chunked prefill ops on npu device
-  void prepare_mla_prefixcache_inputs(ModelInputParams& input_params);
+  void prepare_mla_prefixcache_inputs(AttentionInput& attention);
 
   void init_hierarchy_kv_cache_transfer();
 
@@ -223,9 +224,8 @@ class WorkerImpl {
 
 #if defined(USE_CUDA) || defined(USE_DCU)
   void refresh_cuda_block_copy_runtime_state();
-  bool can_use_cuda_block_copy_kernel(
-      const ModelInputParams& input_params) const;
-  void execute_cuda_block_copy_kernel(const ModelInputParams& input_params);
+  bool can_use_cuda_block_copy_kernel(const BlockCopyInput& block_copy) const;
+  void execute_cuda_block_copy_kernel(const BlockCopyInput& block_copy);
 
   struct CudaBlockCopyRuntimeState {
     torch::Tensor k_cache_ptrs_device;
@@ -247,8 +247,8 @@ class WorkerImpl {
   // decoder ATB binding refresh.
   bool init_rolling_runtime_state();
 
-  torch::Tensor recompute_new_cache_slots(const ForwardInput& input);
-  torch::Tensor compute_in_prefix_slots(const ForwardInput& input);
+  torch::Tensor recompute_new_cache_slots(const ForwardInput& forward_input);
+  torch::Tensor compute_in_prefix_slots(const ForwardInput& forward_input);
 #endif
 
  protected:

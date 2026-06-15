@@ -26,6 +26,8 @@ limitations under the License.
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/util/rec_model_utils.h"
+#include "runtime/forward_params.h"
+
 namespace xllm {
 namespace layer {
 namespace {
@@ -61,15 +63,16 @@ torch::Tensor PrepareOneRecAttentionMask(const at::Tensor& attn_mask,
   return EnsureNdFormat(result);
 }
 
-int64_t ResolveOneRecBatchSize(const ModelInputParams& input_params) {
-  const auto* onerec_params = input_params.onerec_xattention_params() != nullptr
-                                  ? static_cast<const OneRecModelInputParams*>(
-                                        input_params.onerec_xattention_params())
-                                  : input_params.onerec_params();
+int64_t ResolveOneRecBatchSize(const ForwardInput& forward_input) {
+  const auto* onerec_params =
+      forward_input.onerec_xattention_params() != nullptr
+          ? static_cast<const OneRecInput*>(
+                forward_input.onerec_xattention_params())
+          : forward_input.onerec_params();
   if (onerec_params != nullptr && onerec_params->bs > 0) {
     return onerec_params->bs;
   }
-  return std::max<int64_t>(input_params.meta.num_sequences, 1);
+  return std::max<int64_t>(forward_input.meta.num_sequences, 1);
 }
 
 torch::Tensor NormalizeOneRecDecodeFasMask(torch::Tensor attn_mask,
@@ -717,10 +720,7 @@ void NpuOneRecBlockLayerImpl::param_from_args(
     atb_speed::onerec::BlockLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
-    bool is_prefill,
-    const ModelInputParams* input_params) {
-  (void)input_params;
-
+    bool is_prefill) {
   param.isFA = false;
   param.isPrefill = is_prefill;
   param.isBF16 = args.dtype() == "bfloat16";
@@ -1306,17 +1306,17 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(
     torch::Tensor& x,
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
-    ModelInputParams& input_params,
+    ForwardInput& forward_input,
     torch::Tensor* encoder_output,
     int32_t node_id,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
     const torch::Tensor& expert_array) {
-  const auto* onerec_params = input_params.onerec_params();
+  const auto* onerec_params = forward_input.onerec_params();
   CHECK(onerec_params != nullptr) << "OneRec requires rec_params.";
 
   const bool is_prefill =
-      onerec_params->rec_stage == OneRecModelInputParams::RecStage::PREFILL;
+      onerec_params->rec_stage == OneRecInput::RecStage::PREFILL;
   const bool is_first_prefill = onerec_params->is_first_prefill;
   const int64_t ntokens = x.dim() >= 1 ? x.size(0) : 1;
   const bool use_atb_small_tokens =
@@ -1359,7 +1359,7 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(
               x,
               attn_mask,
               kv_cache,
-              input_params,
+              forward_input,
               true,
               is_first_prefill,
               is_first_prefill ? encoder_output : nullptr,
@@ -1371,7 +1371,7 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(
               x,
               attn_mask,
               kv_cache,
-              input_params,
+              forward_input,
               true,
               is_first_prefill,
               is_first_prefill ? encoder_output : nullptr,
@@ -1383,7 +1383,7 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(
                                             x,
                                             attn_mask,
                                             kv_cache,
-                                            input_params,
+                                            forward_input,
                                             true,
                                             true,
                                             encoder_output,
@@ -1395,7 +1395,7 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(
                                         x,
                                         attn_mask,
                                         kv_cache,
-                                        input_params,
+                                        forward_input,
                                         true,
                                         true,
                                         encoder_output,
@@ -1406,7 +1406,7 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(
           << model_name_ << " execute prefill layer fail, error code: " << st;
     } else {
       build_encoder_node_variant_pack(
-          prefill_node_, x, attn_mask, input_params, true, node_id);
+          prefill_node_, x, attn_mask, forward_input, true, node_id);
       st = execute_node(prefill_node_, node_id, event, event_flag);
       LOG_IF(FATAL, st != 0)
           << model_name_
@@ -1422,7 +1422,7 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(
                                           x,
                                           attn_mask,
                                           kv_cache,
-                                          input_params,
+                                          forward_input,
                                           false,
                                           false,
                                           encoder_output,
@@ -1433,7 +1433,7 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(
                                       x,
                                       attn_mask,
                                       kv_cache,
-                                      input_params,
+                                      forward_input,
                                       false,
                                       false,
                                       encoder_output,
@@ -1451,7 +1451,7 @@ void NpuOneRecBlockLayerImpl::build_encoder_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     at::Tensor& attn_mask,
-    ModelInputParams& input_params,
+    ForwardInput& forward_input,
     bool is_prefill,
     int32_t layer_id) {
   (void)is_prefill;
@@ -1493,7 +1493,7 @@ void NpuOneRecBlockLayerImpl::build_encoder_node_variant_pack(
   node.variantPack.inTensors.at(layer_id_idx).hostData =
       placeholder_vec_.data();
 
-  const auto* onerec_params = input_params.onerec_params();
+  const auto* onerec_params = forward_input.onerec_params();
   if (onerec_params != nullptr &&
       onerec_params->encoder_seq_lens_tensor.defined()) {
     node.variantPack.inTensors.at(seq_len_idx) =
@@ -1515,7 +1515,7 @@ void NpuOneRecBlockLayerImpl::build_decoder_moe_node_variant_pack(
     torch::Tensor& x,
     at::Tensor& attn_mask,
     KVCache& kv_cache,
-    ModelInputParams& input_params,
+    ForwardInput& forward_input,
     bool is_prefill,
     bool is_first_prefill,
     torch::Tensor* encoder_output,
@@ -1554,7 +1554,7 @@ void NpuOneRecBlockLayerImpl::build_decoder_moe_node_variant_pack(
       x,
       attn_mask,
       kv_cache,
-      input_params,
+      forward_input,
       (use_legacy_onerec_prefill_only_contract() && is_prefill &&
        !is_first_prefill)
           ? decoder_prefill_only_decode_param_
@@ -1576,7 +1576,7 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
     torch::Tensor& x,
     at::Tensor& attn_mask,
     KVCache& kv_cache,
-    ModelInputParams& input_params,
+    ForwardInput& forward_input,
     const atb_speed::onerec::BlockLayerParam& param,
     bool is_first_prefill,
     torch::Tensor* encoder_output,
@@ -1601,7 +1601,7 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
         PrepareOneRecAttentionMask(attn_mask, device_, mask_dtype);
     if (!param.isPrefill && param.isDecoder) {
       prefill_attn_mask_ = NormalizeOneRecDecodeFasMask(
-          prefill_attn_mask_, ResolveOneRecBatchSize(input_params));
+          prefill_attn_mask_, ResolveOneRecBatchSize(forward_input));
     }
     node.variantPack.inTensors.at(idx++) =
         atb_speed::Utils::AtTensor2Tensor(prefill_attn_mask_);
@@ -1613,7 +1613,7 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
 
   auto k_cache = kv_cache.get_k_cache();
   auto v_cache = kv_cache.get_v_cache();
-  const auto* onerec_xattn_params = input_params.onerec_xattention_params();
+  const auto* onerec_xattn_params = forward_input.onerec_xattention_params();
   if (param.use_xattn && onerec_xattn_params != nullptr &&
       static_cast<size_t>(param.layerId) <
           onerec_xattn_params->unshared_k_caches.size() &&
@@ -1639,11 +1639,11 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
       v_cache.defined() ? atb_speed::Utils::AtTensor2Tensor(v_cache)
                         : placeholder_;
 
-  if (input_params.attention.device.kv_seq_lens.defined()) {
+  if (forward_input.attention.device.kv_seq_lens.defined()) {
     node.variantPack.inTensors.at(idx) = atb_speed::Utils::AtTensor2Tensor(
-        input_params.attention.device.kv_seq_lens);
+        forward_input.attention.device.kv_seq_lens);
     node.variantPack.inTensors.at(idx).hostData =
-        input_params.attention.host.kv_seq_lens.data();
+        forward_input.attention.host.kv_seq_lens.data();
   } else {
     int32_t seq_len = std::max(static_cast<int32_t>(x.size(0)), 1);
     seq_lens_vec_ = {seq_len};
@@ -1668,9 +1668,9 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
   // consumed during decoder prefill-only execution, so do not forward the
   // runtime empty [bs, 0] tensor to ATB.
   if (!param.enableOneRecPrefillOnly &&
-      input_params.attention.device.block_tables.defined()) {
+      forward_input.attention.device.block_tables.defined()) {
     node.variantPack.inTensors.at(idx) = atb_speed::Utils::AtTensor2Tensor(
-        input_params.attention.device.block_tables);
+        forward_input.attention.device.block_tables);
   } else {
     node.variantPack.inTensors.at(idx) = placeholder_;
     node.variantPack.inTensors.at(idx).hostData = placeholder_vec_.data();
@@ -1678,9 +1678,9 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
   idx++;
 
   if (!param.enableOneRecPrefillOnly &&
-      input_params.attention.device.new_cache_slots.defined()) {
+      forward_input.attention.device.new_cache_slots.defined()) {
     node.variantPack.inTensors.at(idx) = atb_speed::Utils::AtTensor2Tensor(
-        input_params.attention.device.new_cache_slots);
+        forward_input.attention.device.new_cache_slots);
   } else {
     node.variantPack.inTensors.at(idx) = placeholder_;
     node.variantPack.inTensors.at(idx).hostData = placeholder_vec_.data();
@@ -1700,8 +1700,8 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
 
   const auto* onerec_params =
       onerec_xattn_params != nullptr
-          ? static_cast<const OneRecModelInputParams*>(onerec_xattn_params)
-          : input_params.onerec_params();
+          ? static_cast<const OneRecInput*>(onerec_xattn_params)
+          : forward_input.onerec_params();
   const bool minimize_cross_attn_inputs =
       param.enableOneRecPrefillOnly && !param.enableSplitFuse && !param.isFA;
   if (!minimize_cross_attn_inputs) {
@@ -1804,7 +1804,7 @@ void NpuOneRecBlockLayerImpl::build_decoder_node_variant_pack(
     torch::Tensor& x,
     at::Tensor& attn_mask,
     KVCache& kv_cache,
-    ModelInputParams& input_params,
+    ForwardInput& forward_input,
     bool is_prefill,
     bool is_first_prefill,
     torch::Tensor* encoder_output,
@@ -1823,7 +1823,7 @@ void NpuOneRecBlockLayerImpl::build_decoder_node_variant_pack(
       x,
       attn_mask,
       kv_cache,
-      input_params,
+      forward_input,
       (use_legacy_onerec_prefill_only_contract() && is_prefill &&
        !is_first_prefill)
           ? decoder_prefill_only_decode_param_

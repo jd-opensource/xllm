@@ -26,7 +26,7 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/state_dict/state_dict.h"
 #include "util/timer.h"
 
@@ -102,12 +102,12 @@ WorkerClient::estimate_kv_cache_capacity_async() {
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerClient::step_async(
-    const ForwardInput& input) {
-  return worker_->step_async(input);
+    const ForwardInput& forward_input) {
+  return worker_->step_async(forward_input);
 }
 
 folly::SemiFuture<std::optional<RawForwardOutput>>
-WorkerClient::step_remote_async(const ForwardInput& input) {
+WorkerClient::step_remote_async(const ForwardInput& forward_input) {
   LOG(FATAL) << "WorkerClient Method step_remote_async with ForwardInput "
                 "param is UnImplemented.";
   return folly::makeSemiFuture(std::optional<RawForwardOutput>(std::nullopt));

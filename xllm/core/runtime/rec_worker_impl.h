@@ -23,6 +23,7 @@ limitations under the License.
 #include <optional>
 #include <vector>
 
+#include "runtime/forward_params.h"
 #include "runtime/llm_worker_impl.h"
 #include "util/rec_model_utils.h"
 #include "util/threadpool.h"
@@ -58,10 +59,10 @@ class RecWorkerImpl : public LLMWorkerImpl {
   void prepare_work_before_execute(const ForwardInput& inputs,
                                    ForwardInput& processed_inputs) override;
 
-  std::optional<ForwardOutput> step(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step(const ForwardInput& forward_input) override;
 
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
-      const ForwardInput& input);
+      const ForwardInput& forward_input);
 
  protected:
   std::shared_ptr<MPMCThreadPool> input_builder_thread_pool_;
@@ -98,7 +99,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
     virtual void prepare_work_before_execute(const ForwardInput& inputs,
                                              ForwardInput& processed_inputs);
 
-    virtual std::optional<ForwardOutput> step(const ForwardInput& input);
+    virtual std::optional<ForwardOutput> step(
+        const ForwardInput& forward_input);
 
     RecPipelineRuntime& runtime() { return runtime_; }
 
@@ -126,7 +128,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
     void prepare_work_before_execute(const ForwardInput& inputs,
                                      ForwardInput& processed_inputs) override;
 
-    std::optional<ForwardOutput> step(const ForwardInput& input) override;
+    std::optional<ForwardOutput> step(
+        const ForwardInput& forward_input) override;
 
    private:
     folly::SemiFuture<torch::Tensor> prepare_filter_mask_async(
@@ -146,7 +149,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
     void prepare_work_before_execute(const ForwardInput& inputs,
                                      ForwardInput& processed_inputs) override;
 
-    std::optional<ForwardOutput> step(const ForwardInput& input) override;
+    std::optional<ForwardOutput> step(
+        const ForwardInput& forward_input) override;
 
    private:
     struct RecConstraintDeviceTensors {
@@ -220,7 +224,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
     void prepare_work_before_execute(const ForwardInput& inputs,
                                      ForwardInput& processed_inputs) override;
 
-    std::optional<ForwardOutput> step(const ForwardInput& input) override;
+    std::optional<ForwardOutput> step(
+        const ForwardInput& forward_input) override;
 
    private:
     // Beam search related tensors
@@ -259,7 +264,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
     // Execute cache select kernel
     void execute_cache_select(const BeamSearchTensors& beam_tensors,
-                              ForwardInput& input,
+                              ForwardInput& forward_input,
                               int32_t round,
                               int32_t beam_width,
                               int32_t layer_num);
@@ -291,18 +296,18 @@ class RecWorkerImpl : public LLMWorkerImpl {
         int32_t max_decode_step);
 
     // Apply async result to prepare decode input for current round
-    void prepare_input_for_current_round(ForwardInput& input,
+    void prepare_input_for_current_round(ForwardInput& forward_input,
                                          const NextRoundInputResults& results,
                                          int32_t round,
                                          const torch::Tensor& top_tokens,
                                          const BeamSearchTensors& beam_tensors);
 
-    void prepare_round_input_for_npu(ForwardInput& input,
+    void prepare_round_input_for_npu(ForwardInput& forward_input,
                                      int32_t round,
                                      const torch::Tensor& top_tokens,
                                      const BeamSearchTensors& beam_tensors);
 
-    void prepare_two_stage_round_input(ForwardInput& input,
+    void prepare_two_stage_round_input(ForwardInput& forward_input,
                                        int32_t round,
                                        const torch::Tensor& top_tokens,
                                        const BeamSearchTensors& beam_tensors);
@@ -310,7 +315,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
     // Consume async result for current round and schedule async computation for
     // next round.
     void prepare_round_input_and_schedule_next(
-        ForwardInput& input,
+        ForwardInput& forward_input,
         int32_t round,
         int32_t total_rounds,
         int32_t batch_size,

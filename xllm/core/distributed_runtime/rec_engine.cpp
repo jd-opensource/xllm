@@ -377,24 +377,19 @@ std::vector<ForwardInput> RecEngine::LlmRecEnginePipeline::prepare_inputs(
     dp_global_token_nums[dp_rank] =
         static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
     if (batch_forward_type.is_empty() &&
-        !batched_inputs[dp_rank]
-             .input_params.meta.batch_forward_type.is_empty()) {
-      batch_forward_type =
-          batched_inputs[dp_rank].input_params.meta.batch_forward_type;
+        !batched_inputs[dp_rank].meta.batch_forward_type.is_empty()) {
+      batch_forward_type = batched_inputs[dp_rank].meta.batch_forward_type;
     }
-    dp_is_decode[dp_rank] =
-        batch_forward_type.is_decode() &&
-        batched_inputs[dp_rank].input_params.meta.q_max_seq_len == 1;
+    dp_is_decode[dp_rank] = batch_forward_type.is_decode() &&
+                            batched_inputs[dp_rank].meta.q_max_seq_len == 1;
   }
 
   for (int32_t dp_rank = 0; dp_rank < engine_.dp_size_; ++dp_rank) {
-    batched_inputs[dp_rank].input_params.parallel.dp_global_token_nums =
+    batched_inputs[dp_rank].parallel.dp_global_token_nums =
         dp_global_token_nums;
-    batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
-    if (batched_inputs[dp_rank]
-            .input_params.meta.batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].input_params.meta.batch_forward_type =
-          batch_forward_type;
+    batched_inputs[dp_rank].parallel.dp_is_decode = dp_is_decode;
+    if (batched_inputs[dp_rank].meta.batch_forward_type.is_empty()) {
+      batched_inputs[dp_rank].meta.batch_forward_type = batch_forward_type;
     }
   }
 
@@ -417,12 +412,13 @@ ForwardOutput RecEngine::LlmRecEnginePipeline::step(
     COUNTER_ADD(prepare_input_latency_microseconds,
                 timer.elapsed_microseconds());
 
-    const bool all_empty = std::all_of(forward_inputs.begin(),
-                                       forward_inputs.end(),
-                                       [](const ForwardInput& input) {
-                                         return !input.token_ids.defined() ||
-                                                input.token_ids.numel() == 0;
-                                       });
+    const bool all_empty =
+        std::all_of(forward_inputs.begin(),
+                    forward_inputs.end(),
+                    [](const ForwardInput& forward_input) {
+                      return !forward_input.token_ids.defined() ||
+                             forward_input.token_ids.numel() == 0;
+                    });
     if (all_empty) {
       return false;
     }

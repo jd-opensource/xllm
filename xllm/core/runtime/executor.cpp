@@ -36,11 +36,9 @@ ForwardInput Executor::prepare_inputs(Batch& batch) {
   return impl_->prepare_inputs(batch);
 }
 
-ModelOutput Executor::forward(const torch::Tensor& tokens,
-                              const torch::Tensor& positions,
-                              std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& params) {
-  return impl_->run(tokens, positions, kv_caches, params);
+ModelOutput Executor::forward(const ForwardInput& forward_input,
+                              std::vector<KVCache>& kv_caches) {
+  return impl_->run(forward_input, kv_caches);
 }
 
 }  // namespace xllm

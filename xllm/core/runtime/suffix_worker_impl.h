@@ -19,6 +19,7 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
+#include "runtime/forward_params.h"
 #include "runtime/speculative_worker_impl.h"
 #include "util/suffix_decoding_cache.h"
 
@@ -36,7 +37,8 @@ class SuffixWorkerImpl : public SpeculativeWorkerImpl {
   ~SuffixWorkerImpl() override = default;
 
  protected:
-  std::optional<ForwardOutput> step_prefill(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step_prefill(
+      const ForwardInput& forward_input) override;
   std::optional<ForwardOutput> step_decode(const ForwardInput& inputs) override;
   std::optional<ForwardOutput> step_empty(const ForwardInput& inputs) override;
 

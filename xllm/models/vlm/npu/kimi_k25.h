@@ -24,7 +24,7 @@ limitations under the License.
 #include <unordered_map>
 
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_kimik25_vision_encoder_layer_impl.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
@@ -34,6 +34,7 @@ limitations under the License.
 #include "models/model_registry.h"
 #include "processors/kimi25_image_processor.h"
 #include "processors/multimodal_processor.h"
+#include "runtime/forward_params.h"
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
 
 namespace xllm {
@@ -792,10 +793,10 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
   }
 
   void prepare_encoder_input(
-      const ModelInputParams& input_params,
+      const ForwardInput& forward_input,
       std::optional<KimiK2_5_VLImageInputs>& image_inputs,
       std::optional<KimiK2_5_VLVideoInputs>& video_inputs) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+    const auto& mm_data = forward_input.multimodal.mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
       pixel_values = res.value();
@@ -882,10 +883,10 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     return features;
   }
 
-  MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
+  MMDict get_multimodal_embeddings(const ForwardInput& forward_input) {
     std::optional<KimiK2_5_VLImageInputs> image_input;
     std::optional<KimiK2_5_VLVideoInputs> video_input;
-    prepare_encoder_input(input_params, image_input, video_input);
+    prepare_encoder_input(forward_input, image_input, video_input);
     auto merge_size =
         model_args_.mm_image_merge_size() > 0
             ? model_args_.mm_image_merge_size()
@@ -942,8 +943,8 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
   }
 
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
-                                     const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+                                     const ForwardInput& forward_input) {
+    const auto& mm_data = forward_input.multimodal.mm_data;
     torch::Tensor multimodal_embeds;
     if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
       multimodal_embeds = emb.value();
@@ -959,11 +960,9 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     return inputs_embeds;
   }
 
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    return language_model_(tokens, positions, kv_caches, input_params);
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    return language_model_->forward(forward_input, kv_caches);
   }
 
   torch::Tensor logits(const torch::Tensor& hidden_states,

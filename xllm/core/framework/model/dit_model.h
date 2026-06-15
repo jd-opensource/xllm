@@ -29,7 +29,7 @@ class DiTModel : public torch::nn::Module {
  public:
   ~DiTModel() override = default;
 
-  virtual DiTForwardOutput forward(const DiTForwardInput& input) = 0;
+  virtual DiTForwardOutput forward(const DiTForwardInput& forward_input) = 0;
   virtual torch::Device device() const = 0;
   virtual const torch::TensorOptions& options() const = 0;
   virtual void load_model(std::unique_ptr<DiTModelLoader> loader) = 0;
@@ -40,8 +40,8 @@ class DiTModelImpl : public DiTModel {
  public:
   DiTModelImpl(Model model, const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
-  DiTForwardOutput forward(const DiTForwardInput& input) override {
-    return model_->forward(input);
+  DiTForwardOutput forward(const DiTForwardInput& forward_input) override {
+    return model_->forward(forward_input);
   }
   torch::Device device() const override { return options_.device(); }
   const torch::TensorOptions& options() const override { return options_; }

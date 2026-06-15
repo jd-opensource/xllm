@@ -22,22 +22,22 @@ limitations under the License.
 #include <cstdint>
 #include <vector>
 
-#include "framework/model/model_input_params.h"
 #include "layers/common/attention_metadata.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 namespace layer {
 namespace {
 
-ModelInputParams make_params(BatchForwardType forward_type,
-                             const std::vector<int32_t>& q_cu_lens,
-                             const std::vector<int32_t>& kv_cu_lens) {
-  ModelInputParams params;
-  params.meta.batch_forward_type = forward_type;
-  params.meta.num_sequences = static_cast<int32_t>(q_cu_lens.size()) - 1;
-  params.meta.actual_num_sequences = params.meta.num_sequences;
-  params.meta.q_max_seq_len = 0;
-  params.meta.kv_max_seq_len = 0;
+ForwardInput make_input(BatchForwardType forward_type,
+                        const std::vector<int32_t>& q_cu_lens,
+                        const std::vector<int32_t>& kv_cu_lens) {
+  ForwardInput forward_input;
+  forward_input.meta.batch_forward_type = forward_type;
+  forward_input.meta.num_sequences = static_cast<int32_t>(q_cu_lens.size()) - 1;
+  forward_input.meta.actual_num_sequences = forward_input.meta.num_sequences;
+  forward_input.meta.q_max_seq_len = 0;
+  forward_input.meta.kv_max_seq_len = 0;
   std::vector<int32_t> q_lens;
   std::vector<int32_t> kv_lens;
   q_lens.reserve(q_cu_lens.size() - 1);
@@ -47,23 +47,26 @@ ModelInputParams make_params(BatchForwardType forward_type,
     const int32_t kv_len = kv_cu_lens[idx] - kv_cu_lens[idx - 1];
     q_lens.emplace_back(q_len);
     kv_lens.emplace_back(kv_len);
-    params.meta.q_max_seq_len = std::max(params.meta.q_max_seq_len, q_len);
-    params.meta.kv_max_seq_len = std::max(params.meta.kv_max_seq_len, kv_len);
+    forward_input.meta.q_max_seq_len =
+        std::max(forward_input.meta.q_max_seq_len, q_len);
+    forward_input.meta.kv_max_seq_len =
+        std::max(forward_input.meta.kv_max_seq_len, kv_len);
   }
-  params.attention.host.q_seq_lens = q_cu_lens;
-  params.attention.host.kv_seq_lens = kv_cu_lens;
-  params.attention.host.q_cu_seq_lens.assign(q_cu_lens.begin() + 1,
-                                             q_cu_lens.end());
-  params.attention.device.q_seq_lens = torch::tensor(q_cu_lens, torch::kInt32);
-  params.attention.device.kv_seq_lens =
+  forward_input.attention.host.q_seq_lens = q_cu_lens;
+  forward_input.attention.host.kv_seq_lens = kv_cu_lens;
+  forward_input.attention.host.q_cu_seq_lens.assign(q_cu_lens.begin() + 1,
+                                                    q_cu_lens.end());
+  forward_input.attention.device.q_seq_lens =
+      torch::tensor(q_cu_lens, torch::kInt32);
+  forward_input.attention.device.kv_seq_lens =
       torch::tensor(kv_cu_lens, torch::kInt32);
-  params.attention.device.q_cu_seq_lens =
-      torch::tensor(params.attention.host.q_cu_seq_lens, torch::kInt32);
-  params.attention.device.new_cache_slots = torch::arange(
+  forward_input.attention.device.q_cu_seq_lens =
+      torch::tensor(forward_input.attention.host.q_cu_seq_lens, torch::kInt32);
+  forward_input.attention.device.new_cache_slots = torch::arange(
       q_cu_lens.back(), torch::TensorOptions().dtype(torch::kInt32));
-  params.attention.device.block_tables =
+  forward_input.attention.device.block_tables =
       torch::empty({0, 0}, torch::TensorOptions().dtype(torch::kInt32));
-  return params;
+  return forward_input;
 }
 
 std::vector<int64_t> tensor_vec(const torch::Tensor& tensor) {
@@ -76,17 +79,18 @@ std::vector<int64_t> tensor_vec(const torch::Tensor& tensor) {
   return values;
 }
 
-AttentionMetadata build_metadata(ModelInputParams params,
+AttentionMetadata build_metadata(ForwardInput forward_input,
                                  const torch::Tensor& positions,
                                  int64_t window_size = 0) {
-  return DSAMetadataBuilderMlu::build(params, positions, {}, {}, window_size);
+  return DSAMetadataBuilderMlu::build(
+      forward_input, positions, {}, {}, window_size);
 }
 
 TEST(DSAMetadataBuilderMluTest, BuildsCanonicalSeqMetadataFromCuLens) {
-  ModelInputParams params =
-      make_params(BatchForwardType::PREFILL, {0, 2, 3}, {0, 5, 9});
+  ForwardInput forward_input =
+      make_input(BatchForwardType::PREFILL, {0, 2, 3}, {0, 5, 9});
   torch::Tensor positions = torch::tensor({3, 4, 8}, torch::kInt32);
-  AttentionMetadata metadata = build_metadata(params, positions);
+  AttentionMetadata metadata = build_metadata(forward_input, positions);
 
   ASSERT_NE(metadata.dsa_metadata, nullptr);
   const DSAMetadata& dsa = *metadata.dsa_metadata;
@@ -109,15 +113,15 @@ TEST(DSAMetadataBuilderMluTest, BuildsCanonicalSeqMetadataFromCuLens) {
 }
 
 TEST(DSAMetadataBuilderMluTest, UsesAttentionMetadataSeqLens) {
-  ModelInputParams params =
-      make_params(BatchForwardType::PREFILL, {0, 2, 3}, {0, 5, 9});
-  params.attention.host.q_cu_seq_lens.clear();
-  params.attention.host.kv_cu_seq_lens.clear();
-  params.attention.host.q_seq_lens = {99};
-  params.attention.host.kv_seq_lens = {199};
+  ForwardInput forward_input =
+      make_input(BatchForwardType::PREFILL, {0, 2, 3}, {0, 5, 9});
+  forward_input.attention.host.q_cu_seq_lens.clear();
+  forward_input.attention.host.kv_cu_seq_lens.clear();
+  forward_input.attention.host.q_seq_lens = {99};
+  forward_input.attention.host.kv_seq_lens = {199};
 
   AttentionMetadata metadata =
-      build_metadata(params, torch::tensor({3, 4, 8}, torch::kInt32));
+      build_metadata(forward_input, torch::tensor({3, 4, 8}, torch::kInt32));
 
   ASSERT_NE(metadata.dsa_metadata, nullptr);
   EXPECT_EQ(tensor_vec(metadata.q_cu_seq_lens),
@@ -129,8 +133,7 @@ TEST(DSAMetadataBuilderMluTest, UsesAttentionMetadataSeqLens) {
 }
 
 TEST(DSAMetadataBuilderMluTest, PreservesAttentionFlags) {
-  ModelInputParams prefill =
-      make_params(BatchForwardType::PREFILL, {0, 1}, {0, 1});
+  ForwardInput prefill = make_input(BatchForwardType::PREFILL, {0, 1}, {0, 1});
   prefill.graph.attn_mask = torch::ones({1, 1}, torch::kFloat32);
   AttentionMetadata prefill_metadata =
       build_metadata(prefill, torch::tensor({0}, torch::kInt32));
@@ -139,12 +142,12 @@ TEST(DSAMetadataBuilderMluTest, PreservesAttentionFlags) {
   EXPECT_TRUE(prefill_metadata.attn_mask.defined());
   EXPECT_FALSE(prefill_metadata.dsa_metadata->attn_mask.defined());
 
-  ModelInputParams mixed = make_params(BatchForwardType::MIXED, {0, 1}, {0, 4});
+  ForwardInput mixed = make_input(BatchForwardType::MIXED, {0, 1}, {0, 4});
   AttentionMetadata mixed_metadata =
       build_metadata(mixed, torch::tensor({3}, torch::kInt32));
   EXPECT_TRUE(mixed_metadata.is_chunked_prefill);
 
-  ModelInputParams dummy = make_params(BatchForwardType::DECODE, {0}, {0});
+  ForwardInput dummy = make_input(BatchForwardType::DECODE, {0}, {0});
   dummy.meta.q_max_seq_len = 0;
   AttentionMetadata dummy_metadata =
       build_metadata(dummy, torch::empty({0}, torch::kInt32));
@@ -152,10 +155,10 @@ TEST(DSAMetadataBuilderMluTest, PreservesAttentionFlags) {
 }
 
 TEST(DSAMetadataBuilderMluTest, BuildsSwaPlan) {
-  ModelInputParams params =
-      make_params(BatchForwardType::CHUNKED_PREFILL, {0, 2, 3}, {0, 5, 12});
-  AttentionMetadata metadata =
-      build_metadata(params, torch::tensor({3, 4, 11}, torch::kInt32), 4);
+  ForwardInput forward_input =
+      make_input(BatchForwardType::CHUNKED_PREFILL, {0, 2, 3}, {0, 5, 12});
+  AttentionMetadata metadata = build_metadata(
+      forward_input, torch::tensor({3, 4, 11}, torch::kInt32), 4);
   const DSAMetadata& dsa = *metadata.dsa_metadata;
 
   EXPECT_EQ(dsa.swa_start_pos_vec, std::vector<int64_t>({0, 3}));
@@ -166,11 +169,11 @@ TEST(DSAMetadataBuilderMluTest, BuildsSwaPlan) {
 }
 
 TEST(DSAMetadataBuilderMluTest, BuildsCompressedPositionMetadata) {
-  ModelInputParams params =
-      make_params(BatchForwardType::PREFILL, {0, 3, 6}, {0, 3, 6});
+  ForwardInput forward_input =
+      make_input(BatchForwardType::PREFILL, {0, 3, 6}, {0, 3, 6});
   torch::Tensor positions =
       torch::tensor({2, 3, 4, 126, 127, 128}, torch::kInt32);
-  AttentionMetadata metadata = build_metadata(params, positions);
+  AttentionMetadata metadata = build_metadata(forward_input, positions);
   const DSAMetadata& dsa = *metadata.dsa_metadata;
 
   EXPECT_TRUE(torch::equal(dsa.input_positions, positions));
@@ -184,9 +187,9 @@ TEST(DSAMetadataBuilderMluTest, BuildsCompressedPositionMetadata) {
 }
 
 TEST(DSAMetadataBuilderMluTest, ExpandsBlockTablesAndSlotMappings) {
-  ModelInputParams params =
-      make_params(BatchForwardType::CHUNKED_PREFILL, {0, 2, 3}, {0, 5, 9});
-  params.multi_block_tables = {
+  ForwardInput forward_input =
+      make_input(BatchForwardType::CHUNKED_PREFILL, {0, 2, 3}, {0, 5, 9});
+  forward_input.multi_block_tables = {
       torch::tensor({10, 11, 20, 21}, torch::kInt32).view({2, 2}),
       torch::tensor({30, 31, 40, 41, 42, 43}, torch::kInt32).view({2, 3})};
   std::vector<DSAGroupInfo> group_infos = {
@@ -197,7 +200,7 @@ TEST(DSAMetadataBuilderMluTest, ExpandsBlockTablesAndSlotMappings) {
        {1, DSACacheType::SLIDING_WINDOW, 1, 4}}};
 
   AttentionMetadata metadata =
-      DSAMetadataBuilderMlu::build(params,
+      DSAMetadataBuilderMlu::build(forward_input,
                                    torch::tensor({3, 4, 8}, torch::kInt32),
                                    caches_info,
                                    group_infos,
@@ -214,9 +217,9 @@ TEST(DSAMetadataBuilderMluTest, ExpandsBlockTablesAndSlotMappings) {
 }
 
 TEST(DSAMetadataBuilderMluTest, SwaSlotsUseAbsoluteBlockColumns) {
-  ModelInputParams params =
-      make_params(BatchForwardType::CHUNKED_PREFILL, {0, 1}, {0, 24});
-  params.multi_block_tables = {
+  ForwardInput forward_input =
+      make_input(BatchForwardType::CHUNKED_PREFILL, {0, 1}, {0, 24});
+  forward_input.multi_block_tables = {
       torch::tensor({-1, -1, -1, -1, -1, 11}, torch::kInt32).view({1, 6})};
   std::vector<DSAGroupInfo> group_infos = {
       {DSACacheType::SLIDING_WINDOW, 1, 4}};
@@ -224,7 +227,7 @@ TEST(DSAMetadataBuilderMluTest, SwaSlotsUseAbsoluteBlockColumns) {
       {{0, DSACacheType::SLIDING_WINDOW, 1, 4}}};
 
   AttentionMetadata metadata =
-      DSAMetadataBuilderMlu::build(params,
+      DSAMetadataBuilderMlu::build(forward_input,
                                    torch::tensor({23}, torch::kInt32),
                                    caches_info,
                                    group_infos,
@@ -240,22 +243,22 @@ TEST(DSAMetadataBuilderMluTest, SwaSlotsUseAbsoluteBlockColumns) {
 }
 
 TEST(DSAMetadataBuilderMluTest, SwaKeepsSparseAbsoluteReadTable) {
-  ModelInputParams params =
-      make_params(BatchForwardType::CHUNKED_PREFILL, {0, 2, 5}, {0, 24, 43});
+  ForwardInput forward_input =
+      make_input(BatchForwardType::CHUNKED_PREFILL, {0, 2, 5}, {0, 24, 43});
   torch::Tensor swa_table = torch::full({2, 11}, -1, torch::kInt32);
   auto swa_table_acc = swa_table.accessor<int32_t, 2>();
   swa_table_acc[0][4] = 49;
   swa_table_acc[0][5] = 50;
   swa_table_acc[1][3] = 59;
   swa_table_acc[1][4] = 60;
-  params.multi_block_tables = {swa_table};
+  forward_input.multi_block_tables = {swa_table};
   std::vector<DSAGroupInfo> group_infos = {
       {DSACacheType::SLIDING_WINDOW, 1, 4}};
   std::vector<std::vector<DSACacheInfo>> caches_info = {
       {{0, DSACacheType::SLIDING_WINDOW, 1, 4}}};
 
   AttentionMetadata metadata = DSAMetadataBuilderMlu::build(
-      params,
+      forward_input,
       torch::tensor({22, 23, 16, 17, 18}, torch::kInt32),
       caches_info,
       group_infos,
@@ -277,16 +280,16 @@ TEST(DSAMetadataBuilderMluTest, SwaKeepsSparseAbsoluteReadTable) {
 }
 
 TEST(DSAMetadataBuilderMluTest, RejectsMissingSwaLiveBlock) {
-  ModelInputParams params =
-      make_params(BatchForwardType::CHUNKED_PREFILL, {0, 1}, {0, 24});
-  params.multi_block_tables = {
+  ForwardInput forward_input =
+      make_input(BatchForwardType::CHUNKED_PREFILL, {0, 1}, {0, 24});
+  forward_input.multi_block_tables = {
       torch::tensor({-1, -1, -1, -1, -1, -1}, torch::kInt32).view({1, 6})};
   std::vector<DSAGroupInfo> group_infos = {
       {DSACacheType::SLIDING_WINDOW, 1, 4}};
   std::vector<std::vector<DSACacheInfo>> caches_info = {
       {{0, DSACacheType::SLIDING_WINDOW, 1, 4}}};
 
-  EXPECT_DEATH(DSAMetadataBuilderMlu::build(params,
+  EXPECT_DEATH(DSAMetadataBuilderMlu::build(forward_input,
                                             torch::tensor({23}, torch::kInt32),
                                             caches_info,
                                             group_infos,
@@ -295,9 +298,9 @@ TEST(DSAMetadataBuilderMluTest, RejectsMissingSwaLiveBlock) {
 }
 
 TEST(DSAMetadataBuilderMluTest, BuildsC128AttentionMetadata) {
-  ModelInputParams params =
-      make_params(BatchForwardType::DECODE, {0, 1}, {0, 128});
-  params.multi_block_tables = {
+  ForwardInput forward_input =
+      make_input(BatchForwardType::DECODE, {0, 1}, {0, 128});
+  forward_input.multi_block_tables = {
       torch::tensor({7}, torch::TensorOptions().dtype(torch::kInt32))
           .view({1, 1})};
   std::vector<DSAGroupInfo> group_infos = {{DSACacheType::TOKEN, 128, 16}};
@@ -305,7 +308,7 @@ TEST(DSAMetadataBuilderMluTest, BuildsC128AttentionMetadata) {
       {{0, DSACacheType::TOKEN, 128, 16}}};
 
   AttentionMetadata metadata =
-      DSAMetadataBuilderMlu::build(params,
+      DSAMetadataBuilderMlu::build(forward_input,
                                    torch::tensor({127}, torch::kInt32),
                                    caches_info,
                                    group_infos,
@@ -321,16 +324,16 @@ TEST(DSAMetadataBuilderMluTest, BuildsC128AttentionMetadata) {
 }
 
 TEST(DSAMetadataBuilderMluTest, BuildsDecodeCompressedSlotMapping) {
-  ModelInputParams params =
-      make_params(BatchForwardType::DECODE, {0, 1}, {0, 129});
-  params.multi_block_tables = {
+  ForwardInput forward_input =
+      make_input(BatchForwardType::DECODE, {0, 1}, {0, 129});
+  forward_input.multi_block_tables = {
       torch::tensor({10, 11, 12}, torch::kInt32).view({1, 3})};
   std::vector<DSAGroupInfo> group_infos = {{DSACacheType::TOKEN, 4, 16}};
   std::vector<std::vector<DSACacheInfo>> caches_info = {
       {{0, DSACacheType::TOKEN, 4, 16}}};
 
   AttentionMetadata metadata =
-      DSAMetadataBuilderMlu::build(params,
+      DSAMetadataBuilderMlu::build(forward_input,
                                    torch::tensor({128}, torch::kInt32),
                                    caches_info,
                                    group_infos,
@@ -341,9 +344,9 @@ TEST(DSAMetadataBuilderMluTest, BuildsDecodeCompressedSlotMapping) {
             std::vector<int64_t>({192}));
   EXPECT_FALSE(metadata.dsa_metadata->cmp_slots_dict.contains(4));
 
-  params.meta.batch_forward_type = BatchForwardType::PREFILL;
+  forward_input.meta.batch_forward_type = BatchForwardType::PREFILL;
   AttentionMetadata prefill_metadata =
-      DSAMetadataBuilderMlu::build(params,
+      DSAMetadataBuilderMlu::build(forward_input,
                                    torch::tensor({128}, torch::kInt32),
                                    caches_info,
                                    group_infos,
@@ -352,13 +355,13 @@ TEST(DSAMetadataBuilderMluTest, BuildsDecodeCompressedSlotMapping) {
 }
 
 TEST(DSAMetadataBuilderMluTest, IgnoresLegacyCuLensFields) {
-  ModelInputParams params =
-      make_params(BatchForwardType::PREFILL, {0, 2, 3}, {0, 5, 9});
-  params.attention.host.q_cu_seq_lens = {99, 100};
-  params.attention.host.kv_cu_seq_lens = {88, 89};
+  ForwardInput forward_input =
+      make_input(BatchForwardType::PREFILL, {0, 2, 3}, {0, 5, 9});
+  forward_input.attention.host.q_cu_seq_lens = {99, 100};
+  forward_input.attention.host.kv_cu_seq_lens = {88, 89};
 
   AttentionMetadata metadata =
-      build_metadata(params, torch::tensor({3, 4, 8}, torch::kInt32));
+      build_metadata(forward_input, torch::tensor({3, 4, 8}, torch::kInt32));
 
   ASSERT_NE(metadata.dsa_metadata, nullptr);
   EXPECT_EQ(tensor_vec(metadata.q_cu_seq_lens),

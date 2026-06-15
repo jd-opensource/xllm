@@ -23,7 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/framework/model_loader.h"
@@ -33,15 +33,14 @@ limitations under the License.
 #include "core/layers/common/qwen3_next_rms_norm.h"
 #include "core/layers/common/word_embedding.h"
 #include "core/layers/npu_torch/qwen3_next_hybrid_decoder_layer_base.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
 class Qwen3HybridModelModule : public torch::nn::Module {
  public:
-  virtual ModelOutput forward(torch::Tensor tokens,
-                              torch::Tensor positions,
-                              std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) = 0;
+  virtual ModelOutput forward(const ForwardInput& forward_input,
+                              std::vector<KVCache>& kv_caches) = 0;
   virtual void load_state_dict(const StateDict& state_dict) = 0;
   virtual void verify_loaded_weights(const std::string& prefix) const = 0;
   virtual layer::WordEmbedding get_word_embedding() = 0;
@@ -79,10 +78,10 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
 
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
-  ModelOutput forward(torch::Tensor tokens,
-                      torch::Tensor positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) override {
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) override {
+    torch::Tensor tokens = forward_input.token_ids;
+    torch::Tensor positions = forward_input.positions;
     // Disable gradient computation to reduce memory usage during inference
     torch::NoGradGuard no_grad;
     if (dp_size_ > 1) {
@@ -94,12 +93,12 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
 
     layer::AttentionMetadata attn_metadata =
         layer::AttentionMetadataBuilder::build(
-            input_params,
+            forward_input,
             model_args_.enable_mla(),
-            build_attention_mask(input_params));
+            build_attention_mask(forward_input));
     torch::Tensor h;
-    if (input_params.embedding.input_embedding.defined()) {
-      h = input_params.embedding.input_embedding;
+    if (forward_input.embedding.input_embedding.defined()) {
+      h = forward_input.embedding.input_embedding;
     } else {
       h = embed_tokens_(tokens);
     }
@@ -118,11 +117,11 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
                          positions,
                          attn_metadata,
                          kv_caches[i],
-                         input_params,
+                         forward_input,
                          mrope_cos_sin);
 #if defined(USE_NPU)
-      if (input_params.parallel.layer_synchronizer != nullptr &&
-          !input_params.parallel.layer_synchronizer->record_event(
+      if (forward_input.parallel.layer_synchronizer != nullptr &&
+          !forward_input.parallel.layer_synchronizer->record_event(
               static_cast<int64_t>(i), device_.index())) {
         return ModelOutput();
       }
@@ -167,7 +166,7 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
   }
 
  protected:
-  torch::Tensor build_attention_mask(const ModelInputParams& input_params) {
+  torch::Tensor build_attention_mask(const ForwardInput& forward_input) {
 #if defined(USE_NPU)
     // On NPU the hybrid path never consumes attn_metadata.attn_mask: full
     // attention runs through the fused-infer / paged-attention kernels (which
@@ -176,24 +175,24 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
     // [seq_len, seq_len] mask here is pure waste and, for long sequences,
     // triggers an NPU OOM. Hand the kernels an empty mask unless a graph buffer
     // already supplies one.
-    if (input_params.graph.attn_mask.defined()) {
-      return input_params.graph.attn_mask;
+    if (forward_input.graph.attn_mask.defined()) {
+      return forward_input.graph.attn_mask;
     }
     return torch::Tensor();
 #else
-    if (input_params.graph.attn_mask.defined()) {
-      return input_params.graph.attn_mask;
+    if (forward_input.graph.attn_mask.defined()) {
+      return forward_input.graph.attn_mask;
     }
-    max_seq_len_ = std::max(input_params.meta.kv_max_seq_len, max_seq_len_);
+    max_seq_len_ = std::max(forward_input.meta.kv_max_seq_len, max_seq_len_);
     const bool use_append_mask =
-        input_params.is_spec_verify ||
-        input_params.meta.batch_forward_type.is_mixed() ||
-        input_params.meta.batch_forward_type.is_chunked_prefill();
+        forward_input.is_spec_verify ||
+        forward_input.meta.batch_forward_type.is_mixed() ||
+        forward_input.meta.batch_forward_type.is_chunked_prefill();
     if (!use_append_mask) {
       return dense_attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
     }
 
-    const int32_t num_sequences = input_params.meta.num_sequences;
+    const int32_t num_sequences = forward_input.meta.num_sequences;
     if (num_sequences <= 0) {
       return dense_attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
     }
@@ -201,12 +200,12 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
     std::vector<torch::Tensor> req_mask_vec;
     req_mask_vec.reserve(num_sequences);
     for (int32_t j = 0; j < num_sequences; ++j) {
-      req_mask_vec.emplace_back(
-          attn_mask_.gen_append_mask(input_params.attention.host.q_seq_lens[j],
-                                     input_params.attention.host.kv_seq_lens[j],
-                                     max_seq_len_,
-                                     dtype_,
-                                     device_));
+      req_mask_vec.emplace_back(attn_mask_.gen_append_mask(
+          forward_input.attention.host.q_seq_lens[j],
+          forward_input.attention.host.kv_seq_lens[j],
+          max_seq_len_,
+          dtype_,
+          device_));
     }
     return torch::cat(req_mask_vec, 0);
 #endif
@@ -235,11 +234,9 @@ class Qwen3HybridForCausalLMImplBase : public torch::nn::Module {
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   // returns: [num_tokens, hidden_size]
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    return model_->forward(tokens, positions, kv_caches, input_params);
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    return model_->forward(forward_input, kv_caches);
   }
 
   // hidden_states: [num_tokens, hidden_size]

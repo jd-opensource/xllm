@@ -91,33 +91,33 @@ torch::Tensor gather_token_level_tensor(const torch::Tensor& src,
 // that already went through ForwardInput::to(NPU) (e.g. MTP prefill with
 // device_tensors_ready) must be brought back to CPU here; otherwise
 // index_select triggers "Expected NPU tensor" on torch_npu.
-void ensure_cpu_for_cp_partition(ForwardInput& input) {
+void ensure_cpu_for_cp_partition(ForwardInput& forward_input) {
   auto to_cpu_if_needed = [](const char* /*name*/, torch::Tensor& tensor) {
     if (tensor.defined() && !tensor.device().is_cpu()) {
       tensor = tensor.to(torch::kCPU);
     }
   };
 
-  to_cpu_if_needed("token_ids", input.token_ids);
-  to_cpu_if_needed("positions", input.positions);
+  to_cpu_if_needed("token_ids", forward_input.token_ids);
+  to_cpu_if_needed("positions", forward_input.positions);
   to_cpu_if_needed("mtp_shifted_token_ids",
-                   input.input_params.embedding.mtp_shifted_token_ids);
+                   forward_input.embedding.mtp_shifted_token_ids);
   to_cpu_if_needed("selected_token_idxes",
-                   input.sampling_params.selected_token_idxes);
+                   forward_input.sampling_params.selected_token_idxes);
 
-  auto& attn_dev = input.input_params.attention.device;
+  auto& attn_dev = forward_input.attention.device;
   to_cpu_if_needed("attention.device.q_seq_lens", attn_dev.q_seq_lens);
   to_cpu_if_needed("attention.device.kv_seq_lens", attn_dev.kv_seq_lens);
   to_cpu_if_needed("attention.device.q_cu_seq_lens", attn_dev.q_cu_seq_lens);
 
-  input.token_ids_host = input.token_ids;
-  input.positions_host = input.positions;
-  input.device_tensors_ready = false;
+  forward_input.token_ids_host = forward_input.token_ids;
+  forward_input.positions_host = forward_input.positions;
+  forward_input.device_tensors_ready = false;
 }
 
 }  // namespace
 
-void cp_partition_inplace(ForwardInput& input,
+void cp_partition_inplace(ForwardInput& forward_input,
                           int32_t cp_rank,
                           int32_t cp_size) {
   if (cp_size <= 1) {
@@ -125,24 +125,26 @@ void cp_partition_inplace(ForwardInput& input,
   }
   // MIXED (chunked prefill + decode) still runs the prefill ATB node and needs
   // per-CP-rank token slices; only pure DECODE batches skip partition.
-  if (input.input_params.meta.batch_forward_type.is_decode()) {
+  if (forward_input.meta.batch_forward_type.is_decode()) {
     return;
   }
-  const int32_t num_sequences = input.input_params.meta.num_sequences;
+  const int32_t num_sequences = forward_input.meta.num_sequences;
   if (num_sequences <= 0) {
     return;
   }
-  if (!input.token_ids.defined() || input.token_ids.numel() == 0) {
+  if (!forward_input.token_ids.defined() ||
+      forward_input.token_ids.numel() == 0) {
     LOG(ERROR) << "[CP_PARTITION] cp_partition_inplace skipped: token_ids "
                   "empty/undefined cp_rank="
                << cp_rank << " cp_size=" << cp_size
                << " host_buffer_has_layout="
-               << input.input_host_buffer_has_layout
-               << " device_tensors_ready=" << input.device_tensors_ready
-               << " host_token_ids_defined=" << input.host_token_ids().defined()
+               << forward_input.input_host_buffer_has_layout
+               << " device_tensors_ready=" << forward_input.device_tensors_ready
+               << " host_token_ids_defined="
+               << forward_input.host_token_ids().defined()
                << " host_token_ids_numel="
-               << (input.host_token_ids().defined()
-                       ? input.host_token_ids().numel()
+               << (forward_input.host_token_ids().defined()
+                       ? forward_input.host_token_ids().numel()
                        : 0);
     return;
   }
@@ -151,13 +153,12 @@ void cp_partition_inplace(ForwardInput& input,
   CHECK_GE(cp_rank, 0);
   CHECK_LT(cp_rank, cp_size);
 
-  ensure_cpu_for_cp_partition(input);
+  ensure_cpu_for_cp_partition(forward_input);
 
-  const int64_t token_num = input.token_ids.numel();
+  const int64_t token_num = forward_input.token_ids.numel();
   const int32_t num_chunks = cp_size * 2;
 
-  auto& input_params = input.input_params;
-  auto& attention = input_params.attention;
+  auto& attention = forward_input.attention;
 
   const std::vector<int32_t> input_lens =
       !attention.host.q_seq_lens.empty()
@@ -233,14 +234,14 @@ void cp_partition_inplace(ForwardInput& input,
       gather_vec,
       torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
 
-  input.token_ids =
-      gather_token_level_tensor(input.token_ids, gather_indices, token_num);
-  input.positions =
-      gather_token_level_tensor(input.positions, gather_indices, token_num);
-  input.token_ids_host = input.token_ids;
-  input.positions_host = input.positions;
-  input_params.embedding.mtp_shifted_token_ids = gather_token_level_tensor(
-      input_params.embedding.mtp_shifted_token_ids, gather_indices, token_num);
+  forward_input.token_ids = gather_token_level_tensor(
+      forward_input.token_ids, gather_indices, token_num);
+  forward_input.positions = gather_token_level_tensor(
+      forward_input.positions, gather_indices, token_num);
+  forward_input.token_ids_host = forward_input.token_ids;
+  forward_input.positions_host = forward_input.positions;
+  forward_input.embedding.mtp_shifted_token_ids = gather_token_level_tensor(
+      forward_input.embedding.mtp_shifted_token_ids, gather_indices, token_num);
 
   const std::vector<int32_t> new_q_lens =
       build_seq_lens(attention.host.q_seq_lens, cp_q_lens, num_sequences);
@@ -259,10 +260,10 @@ void cp_partition_inplace(ForwardInput& input,
   attention.host.q_cu_seq_lens = cu;
   attention.device.q_cu_seq_lens = torch::tensor(cu, cpu_int32_options());
 
-  input_params.meta.q_max_seq_len = cp_global_max_seq_len;
-  input_params.meta.kv_max_seq_len = cp_global_max_seq_len;
+  forward_input.meta.q_max_seq_len = cp_global_max_seq_len;
+  forward_input.meta.kv_max_seq_len = cp_global_max_seq_len;
 
-  auto& selected = input.sampling_params.selected_token_idxes;
+  auto& selected = forward_input.sampling_params.selected_token_idxes;
   if (selected.defined() && selected.numel() > 0) {
     auto selected_cpu = selected.to(torch::kCPU).to(torch::kInt32).contiguous();
     const int32_t* selected_data = selected_cpu.data_ptr<int32_t>();
@@ -316,7 +317,7 @@ void cp_partition_inplace(ForwardInput& input,
       remapped.push_back(static_cast<int32_t>(remap_idx));
     }
 
-    input.sampling_params.selected_token_idxes =
+    forward_input.sampling_params.selected_token_idxes =
         torch::tensor(remapped, cpu_int32_options());
   }
 }

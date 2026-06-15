@@ -407,13 +407,12 @@ torch::Tensor FusedMoEImpl::select_experts(
       dispatch_scale_slice.copy_(hidden_states_scale_bytes);
     }
   } else {
-    xllm::kernel::MoeExpandInputParams moe_expand_input_params;
-    moe_expand_input_params.input = hidden_states_2d;
-    moe_expand_input_params.gather_index = gather_idx;
-    moe_expand_input_params.combine_idx = combine_idx;
-    moe_expand_input_params.topk = topk_;
-    expand_hidden_states =
-        xllm::kernel::moe_expand_input(moe_expand_input_params);
+    xllm::kernel::MoeExpandInputParams moe_expand_input;
+    moe_expand_input.input = hidden_states_2d;
+    moe_expand_input.gather_index = gather_idx;
+    moe_expand_input.combine_idx = combine_idx;
+    moe_expand_input.topk = topk_;
+    expand_hidden_states = xllm::kernel::moe_expand_input(moe_expand_input);
     if (enable_all2all_communication) {
       // use copy to place the output inside the dispatch buffer
       torch::Tensor dispatch_tensor =
@@ -720,11 +719,11 @@ torch::Tensor FusedMoEImpl::forward_experts(const torch::Tensor& hidden_states,
 }
 
 torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
-                                    const ModelInputParams& input_params) {
+                                    const ParallelInput& parallel_input) {
   // we only support all2all communication for decode stage for now
   bool enable_all2all_communication =
-      enable_deep_ep_ && std::all_of(input_params.parallel.dp_is_decode.begin(),
-                                     input_params.parallel.dp_is_decode.end(),
+      enable_deep_ep_ && std::all_of(parallel_input.dp_is_decode.begin(),
+                                     parallel_input.dp_is_decode.end(),
                                      [](int32_t val) { return val == 1; });
 
   bool is_dp_ep_parallel =
@@ -739,7 +738,7 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
   if (need_gather_and_slice) {
     input = parallel_state::gather(input,
                                    parallel_args_.dp_local_process_group_,
-                                   input_params.parallel.dp_global_token_nums);
+                                   parallel_input.dp_global_token_nums);
   }
   // MoE Gate
   auto router_logits = gate_(input);
@@ -749,7 +748,7 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
       forward_experts(input, router_logits, enable_all2all_communication);
 
   if (need_gather_and_slice) {
-    output = get_dp_local_slice(output, input_params, parallel_args_);
+    output = get_dp_local_slice(output, parallel_input, parallel_args_);
   }
 
   return output;

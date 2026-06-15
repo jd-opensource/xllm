@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 #include <torch/torch.h>
 
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "loader/siglip_encoder_loader.h"

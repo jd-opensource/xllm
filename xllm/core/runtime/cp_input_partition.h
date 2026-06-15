@@ -31,34 +31,34 @@ namespace xllm::cp {
 //
 // Trigger conditions (no-op otherwise):
 //   - cp_size > 1
-//   - !input.input_params.batch_forward_type.is_decode() (prefill / chunked
+//   - !input.input.batch_forward_type.is_decode() (prefill / chunked
 //     prefill / mixed; pure decode is skipped)
 //     prefill batches; decode batches keep the global view)
-//   - input.input_params.num_sequences > 0
+//   - input.input.num_sequences > 0
 //   - input.token_ids is defined and non-empty
 //
 // Fields rewritten:
 //   - token_ids, positions (token-level: index_select on dim 0)
-//   - input_params.embedding.mtp_shifted_token_ids (token-level; sliced when
+//   - input.embedding.mtp_shifted_token_ids (token-level; sliced when
 //     defined)
-//   - input_params.q_seq_lens(_vec), kv_seq_lens(_vec), q_cu_seq_lens
+//   - input.q_seq_lens(_vec), kv_seq_lens(_vec), q_cu_seq_lens
 //     (rebuilt from per-seq cp_q_lens; the cumsum / non-cumsum layout is
 //     preserved per the existing convention)
-//   - input_params.q_max_seq_len, kv_max_seq_len (set to the max chunk pair
+//   - input.q_max_seq_len, kv_max_seq_len (set to the max chunk pair
 //     length across cp ranks, identical to old behavior)
 //   - sampling_params.selected_token_idxes (remapped onto the per-rank view
 //     using the same algorithm as the old cp_partition)
 //
 // Fields explicitly NOT touched (parity with old cp_partition):
-//   - input_params.new_cache_slots / new_cache_slot_offsets
-//   - input_params.block_tables
-//   - input_params.kv_cache_tokens_nums(_host)
-//   - input_params.dp_global_token_nums / dp_is_decode
+//   - input.new_cache_slots / new_cache_slot_offsets
+//   - input.block_tables
+//   - input.kv_cache_tokens_nums(_host)
+//   - input.dp_global_token_nums / dp_is_decode
 //   - transfer_kv_infos
 //
 // This function is CPU-only (operates on CPU tensors before the
 // `to(device)` step in WorkerImpl::prepare_work_before_execute).
-void cp_partition_inplace(ForwardInput& input,
+void cp_partition_inplace(ForwardInput& forward_input,
                           int32_t cp_rank,
                           int32_t cp_size);
 

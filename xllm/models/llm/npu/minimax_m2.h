@@ -29,7 +29,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/common/interruption_bus.h"
 #include "core/framework/hf_model_loader.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/framework/model_loader.h"
@@ -38,6 +38,7 @@ limitations under the License.
 #include "core/layers/common/lm_head.h"
 #include "core/layers/common/word_embedding.h"
 #include "core/layers/npu_torch/minimax_m2_decode_layer.h"
+#include "core/runtime/forward_params.h"
 
 namespace xllm::npu::model {
 
@@ -65,9 +66,9 @@ class MiniMaxM2MoeDecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor& positions,
                         const layer::AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params) {
+                        const ForwardInput& forward_input) {
     return layer_->forward(
-        x, residual, positions, attn_metadata, kv_cache, input_params);
+        x, residual, positions, attn_metadata, kv_cache, forward_input);
   }
 
   void load_state_dict(const StateDict& state_dict) {
@@ -224,35 +225,30 @@ class MiniMaxM2ModelImpl : public torch::nn::Module {
     }
   }
 
-  ModelOutput forward(torch::Tensor tokens,
-                      torch::Tensor positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    ModelInputParams modified_input_params = input_params;
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    torch::Tensor tokens = forward_input.token_ids;
+    torch::Tensor positions = forward_input.positions;
+    ForwardInput modified_input = forward_input;
     torch::Tensor h;
-    if (input_params.embedding.input_embedding.defined()) {
-      h = input_params.embedding.input_embedding;
+    if (forward_input.embedding.input_embedding.defined()) {
+      h = forward_input.embedding.input_embedding;
     } else if (tokens.numel() == 0) {
       h = torch::empty({0, hidden_size_}, embed_tokens_->weight().options());
     } else {
       h = embed_tokens_(tokens);
     }
 
-    if (!modified_input_params.attn_metadata) {
-      modified_input_params.attn_metadata =
-          std::make_shared<layer::AttentionMetadata>(
-              get_attention_metadata(modified_input_params, h));
+    if (!modified_input.attn_metadata) {
+      modified_input.attn_metadata = std::make_shared<layer::AttentionMetadata>(
+          get_attention_metadata(modified_input, h));
     }
 
-    auto& attn_metadata = *(modified_input_params.attn_metadata);
+    auto& attn_metadata = *(modified_input.attn_metadata);
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); ++i) {
-      h = layers_[i]->forward(h,
-                              residual,
-                              positions,
-                              attn_metadata,
-                              kv_caches[i],
-                              modified_input_params);
+      h = layers_[i]->forward(
+          h, residual, positions, attn_metadata, kv_caches[i], modified_input);
     }
 
     if (h.numel() == 0) {
@@ -287,27 +283,27 @@ class MiniMaxM2ModelImpl : public torch::nn::Module {
 
  private:
   layer::AttentionMetadata get_attention_metadata(
-      const ModelInputParams& params,
+      const ForwardInput& forward_input,
       const torch::Tensor& h) {
-    if (params.meta.q_max_seq_len == 0) {
-      return layer::AttentionMetadataBuilder::build(params, enable_mla_);
+    if (forward_input.meta.q_max_seq_len == 0) {
+      return layer::AttentionMetadataBuilder::build(forward_input, enable_mla_);
     }
 
-    max_seq_len_ = std::max(params.meta.kv_max_seq_len, max_seq_len_);
+    max_seq_len_ = std::max(forward_input.meta.kv_max_seq_len, max_seq_len_);
     torch::Tensor attn_mask;
     if (FLAGS_enable_chunked_prefill) {
-      const int32_t max_kv_seq = params.meta.kv_max_seq_len;
-      const int32_t num_sequences = params.meta.num_sequences;
+      const int32_t max_kv_seq = forward_input.meta.kv_max_seq_len;
+      const int32_t num_sequences = forward_input.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
         req_mask_vec.reserve(num_sequences);
         for (int32_t j = 0; j < num_sequences; ++j) {
-          req_mask_vec.emplace_back(
-              attn_mask_.gen_append_mask(params.attention.host.q_seq_lens[j],
-                                         params.attention.host.kv_seq_lens[j],
-                                         max_kv_seq,
-                                         h.dtype().toScalarType(),
-                                         h.device()));
+          req_mask_vec.emplace_back(attn_mask_.gen_append_mask(
+              forward_input.attention.host.q_seq_lens[j],
+              forward_input.attention.host.kv_seq_lens[j],
+              max_kv_seq,
+              h.dtype().toScalarType(),
+              h.device()));
         }
         attn_mask = torch::cat(req_mask_vec, 0);
       } else {
@@ -319,7 +315,7 @@ class MiniMaxM2ModelImpl : public torch::nn::Module {
           max_seq_len_, h.dtype().toScalarType(), h.device());
     }
     return layer::AttentionMetadataBuilder::build(
-        params, enable_mla_, attn_mask);
+        forward_input, enable_mla_, attn_mask);
   }
 
   std::vector<MiniMaxM2MoeDecoderLayer> layers_;
@@ -341,11 +337,9 @@ class MiniMaxM2ForCausalLMImpl : public torch::nn::Module {
     lm_head_ = register_module("lm_head", layer::LmHead(context));
   }
 
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    return model_(tokens, positions, kv_caches, input_params);
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    return model_(forward_input, kv_caches);
   }
 
   torch::Tensor logits(const torch::Tensor& hidden_states,

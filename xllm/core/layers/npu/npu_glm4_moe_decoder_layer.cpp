@@ -21,6 +21,7 @@ limitations under the License.
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 namespace layer {
@@ -352,25 +353,24 @@ int64_t NpuGlm4MoeDecoderImpl::init_node(atb_speed::Model::Node& node,
   return atb::NO_ERROR;
 }
 
-torch::Tensor NpuGlm4MoeDecoderImpl::forward(
-    torch::Tensor& x,
-    torch::Tensor& cos_pos,
-    torch::Tensor& sin_pos,
-    torch::Tensor& attn_mask,
-    KVCache& kv_cache,
-    const ModelInputParams& input_params,
-    aclrtEvent* event,
-    std::atomic<bool>* event_flag,
-    int node_id) {
+torch::Tensor NpuGlm4MoeDecoderImpl::forward(torch::Tensor& x,
+                                             torch::Tensor& cos_pos,
+                                             torch::Tensor& sin_pos,
+                                             torch::Tensor& attn_mask,
+                                             KVCache& kv_cache,
+                                             const ForwardInput& forward_input,
+                                             aclrtEvent* event,
+                                             std::atomic<bool>* event_flag,
+                                             int node_id) {
   atb::Status st;
-  if (!input_params.meta.batch_forward_type.is_decode()) {
+  if (!forward_input.meta.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,
                             sin_pos,
                             attn_mask,
                             kv_cache,
-                            input_params,
+                            forward_input,
                             true,
                             false);
     st = execute_node(prefill_node_, node_id, event, event_flag);
@@ -379,7 +379,7 @@ torch::Tensor NpuGlm4MoeDecoderImpl::forward(
   } else {
     const bool use_graph_decode_input =
         ::xllm::ExecutionConfig::get_instance().enable_graph() &&
-        input_params.graph.tiling_data.defined();
+        forward_input.graph.tiling_data.defined();
     auto& decode_node =
         use_graph_decode_input ? decode_graph_node_ : decode_eager_node_;
     build_node_variant_pack(decode_node,
@@ -388,7 +388,7 @@ torch::Tensor NpuGlm4MoeDecoderImpl::forward(
                             sin_pos,
                             /*attn_mask*/ tensor_placeholder_,
                             kv_cache,
-                            input_params,
+                            forward_input,
                             false,
                             use_graph_decode_input);
     st = execute_node(decode_node, node_id + 1000, event, event_flag);
@@ -406,11 +406,11 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
     torch::Tensor& sin_pos,
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
-    const ModelInputParams& input_params,
+    const ForwardInput& forward_input,
     bool is_prefill,
     bool use_graph_decode_input) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
-  auto& dp_ep_padding = input_params.parallel.dp_ep_padding_data;
+  auto& dp_ep_padding = forward_input.parallel.dp_ep_padding_data;
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
@@ -426,9 +426,9 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6) =
       atb_speed::Utils::AtTensor2Tensor(
-          input_params.attention.device.kv_seq_lens);
+          forward_input.attention.device.kv_seq_lens);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6).hostData =
-      const_cast<int32_t*>(input_params.attention.host.kv_seq_lens.data());
+      const_cast<int32_t*>(forward_input.attention.host.kv_seq_lens.data());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7).hostData =
@@ -437,13 +437,13 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
       atb_speed::Utils::AtTensor2Tensor(
-          input_params.attention.device.block_tables);
+          forward_input.attention.device.block_tables);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
       atb_speed::Utils::AtTensor2Tensor(
-          input_params.attention.device.new_cache_slots);
+          forward_input.attention.device.new_cache_slots);
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.expert.expert_array);
+      atb_speed::Utils::AtTensor2Tensor(forward_input.expert.expert_array);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 12) =
       atb_speed::Utils::AtTensor2Tensor(expert_group_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13) =
@@ -458,9 +458,9 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
        ::xllm::KVCacheConfig::get_instance().enable_prefix_cache())) {
     node.variantPack.inTensors.at(input_idx) =
         atb_speed::Utils::AtTensor2Tensor(
-            input_params.attention.device.q_seq_lens);
+            forward_input.attention.device.q_seq_lens);
     node.variantPack.inTensors.at(input_idx).hostData =
-        const_cast<int32_t*>(input_params.attention.host.q_seq_lens.data());
+        const_cast<int32_t*>(forward_input.attention.host.q_seq_lens.data());
     input_idx++;
   }
 
@@ -487,9 +487,9 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
   if (!is_prefill && use_graph_decode_input &&
-      input_params.graph.tiling_data.defined()) {
+      forward_input.graph.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.graph.tiling_data);
+        atb_speed::Utils::AtTensor2Tensor(forward_input.graph.tiling_data);
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {

@@ -23,10 +23,10 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "framework/model/model_input_params.h"
 #include "layers/common/attention_metadata.h"
 #include "layers/common/attention_metadata_builder.h"
 #include "layers/common/dsa_metadata.h"
+#include "runtime/forward_params.h"
 #include "util/tensor_helper.h"
 
 namespace xllm::layer {
@@ -166,14 +166,14 @@ torch::Tensor build_decode_slot_mapping(const torch::Tensor& cache_block_table,
 }  // namespace
 
 AttentionMetadata DSAMetadataBuilderMlu::build(
-    const ModelInputParams& params,
+    const ForwardInput& forward_input,
     const torch::Tensor& positions,
     const std::vector<std::vector<DSACacheInfo>>& caches_info,
     const std::vector<DSAGroupInfo>& group_infos,
     int64_t window_size) {
   // 1. Build base AttentionMetadata (q_cu_seq_lens, block_table, etc.)
   AttentionMetadata attn_metadata =
-      AttentionMetadataBuilder::build(params, /*enable_mla=*/true);
+      AttentionMetadataBuilder::build(forward_input, /*enable_mla=*/true);
 
   // 2. Keep DSA metadata independent while syncing base attention tensors.
   auto dsa_metadata = std::make_shared<DSAMetadata>();
@@ -183,7 +183,7 @@ AttentionMetadata DSAMetadataBuilderMlu::build(
   }
 
   // 3. Build DSA-specific fields
-  build_dsa_fields(params,
+  build_dsa_fields(forward_input,
                    attn_metadata,
                    positions,
                    caches_info,
@@ -201,15 +201,15 @@ AttentionMetadata DSAMetadataBuilderMlu::build(
 }
 
 void DSAMetadataBuilderMlu::build_dsa_fields(
-    const ModelInputParams& params,
+    const ForwardInput& forward_input,
     const AttentionMetadata& attn_metadata,
     const torch::Tensor& positions,
     const std::vector<std::vector<DSACacheInfo>>& caches_info,
     const std::vector<DSAGroupInfo>& group_infos,
     int64_t window_size,
     DSAMetadata& dsa) {
-  const bool is_decode = params.meta.batch_forward_type.is_decode();
-  const int32_t batch_size = params.meta.num_sequences;
+  const bool is_decode = forward_input.meta.batch_forward_type.is_decode();
+  const int32_t batch_size = forward_input.meta.num_sequences;
   std::vector<int32_t> q_lens_vec;
   std::vector<int32_t> kv_lens_vec;
 
@@ -222,13 +222,13 @@ void DSAMetadataBuilderMlu::build_dsa_fields(
   }
 
   if (positions.defined()) {
-    build_positions(params, batch_size, dsa);
+    build_positions(forward_input, batch_size, dsa);
   }
 
   // --- Block tables / slots expansion ---
-  if (!params.multi_block_tables.empty() && !caches_info.empty()) {
+  if (!forward_input.multi_block_tables.empty() && !caches_info.empty()) {
     std::vector<torch::Tensor> active_multi_block_tables =
-        params.multi_block_tables;
+        forward_input.multi_block_tables;
     int32_t manager_num =
         static_cast<int32_t>(active_multi_block_tables.size());
     if (manager_num == 1 && batch_size == 1 &&
@@ -811,10 +811,10 @@ void DSAMetadataBuilderMlu::build_swa_plan(
       torch::tensor(context_lens, torch::TensorOptions().dtype(torch::kInt32));
 }
 
-void DSAMetadataBuilderMlu::build_positions(const ModelInputParams& params,
+void DSAMetadataBuilderMlu::build_positions(const ForwardInput& forward_input,
                                             int32_t batch_size,
                                             DSAMetadata& dsa_metadata) {
-  (void)params;
+  (void)forward_input;
   if (!dsa_metadata.input_positions.defined()) return;
 
   auto input_positions = dsa_metadata.input_positions;

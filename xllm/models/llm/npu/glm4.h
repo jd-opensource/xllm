@@ -20,6 +20,7 @@ limitations under the License.
 #include "core/layers/common/rotary_embedding_util.h"
 #include "core/layers/npu/npu_glm4_decoder_layer_impl.h"
 #include "llm_model_base.h"
+#include "runtime/forward_params.h"
 
 namespace xllm::npu::model {
 
@@ -74,18 +75,17 @@ class Glm4ModelImpl
     }
   }
 
-  virtual ModelOutput forward(torch::Tensor tokens,
-                              torch::Tensor positions,
-                              std::vector<KVCache>& kv_caches,
-                              const ModelInputParams& input_params) {
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
+  virtual ModelOutput forward(const ForwardInput& forward_input,
+                              std::vector<KVCache>& kv_caches) {
+    torch::Tensor tokens = forward_input.token_ids;
+    torch::Tensor positions = forward_input.positions;
+    ForwardInput modified_input = forward_input;
 
     if (tokens.numel() == 0) {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
       positions = torch::tensor({0}).to(torch::kInt32).to(tokens.device());
     }
-    auto inputs_embeds = input_params.embedding.input_embedding;
+    auto inputs_embeds = forward_input.embedding.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
@@ -122,16 +122,16 @@ class Glm4ModelImpl
     sin_pos = sin_pos.reshape({-1, sin_pos.sizes().back() / 2, 2});
     torch::Tensor attn_mask;
     if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      int max_kv_seq = input_params.meta.kv_max_seq_len;
-      int num_sequences = input_params.meta.num_sequences;
+      int max_kv_seq = forward_input.meta.kv_max_seq_len;
+      int num_sequences = forward_input.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
         req_mask_vec.reserve(num_sequences);
 
         for (int j = 0; j < num_sequences; j++) {
           auto mask = attn_mask_.gen_append_mask(
-              input_params.attention.host.q_seq_lens[j],
-              input_params.attention.host.kv_seq_lens[j],
+              forward_input.attention.host.q_seq_lens[j],
+              forward_input.attention.host.kv_seq_lens[j],
               max_kv_seq,
               cos_pos.dtype().toScalarType(),
               cos_pos.device());
@@ -139,7 +139,7 @@ class Glm4ModelImpl
         }
         attn_mask = torch::cat(req_mask_vec, 0);
       }
-    } else if (input_params.meta.batch_forward_type.is_prefill()) {
+    } else if (forward_input.meta.batch_forward_type.is_prefill()) {
       attn_mask = attn_mask_.get_attn_mask(
           128, cos_pos.dtype().toScalarType(), cos_pos.device());
     }
@@ -148,12 +148,12 @@ class Glm4ModelImpl
       aclrtEvent* event{nullptr};
       std::atomic<bool>* event_flag{nullptr};
 
-      if (input_params.parallel.layer_synchronizer != nullptr) {
-        event = input_params.parallel.layer_synchronizer->get_event(i);
+      if (modified_input.parallel.layer_synchronizer != nullptr) {
+        event = modified_input.parallel.layer_synchronizer->get_event(i);
         event_flag =
-            input_params.parallel.layer_synchronizer->get_event_flag(i);
+            modified_input.parallel.layer_synchronizer->get_event_flag(i);
       }
-      if (!input_params.synchronize_layer(i)) {
+      if (!modified_input.synchronize_layer(i)) {
         return ModelOutput();
       }
 
@@ -163,7 +163,7 @@ class Glm4ModelImpl
             sin_pos,
             attn_mask,
             kv_caches[i],
-            input_params_new,
+            modified_input,
             event,
             event_flag);
     }

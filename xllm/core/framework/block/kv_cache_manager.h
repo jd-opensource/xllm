@@ -19,7 +19,7 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "framework/batch/batch.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 

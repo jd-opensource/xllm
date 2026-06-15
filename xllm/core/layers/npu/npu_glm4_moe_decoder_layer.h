@@ -27,6 +27,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "loader/glm4_moe_decoder_loader.h"
 #include "npu_base_layer.h"
+#include "runtime/forward_params.h"
 #include "xllm_atb_layers/models/glm/layer/moe_decoder_layer.h"
 
 namespace xllm {
@@ -48,7 +49,7 @@ class NpuGlm4MoeDecoderImpl : public BaseLayer {
                         torch::Tensor& sin_pos,
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params,
+                        const ForwardInput& forward_input,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
                         int node_id = 0);
@@ -98,7 +99,7 @@ class NpuGlm4MoeDecoderImpl : public BaseLayer {
                                torch::Tensor& sin_pos,
                                torch::Tensor& attn_mask,
                                KVCache& kv_cache,
-                               const ModelInputParams& input_params,
+                               const ForwardInput& forward_input,
                                bool is_prefill,
                                bool use_graph_decode_input);
 

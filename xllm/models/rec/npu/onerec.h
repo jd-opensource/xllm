@@ -29,6 +29,7 @@ limitations under the License.
 #include "models/model_registry.h"
 #include "models/rec/npu/onerec_npu_impl.h"
 #include "models/rec/rec_model_base.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 
@@ -45,30 +46,30 @@ class OneRecModelImpl final : public torch::nn::Module {
         "decoder", OneRecStack(context, /*is_decode=*/true, shared_));
   }
 
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    const torch::Tensor& tokens = forward_input.token_ids;
+    const torch::Tensor& positions = forward_input.positions;
     if (!tokens.defined()) {
       return ModelOutput();
     }
     (void)positions;
     (void)kv_caches;
 
-    const auto* onerec_params = input_params.onerec_params();
+    const auto* onerec_params = forward_input.onerec_params();
 
     if (onerec_params != nullptr) {
       if (onerec_params->is_encoder_forward) {
         std::vector<KVCache> encoder_kv_caches;
         auto encoder_output =
-            encoder_(tokens, positions, encoder_kv_caches, input_params);
+            encoder_(tokens, positions, encoder_kv_caches, forward_input);
 
         torch::Tensor cached_encoder_output;
         if (encoder_output.defined() &&
             onerec_params->encoder_max_seq_len > 0 &&
             !onerec_params->encoder_seq_lens.empty()) {
           cached_encoder_output =
-              pad_encoder_output(encoder_output, input_params);
+              pad_encoder_output(encoder_output, forward_input);
         } else {
           cached_encoder_output = encoder_output;
         }
@@ -96,7 +97,7 @@ class OneRecModelImpl final : public torch::nn::Module {
       }
 
       auto decoder_output = decoder_(
-          tokens, positions, kv_caches, input_params, cached_encoder_output);
+          tokens, positions, kv_caches, forward_input, cached_encoder_output);
       return ModelOutput(decoder_output);
     }
 
@@ -166,7 +167,7 @@ class OneRecModelImpl final : public torch::nn::Module {
   }
 
   torch::Tensor build_hidden_states(const torch::Tensor& tokens,
-                                    const OneRecModelInputParams* onerec_params,
+                                    const OneRecInput* onerec_params,
                                     bool is_encoder_forward) {
     if (tokens.numel() == 0) {
       return torch::empty({0, hidden_size_}, options_);
@@ -193,8 +194,7 @@ class OneRecModelImpl final : public torch::nn::Module {
     return torch::Tensor();
   }
 
-  torch::Tensor resolve_cross_context(
-      const OneRecModelInputParams* onerec_params) const {
+  torch::Tensor resolve_cross_context(const OneRecInput* onerec_params) const {
     if (onerec_params == nullptr) {
       return torch::Tensor();
     }

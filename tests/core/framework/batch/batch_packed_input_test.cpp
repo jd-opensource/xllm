@@ -85,13 +85,13 @@ TEST(BatchPackedInputTest, PackedProtoLazyUnpackRestoresSampleIdxes) {
                             nullptr,
                             BatchForwardType::DECODE);
 
-  ForwardInput input =
+  ForwardInput forward_input =
       builder.build_forward_input(/*num_decoding_tokens=*/1,
                                   /*min_decoding_batch_size=*/0);
-  ASSERT_TRUE(input.sampling_params.sample_idxes.defined());
+  ASSERT_TRUE(forward_input.sampling_params.sample_idxes.defined());
 
   proto::PackedForwardInput packed_input;
-  ASSERT_TRUE(forward_input_to_packed_proto(input, &packed_input));
+  ASSERT_TRUE(forward_input_to_packed_proto(forward_input, &packed_input));
 
   ForwardInput lazy_input;
   packed_proto_to_forward_input(

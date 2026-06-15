@@ -22,10 +22,11 @@ limitations under the License.
 #include "forward_params.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "options.h"
+#include "runtime/forward_params.h"
 #include "runtime/worker_impl.h"
 
 namespace xllm {
@@ -46,25 +47,25 @@ class LLMWorkerImpl : public WorkerImpl {
   // initialize model, cache manager. blocking call
   bool init_model(ModelContext& context) override;
 
-  std::optional<ForwardOutput> step(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step(const ForwardInput& forward_input) override;
 
-  std::optional<ForwardOutput> step_no_sync(const ForwardInput& input);
+  std::optional<ForwardOutput> step_no_sync(const ForwardInput& forward_input);
   std::optional<ForwardOutput> execute_no_sync_on_stream(
-      const ForwardInput& input,
+      const ForwardInput& forward_input,
       Stream& compute_stream);
 
   folly::SemiFuture<std::optional<ForwardOutput>> step_async_no_sync(
-      const ForwardInput& input);
+      const ForwardInput& forward_input);
 
   std::optional<ForwardOutput> step_internal(
-      const ForwardInput& input,
+      const ForwardInput& forward_input,
       ForwardSyncPolicy sync_policy = ForwardSyncPolicy::LEGACY);
 
  protected:
   std::optional<ForwardOutput> step_for_schedule_overlap(
-      const ForwardInput& input) override;
+      const ForwardInput& forward_input) override;
   ForwardInput update_input_by_last_step_output_for_schedule_overlap(
-      ForwardInput& input) override;
+      ForwardInput& forward_input) override;
 
  public:
 #if defined(USE_NPU)

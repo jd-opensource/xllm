@@ -28,12 +28,12 @@ limitations under the License.
 #include <vector>
 
 #include "common/global_flags.h"
-#include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/mlu/deepseek_v4/dsa_metadata_builder_mlu.h"
 #include "layers/mlu/deepseek_v4_ref_utils.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "runtime/forward_params.h"
 #include "util/linalg.h"
 
 namespace xllm {
@@ -162,33 +162,35 @@ int32_t max_seq_len(const std::vector<int>& cu_lens) {
   return max_len;
 }
 
-ModelInputParams make_c128_params(BatchForwardType batch_forward_type,
-                                  int32_t num_sequences,
-                                  const std::vector<int>& q_cu_lens,
-                                  const std::vector<int>& kv_cu_lens,
-                                  const torch::Tensor& block_table) {
-  ModelInputParams params;
-  params.meta.batch_forward_type = batch_forward_type;
-  params.meta.num_sequences = num_sequences;
-  params.meta.actual_num_sequences = num_sequences;
-  params.meta.q_max_seq_len = max_seq_len(q_cu_lens);
-  params.meta.kv_max_seq_len = max_seq_len(kv_cu_lens);
-  params.attention.host.q_seq_lens.assign(q_cu_lens.begin(), q_cu_lens.end());
-  params.attention.host.kv_seq_lens.assign(kv_cu_lens.begin(),
-                                           kv_cu_lens.end());
-  params.attention.host.q_cu_seq_lens.assign(q_cu_lens.begin() + 1,
-                                             q_cu_lens.end());
-  params.attention.device.q_seq_lens = torch::tensor(q_cu_lens, torch::kInt32);
-  params.attention.device.kv_seq_lens =
+ForwardInput make_c128_input(BatchForwardType batch_forward_type,
+                             int32_t num_sequences,
+                             const std::vector<int>& q_cu_lens,
+                             const std::vector<int>& kv_cu_lens,
+                             const torch::Tensor& block_table) {
+  ForwardInput forward_input;
+  forward_input.meta.batch_forward_type = batch_forward_type;
+  forward_input.meta.num_sequences = num_sequences;
+  forward_input.meta.actual_num_sequences = num_sequences;
+  forward_input.meta.q_max_seq_len = max_seq_len(q_cu_lens);
+  forward_input.meta.kv_max_seq_len = max_seq_len(kv_cu_lens);
+  forward_input.attention.host.q_seq_lens.assign(q_cu_lens.begin(),
+                                                 q_cu_lens.end());
+  forward_input.attention.host.kv_seq_lens.assign(kv_cu_lens.begin(),
+                                                  kv_cu_lens.end());
+  forward_input.attention.host.q_cu_seq_lens.assign(q_cu_lens.begin() + 1,
+                                                    q_cu_lens.end());
+  forward_input.attention.device.q_seq_lens =
+      torch::tensor(q_cu_lens, torch::kInt32);
+  forward_input.attention.device.kv_seq_lens =
       torch::tensor(kv_cu_lens, torch::kInt32);
-  params.attention.device.q_cu_seq_lens =
-      torch::tensor(params.attention.host.q_cu_seq_lens, torch::kInt32);
-  params.attention.device.new_cache_slots = torch::empty(
+  forward_input.attention.device.q_cu_seq_lens =
+      torch::tensor(forward_input.attention.host.q_cu_seq_lens, torch::kInt32);
+  forward_input.attention.device.new_cache_slots = torch::empty(
       {q_cu_lens.back()}, torch::TensorOptions().dtype(torch::kInt32));
-  params.attention.device.block_tables =
+  forward_input.attention.device.block_tables =
       torch::empty({0, 0}, torch::TensorOptions().dtype(torch::kInt32));
-  params.multi_block_tables = {block_table};
-  return params;
+  forward_input.multi_block_tables = {block_table};
+  return forward_input;
 }
 
 AttentionMetadata build_c128_metadata(BatchForwardType batch_forward_type,
@@ -197,14 +199,14 @@ AttentionMetadata build_c128_metadata(BatchForwardType batch_forward_type,
                                       const std::vector<int>& kv_cu_lens,
                                       const torch::Tensor& block_table,
                                       int32_t block_size) {
-  ModelInputParams params = make_c128_params(
+  ForwardInput forward_input = make_c128_input(
       batch_forward_type, num_sequences, q_cu_lens, kv_cu_lens, block_table);
   torch::Tensor positions = torch::arange(q_cu_lens.back(), torch::kInt32);
   std::vector<std::vector<DSACacheInfo>> caches_info = {
       {{0, DSACacheType::TOKEN, 128, block_size}}};
   std::vector<DSAGroupInfo> group_infos = {
       {DSACacheType::TOKEN, 128, block_size}};
-  return DSAMetadataBuilderMlu::build(params,
+  return DSAMetadataBuilderMlu::build(forward_input,
                                       positions,
                                       caches_info,
                                       group_infos,
@@ -355,16 +357,16 @@ void expect_topk_prefix_set_equal(const torch::Tensor& actual,
 }  // namespace
 
 TEST(DeepseekV4DSAMetadataBuilderTest, SyncsPrefillSeqLensToAttentionMetadata) {
-  ModelInputParams params =
-      make_c128_params(BatchForwardType::PREFILL,
-                       /*num_sequences=*/2,
-                       /*q_cu_lens=*/{0, 9, 17},
-                       /*kv_cu_lens=*/{0, 9, 17},
-                       torch::empty({0, 0}, torch::kInt32));
+  ForwardInput forward_input =
+      make_c128_input(BatchForwardType::PREFILL,
+                      /*num_sequences=*/2,
+                      /*q_cu_lens=*/{0, 9, 17},
+                      /*kv_cu_lens=*/{0, 9, 17},
+                      torch::empty({0, 0}, torch::kInt32));
 
   torch::Tensor positions = torch::arange(17, torch::kInt32);
   AttentionMetadata metadata = DSAMetadataBuilderMlu::build(
-      params, positions, {}, {}, /*window_size=*/0);
+      forward_input, positions, {}, {}, /*window_size=*/0);
 
   ASSERT_NE(metadata.dsa_metadata, nullptr);
   EXPECT_TRUE(torch::equal(metadata.q_cu_seq_lens,

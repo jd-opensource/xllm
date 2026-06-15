@@ -23,11 +23,12 @@ limitations under the License.
 #include <unordered_map>
 
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/layers/npu/multi_head_attention.h"
 #include "core/layers/npu/npu_siglip_encoder_layer_impl.h"
+#include "core/runtime/forward_params.h"
 #include "models/llm/npu/qwen2.h"
 #include "models/model_registry.h"
 #include "processors/minicpmv_image_processor.h"
@@ -820,9 +821,9 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
       mlp_ = register_module("mlp", VisionAdapterMLP(context));
   }
 
-  void prepare_encoder_input(const ModelInputParams& input_params,
+  void prepare_encoder_input(const MultiModalInput& multimodal,
                              std::optional<MiniCPMVImageInputs>& image_inputs) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+    const auto& mm_data = multimodal.mm_data;
 
     std::vector<torch::Tensor> pixel_values;
     if (const auto& res =
@@ -948,9 +949,9 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     return llm_embedding;
   }
 
-  MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
+  MMDict get_multimodal_embeddings(const ForwardInput& forward_input) {
     std::optional<MiniCPMVImageInputs> image_inputs;
-    prepare_encoder_input(input_params, image_inputs);
+    prepare_encoder_input(forward_input.multimodal, image_inputs);
     MMDict multimodal_embeds;
     if (!image_inputs.has_value()) {
       return multimodal_embeds;
@@ -1012,8 +1013,8 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
   }
 
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
-                                     const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+                                     const ForwardInput& forward_input) {
+    const auto& mm_data = forward_input.multimodal.mm_data;
     torch::Tensor multimodal_embeds;
     if (const auto& emb = mm_data.get<torch::Tensor>("image|embedding")) {
       multimodal_embeds = emb.value();
@@ -1031,11 +1032,9 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
         inputs_embeds, multimodal_embeds, image_bounds);
     return inputs_embeds;
   }
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    return language_model_(tokens, positions, kv_caches, input_params);
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    return language_model_->forward(forward_input, kv_caches);
   }
 
   torch::Tensor logits(const torch::Tensor& hidden_states,

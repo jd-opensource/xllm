@@ -24,18 +24,19 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
+#include "core/runtime/forward_params.h"
 #include "model_args.h"
-#include "model_input_params.h"
+#include "model_input_types.h"
 
 namespace xllm {
 
 class CausalVLM : public CausalLM {
  public:
   ~CausalVLM() override = default;
-  virtual MMDict encode(const ModelInputParams& parameters) = 0;
+  virtual MMDict encode(const ForwardInput& forward_input) = 0;
   virtual torch::Tensor get_input_embeddings(
       const torch::Tensor& input_ids,
-      const ModelInputParams& input_params) = 0;
+      const ForwardInput& forward_input) = 0;
 };
 
 template <typename Model>
@@ -44,21 +45,19 @@ class CausalVLMImpl : public CausalVLM {
   CausalVLMImpl(Model model, const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
-  MMDict encode(const ModelInputParams& parameters) override {
-    return model_->get_multimodal_embeddings(parameters);
+  MMDict encode(const ForwardInput& forward_input) override {
+    return model_->get_multimodal_embeddings(forward_input);
   }
 
   torch::Tensor get_input_embeddings(
       const torch::Tensor& input_ids,
-      const ModelInputParams& input_params) override {
-    return model_->get_input_embeddings(input_ids, input_params);
+      const ForwardInput& forward_input) override {
+    return model_->get_input_embeddings(input_ids, forward_input);
   }
 
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& parameters) override {
-    return model_->forward(tokens, positions, kv_caches, parameters);
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) override {
+    return model_->forward(forward_input, kv_caches);
   }
 
   torch::Tensor pooler(const torch::Tensor& hidden_states,

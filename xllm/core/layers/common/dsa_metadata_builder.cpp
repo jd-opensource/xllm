@@ -20,29 +20,30 @@ limitations under the License.
 #include "attention_metadata.h"
 #include "attention_metadata_builder.h"
 #include "dsa_metadata.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
+#include "runtime/forward_params.h"
 #include "util/tensor_helper.h"
 
 namespace xllm::layer {
 
 namespace {
 
-torch::Device infer_metadata_device(const ModelInputParams& params,
+torch::Device infer_metadata_device(const ForwardInput& forward_input,
                                     const torch::Tensor& positions) {
   if (positions.defined()) {
     return positions.device();
   }
-  if (params.attention.device.kv_seq_lens.defined()) {
-    return params.attention.device.kv_seq_lens.device();
+  if (forward_input.attention.device.kv_seq_lens.defined()) {
+    return forward_input.attention.device.kv_seq_lens.device();
   }
-  if (params.attention.device.q_seq_lens.defined()) {
-    return params.attention.device.q_seq_lens.device();
+  if (forward_input.attention.device.q_seq_lens.defined()) {
+    return forward_input.attention.device.q_seq_lens.device();
   }
-  if (params.attention.device.new_cache_slots.defined()) {
-    return params.attention.device.new_cache_slots.device();
+  if (forward_input.attention.device.new_cache_slots.defined()) {
+    return forward_input.attention.device.new_cache_slots.device();
   }
-  if (params.attention.device.block_tables.defined()) {
-    return params.attention.device.block_tables.device();
+  if (forward_input.attention.device.block_tables.defined()) {
+    return forward_input.attention.device.block_tables.device();
   }
   return torch::Device(torch::kCPU);
 }
@@ -76,7 +77,7 @@ torch::Tensor pad_block_table(const torch::Tensor& block_table,
 }  // namespace
 
 AttentionMetadata DSAMetadataBuilder::build(
-    const ModelInputParams& params,
+    const ForwardInput& forward_input,
     const torch::Tensor& positions,
     const torch::Tensor& dsa_cos_sin,
     const std::vector<std::vector<DSACacheInfo>>& caches_info,
@@ -84,15 +85,15 @@ AttentionMetadata DSAMetadataBuilder::build(
     const torch::Tensor& dsa_c4_cos_sin,
     const torch::Tensor& dsa_c128_cos_sin) {
   // 1. Build base AttentionMetadata (q_cu_seq_lens, block_table, etc.)
-  AttentionMetadata attn_metadata =
-      AttentionMetadataBuilder::build(params,
-                                      /*enable_mla=*/false,
-                                      /*attn_mask=*/{},
-                                      infer_metadata_device(params, positions));
+  AttentionMetadata attn_metadata = AttentionMetadataBuilder::build(
+      forward_input,
+      /*enable_mla=*/false,
+      /*attn_mask=*/{},
+      infer_metadata_device(forward_input, positions));
 
   // 2. Build DSA-specific fields
   auto dsa_metadata = std::make_shared<DSAMetadata>();
-  build_dsa_fields(params,
+  build_dsa_fields(forward_input,
                    positions,
                    dsa_cos_sin,
                    dsa_c4_cos_sin,
@@ -120,7 +121,7 @@ AttentionMetadata DSAMetadataBuilder::build(
 }
 
 void DSAMetadataBuilder::build_dsa_fields(
-    const ModelInputParams& params,
+    const ForwardInput& forward_input,
     const torch::Tensor& positions,
     const torch::Tensor& dsa_cos_sin,
     const torch::Tensor& dsa_c4_cos_sin,
@@ -129,24 +130,24 @@ void DSAMetadataBuilder::build_dsa_fields(
     const std::vector<DSAGroupInfo>& group_infos,
     DSAMetadata& dsa) {
   const int32_t batch_size =
-      static_cast<int32_t>(params.attention.host.kv_seq_lens.size());
+      static_cast<int32_t>(forward_input.attention.host.kv_seq_lens.size());
   std::vector<int32_t> q_lens_vec;
   q_lens_vec.reserve(batch_size);
 
   dsa.input_positions = positions;
-  const bool is_acl_graph = params.enable_graph;
+  const bool is_acl_graph = forward_input.enable_graph;
   const torch::Device metadata_device(torch::kCPU);
 
   // Build per-batch sequence length metadata.
-  build_seq_lengths(params, metadata_device, batch_size, dsa);
+  build_seq_lengths(forward_input, metadata_device, batch_size, dsa);
   dsa.is_acl_graph = is_acl_graph;
-  if (static_cast<int32_t>(params.attention.host.q_seq_lens.size()) ==
+  if (static_cast<int32_t>(forward_input.attention.host.q_seq_lens.size()) ==
       batch_size) {
-    q_lens_vec.assign(params.attention.host.q_seq_lens.begin(),
-                      params.attention.host.q_seq_lens.end());
-  } else if (params.meta.batch_forward_type.no_decode()) {
-    q_lens_vec.assign(params.attention.host.kv_seq_lens.begin(),
-                      params.attention.host.kv_seq_lens.end());
+    q_lens_vec.assign(forward_input.attention.host.q_seq_lens.begin(),
+                      forward_input.attention.host.q_seq_lens.end());
+  } else if (forward_input.meta.batch_forward_type.no_decode()) {
+    q_lens_vec.assign(forward_input.attention.host.kv_seq_lens.begin(),
+                      forward_input.attention.host.kv_seq_lens.end());
   } else {
     q_lens_vec.assign(batch_size, 1);
   }
@@ -160,16 +161,16 @@ void DSAMetadataBuilder::build_dsa_fields(
   }
 
   if (positions.defined()) {
-    build_positions(params, batch_size, dsa);
+    build_positions(forward_input, batch_size, dsa);
   }
 
   (void)dsa_c4_cos_sin;
   (void)dsa_c128_cos_sin;
 
   // --- Block tables / slots expansion ---
-  if (!params.multi_block_tables.empty() && !caches_info.empty()) {
+  if (!forward_input.multi_block_tables.empty() && !caches_info.empty()) {
     std::vector<torch::Tensor> active_multi_block_tables =
-        params.multi_block_tables;
+        forward_input.multi_block_tables;
     int32_t manager_num =
         static_cast<int32_t>(active_multi_block_tables.size());
     if (manager_num == 1 && batch_size == 1 &&
@@ -193,18 +194,19 @@ void DSAMetadataBuilder::build_dsa_fields(
           << manager_num;
     }
 
-    CHECK_EQ(batch_size,
-             static_cast<int32_t>(params.attention.host.kv_seq_lens.size()))
+    CHECK_EQ(
+        batch_size,
+        static_cast<int32_t>(forward_input.attention.host.kv_seq_lens.size()))
         << "DSAMetadataBuilder: batch_size mismatch with kv_seq_lens_vec size.";
     CHECK_LE(manager_num, static_cast<int32_t>(group_infos.size()))
         << "DSAMetadataBuilder: manager_num(" << manager_num
         << ") exceeds group_infos size(" << group_infos.size()
         << "), cannot align manager/group mapping.";
     int32_t graph_block_table_capacity_cols = 0;
-    if (is_acl_graph && params.attention.device.block_tables.defined() &&
-        params.attention.device.block_tables.dim() == 2) {
-      graph_block_table_capacity_cols =
-          static_cast<int32_t>(params.attention.device.block_tables.size(1));
+    if (is_acl_graph && forward_input.attention.device.block_tables.defined() &&
+        forward_input.attention.device.block_tables.dim() == 2) {
+      graph_block_table_capacity_cols = static_cast<int32_t>(
+          forward_input.attention.device.block_tables.size(1));
     }
     if (is_acl_graph && graph_block_table_capacity_cols > 0) {
       for (int32_t m = 0; m < manager_num; ++m) {
@@ -220,7 +222,7 @@ void DSAMetadataBuilder::build_dsa_fields(
       }
     }
     const int32_t n_layers = static_cast<int32_t>(caches_info.size());
-    const auto& ctx_lens = params.attention.host.kv_seq_lens;
+    const auto& ctx_lens = forward_input.attention.host.kv_seq_lens;
     const int64_t graph_slot_capacity =
         is_acl_graph && positions.defined() ? positions.numel() : 0;
     int64_t total_tokens = 0;
@@ -571,24 +573,24 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
   out_bt = new_bt;
 }
 
-void DSAMetadataBuilder::build_seq_lengths(const ModelInputParams& params,
+void DSAMetadataBuilder::build_seq_lengths(const ForwardInput& forward_input,
                                            const torch::Device& target_device,
                                            int32_t batch_size,
                                            DSAMetadata& dsa_metadata) {
   auto int_options =
       torch::TensorOptions().dtype(torch::kInt32).device(target_device);
-  torch::Tensor kv_lens = params.attention.device.kv_seq_lens;
+  torch::Tensor kv_lens = forward_input.attention.device.kv_seq_lens;
   if (target_device.is_cpu() &&
-      static_cast<int32_t>(params.attention.host.kv_seq_lens.size()) ==
+      static_cast<int32_t>(forward_input.attention.host.kv_seq_lens.size()) ==
           batch_size) {
     kv_lens = torch::tensor(
-        std::vector<int32_t>(params.attention.host.kv_seq_lens.begin(),
-                             params.attention.host.kv_seq_lens.end()),
+        std::vector<int32_t>(forward_input.attention.host.kv_seq_lens.begin(),
+                             forward_input.attention.host.kv_seq_lens.end()),
         int_options);
   } else if (!kv_lens.defined() || kv_lens.numel() == 0) {
     kv_lens = torch::tensor(
-        std::vector<int32_t>(params.attention.host.kv_seq_lens.begin(),
-                             params.attention.host.kv_seq_lens.end()),
+        std::vector<int32_t>(forward_input.attention.host.kv_seq_lens.begin(),
+                             forward_input.attention.host.kv_seq_lens.end()),
         int_options);
   } else if (kv_lens.device() != target_device) {
     kv_lens = safe_to(kv_lens, int_options, true);
@@ -597,25 +599,25 @@ void DSAMetadataBuilder::build_seq_lengths(const ModelInputParams& params,
   dsa_metadata.actual_seq_lengths_kv = kv_lens;
 
   torch::Tensor q_lens;
-  q_lens = params.attention.device.q_seq_lens;
-  if (static_cast<int32_t>(params.attention.host.q_seq_lens.size()) ==
+  q_lens = forward_input.attention.device.q_seq_lens;
+  if (static_cast<int32_t>(forward_input.attention.host.q_seq_lens.size()) ==
       batch_size) {
-    // Prefer explicit per-sequence query lengths from ModelInputParams.
+    // Prefer explicit per-sequence query lengths from ForwardInput.
     // This is accurate for prefill/decode/chunked/mixed batches.
     if (target_device.is_cpu()) {
       q_lens = torch::tensor(
-          std::vector<int32_t>(params.attention.host.q_seq_lens.begin(),
-                               params.attention.host.q_seq_lens.end()),
+          std::vector<int32_t>(forward_input.attention.host.q_seq_lens.begin(),
+                               forward_input.attention.host.q_seq_lens.end()),
           int_options);
     } else if (!q_lens.defined() || q_lens.numel() == 0) {
       q_lens = torch::tensor(
-          std::vector<int32_t>(params.attention.host.q_seq_lens.begin(),
-                               params.attention.host.q_seq_lens.end()),
+          std::vector<int32_t>(forward_input.attention.host.q_seq_lens.begin(),
+                               forward_input.attention.host.q_seq_lens.end()),
           int_options);
     } else if (q_lens.device() != target_device) {
       q_lens = safe_to(q_lens, int_options, true);
     }
-  } else if (params.meta.batch_forward_type.no_decode()) {
+  } else if (forward_input.meta.batch_forward_type.no_decode()) {
     // Pure prefill path fallback: query lengths follow KV context lengths.
     q_lens = kv_lens;
   } else {
@@ -652,29 +654,29 @@ void DSAMetadataBuilder::build_seq_lengths(const ModelInputParams& params,
     dsa_metadata.max_seqlen_q = torch::zeros({1}, int_options);
   }
 
-  dsa_metadata.max_query_len =
-      std::max<int64_t>(params.meta.q_max_seq_len,
-                        vector_max_or_zero(params.attention.host.q_seq_lens));
-  dsa_metadata.max_seq_len =
-      std::max<int64_t>(params.meta.kv_max_seq_len,
-                        vector_max_or_zero(params.attention.host.kv_seq_lens));
+  dsa_metadata.max_query_len = std::max<int64_t>(
+      forward_input.meta.q_max_seq_len,
+      vector_max_or_zero(forward_input.attention.host.q_seq_lens));
+  dsa_metadata.max_seq_len = std::max<int64_t>(
+      forward_input.meta.kv_max_seq_len,
+      vector_max_or_zero(forward_input.attention.host.kv_seq_lens));
 }
 
-void DSAMetadataBuilder::build_positions(const ModelInputParams& params,
+void DSAMetadataBuilder::build_positions(const ForwardInput& forward_input,
                                          int32_t batch_size,
                                          DSAMetadata& dsa_metadata) {
   if (!dsa_metadata.input_positions.defined()) return;
 
   auto input_positions = dsa_metadata.input_positions;
   int64_t num_tokens = input_positions.size(0);
-  const bool is_acl_graph = params.enable_graph;
+  const bool is_acl_graph = forward_input.enable_graph;
   const auto target_device = input_positions.device();
   const auto pos_dtype = input_positions.scalar_type();
   auto cpu_options =
       torch::TensorOptions().dtype(pos_dtype).device(torch::kCPU);
 
   const bool has_host_lens =
-      static_cast<int32_t>(params.attention.host.kv_seq_lens.size()) ==
+      static_cast<int32_t>(forward_input.attention.host.kv_seq_lens.size()) ==
       batch_size;
   if (has_host_lens) {
     std::vector<int64_t> c4_positions;
@@ -684,12 +686,12 @@ void DSAMetadataBuilder::build_positions(const ModelInputParams& params,
     c128_positions.reserve(static_cast<size_t>(
         std::max<int64_t>(num_tokens / 128 + batch_size, 0)));
     for (int32_t seq = 0; seq < batch_size; ++seq) {
-      const int64_t kv_len = params.attention.host.kv_seq_lens[seq];
+      const int64_t kv_len = forward_input.attention.host.kv_seq_lens[seq];
       int64_t q_len = 1;
-      if (static_cast<int32_t>(params.attention.host.q_seq_lens.size()) ==
-          batch_size) {
-        q_len = params.attention.host.q_seq_lens[seq];
-      } else if (params.meta.batch_forward_type.no_decode()) {
+      if (static_cast<int32_t>(
+              forward_input.attention.host.q_seq_lens.size()) == batch_size) {
+        q_len = forward_input.attention.host.q_seq_lens[seq];
+      } else if (forward_input.meta.batch_forward_type.no_decode()) {
         q_len = kv_len;
       }
       q_len = std::clamp<int64_t>(q_len, 0, kv_len);

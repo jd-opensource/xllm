@@ -34,9 +34,9 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/model_args.h"
-#include "core/framework/model/model_input_params.h"
 #include "core/runtime/executor_impl.h"
 #include "core/runtime/executor_impl_factory.h"
+#include "core/runtime/forward_params.h"
 #include "core/runtime/options.h"
 #include "kernels/dcu/piecewise_graphs.h"
 
@@ -53,24 +53,24 @@ class DcuGraphPersistentParam final {
   ~DcuGraphPersistentParam() = default;
 
   // Updates persistent tensors.
-  // When return_capture_params is true, returns a ModelInputParams copy whose
+  // When return_capture_input is true, returns a ForwardInput copy whose
   // attn_metadata points to persistent buffers for graph capture.
-  std::optional<ModelInputParams> update(const torch::Tensor& tokens,
-                                         const torch::Tensor& positions,
-                                         const ModelInputParams& params,
-                                         uint32_t padded_num_tokens = 0,
-                                         bool return_capture_params = false,
-                                         uint32_t graph_max_seq_len = 0);
+  std::optional<ForwardInput> update(const torch::Tensor& tokens,
+                                     const torch::Tensor& positions,
+                                     const ForwardInput& forward_input,
+                                     uint32_t padded_num_tokens = 0,
+                                     bool return_capture_input = false,
+                                     uint32_t graph_max_seq_len = 0);
 
-  ModelInputParams init_decode_params(const torch::Tensor& tokens,
-                                      const torch::Tensor& positions,
-                                      const ModelInputParams& params,
-                                      uint32_t padded_num_tokens,
-                                      uint32_t graph_max_seq_len);
+  ForwardInput init_decode_input(const torch::Tensor& tokens,
+                                 const torch::Tensor& positions,
+                                 const ForwardInput& forward_input,
+                                 uint32_t padded_num_tokens,
+                                 uint32_t graph_max_seq_len);
 
   void update_decode_input_buffer(const torch::Tensor& tokens,
                                   const torch::Tensor& positions,
-                                  const ModelInputParams& params,
+                                  const ForwardInput& forward_input,
                                   uint32_t padded_num_tokens);
 
   torch::Tensor persistent_tokens(uint32_t n_tokens) const {
@@ -196,7 +196,7 @@ class DcuGraph final {
                const runtime::Options& options,
                const torch::Tensor& tokens,
                const torch::Tensor& positions,
-               const ModelInputParams& params,
+               const ForwardInput& forward_input,
                std::vector<KVCache>& kv_cache,
                uint32_t bucket_num_tokens,
                const at::hip::MempoolId_t& pool,
@@ -206,7 +206,7 @@ class DcuGraph final {
   ModelOutput replay(const torch::Tensor& tokens,
                      const torch::Tensor& positions,
                      std::vector<KVCache>& kv_cache,
-                     const ModelInputParams& params);
+                     const ForwardInput& forward_input);
 
   torch::Tensor get_hidden_states(uint32_t n_tokens) const {
     return persistent_param_.hidden_states(n_tokens);
@@ -236,10 +236,8 @@ class DcuGraphExecutorImpl final : public ExecutorImpl {
 
   ForwardInput prepare_inputs(Batch& batch) override;
 
-  ModelOutput run(const torch::Tensor& tokens,
-                  const torch::Tensor& positions,
-                  std::vector<KVCache>& kv_caches,
-                  const ModelInputParams& params) override;
+  ModelOutput run(const ForwardInput& forward_input,
+                  std::vector<KVCache>& kv_caches) override;
 
  private:
   uint32_t get_bucket_num_tokens(uint32_t num_tokens) const;

@@ -37,7 +37,7 @@ struct DiTRequestParams {
 
   std::string model;
 
-  DiTInputParams input_params;
+  DiTInputParams input;
   // Mandatory: Generation control parameters (encapsulates all fields related
   // to "image generation process")
   DiTGenerationParams generation_params;

@@ -65,13 +65,12 @@ bool is_qwen3_5_model_type(const std::string& model_type) {
 
 bool AclGraph::capture(CausalLM* model,
                        const runtime::Options& options,
-                       const torch::Tensor& tokens,
-                       const torch::Tensor& positions,
-                       const ModelInputParams& params,
+                       const ForwardInput& forward_input,
                        std::vector<KVCache>& kv_cache,
                        uint32_t bucket_num_tokens) {
   // Save bucket num_tokens for this graph instance
   num_tokens_ = bucket_num_tokens;
+  const torch::Tensor& tokens = forward_input.token_ids;
 
   // Get actual num_tokens from tokens tensor
   // const uint32_t actual_num_tokens = tokens.size(0);
@@ -94,22 +93,19 @@ bool AclGraph::capture(CausalLM* model,
   const uint32_t actual_num_tokens = tokens.size(0);
   CHECK_GE(num_tokens_, actual_num_tokens)
       << "num_tokens_ >= actual_num_tokens";
-  auto graph_params = persistent_param_.update(tokens,
-                                               k_cache,
-                                               v_cache,
-                                               positions,
-                                               params,
-                                               num_tokens_,
-                                               /*return_capture_params=*/true);
+  auto graph_input = persistent_param_.update(forward_input,
+                                              k_cache,
+                                              v_cache,
+                                              num_tokens_,
+                                              /*return_capture_input=*/true);
 
-  // Use the returned ModelInputParams for graph capture
-  CHECK(graph_params.has_value())
-      << "update() should return ModelInputParams when "
-         "return_capture_params=true";
+  // Use the returned ForwardInput for graph capture
+  CHECK(graph_input.has_value())
+      << "update() should return ForwardInput when return_capture_input=true";
   prepare_model_graph_metadata(
       model,
       persistent_param_.persistent_positions(num_tokens_),
-      graph_params.value());
+      graph_input.value());
 
   // Synchronize stream to ensure all data is copied to graph persistent buffers
   aclrtSynchronizeStream(stream);
@@ -144,11 +140,7 @@ bool AclGraph::capture(CausalLM* model,
     graph_.capture_begin(
         {0, 0}, aclmdlRICaptureMode::ACL_MODEL_RI_CAPTURE_MODE_THREAD_LOCAL);
     // Execute forward pass - NPUGraph mempool manages temporary tensors
-    auto forward_result =
-        model->forward({persistent_param_.persistent_tokens(num_tokens_)},
-                       {persistent_param_.persistent_positions(num_tokens_)},
-                       kv_cache,
-                       {graph_params.value()});
+    auto forward_result = model->forward(graph_input.value(), kv_cache);
 
     // Store result in persistent buffer owned by NPUGraph mempool
     persistent_param_.set_hidden_states(forward_result.hidden_states);
@@ -215,7 +207,7 @@ void AclGraph::make_current_stream_wait_for_graph(aclrtStream current_stream) {
 
 void AclGraph::prepare_model_graph_metadata(CausalLM* model,
                                             const torch::Tensor& positions,
-                                            ModelInputParams& params) {
+                                            ForwardInput& forward_input) {
   CHECK(model != nullptr) << "ACL graph model must not be null";
   if (!model->requires_graph_forward_metadata()) {
     return;
@@ -226,16 +218,15 @@ void AclGraph::prepare_model_graph_metadata(CausalLM* model,
         << "ACL graph metadata state must be initialized during capture";
   }
   model->prepare_graph_forward_metadata(
-      model_graph_metadata_state_.get(), positions, params);
-  CHECK(params.attn_metadata)
+      model_graph_metadata_state_.get(), positions, forward_input);
+  CHECK(forward_input.attn_metadata)
       << "model graph metadata preparation did not populate attn_metadata";
 }
 
 ModelOutput AclGraph::replay(CausalLM* model,
-                             const torch::Tensor& tokens,
-                             const torch::Tensor& positions,
-                             std::vector<KVCache>& kv_cache,
-                             const ModelInputParams& params) {
+                             const ForwardInput& forward_input,
+                             std::vector<KVCache>& kv_cache) {
+  const torch::Tensor& tokens = forward_input.token_ids;
   const uint32_t actual_num_tokens = tokens.size(0);
   CHECK_LE(actual_num_tokens, num_tokens_)
       << "num_tokens mismatch: expected <= " << num_tokens_ << ", got "
@@ -248,21 +239,15 @@ ModelOutput AclGraph::replay(CausalLM* model,
   // by k_cache being valid and non-empty
   auto [k_cache, v_cache] = find_attention_plan_kv_cache(kv_cache);
   const bool needs_graph_metadata = model->requires_graph_forward_metadata();
-  std::optional<ModelInputParams> graph_params =
-      persistent_param_.update(tokens,
-                               k_cache,
-                               v_cache,
-                               positions,
-                               params,
-                               num_tokens_,
-                               needs_graph_metadata);
+  std::optional<ForwardInput> graph_input = persistent_param_.update(
+      forward_input, k_cache, v_cache, num_tokens_, needs_graph_metadata);
   if (needs_graph_metadata) {
-    CHECK(graph_params.has_value())
-        << "ACL graph replay requires persistent params for graph metadata";
+    CHECK(graph_input.has_value())
+        << "ACL graph replay requires persistent input for graph metadata";
     prepare_model_graph_metadata(
         model,
         persistent_param_.persistent_positions(num_tokens_),
-        graph_params.value());
+        graph_input.value());
   }
 
   // Replay captured graph - NPUGraph mempool reuses temporary tensors
@@ -299,28 +284,24 @@ ForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
 // tokens: [num_decode_tokens]
 // positions: [num_decode_tokens] token pos in the sequence
 // returns: [num_decode_tokens, hidden_size]
-ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
-                                      const torch::Tensor& positions,
-                                      std::vector<KVCache>& kv_caches,
-                                      const ModelInputParams& params) {
+ModelOutput AclGraphExecutorImpl::run(const ForwardInput& forward_input,
+                                      std::vector<KVCache>& kv_caches) {
   // no mirco batch in decode phase
-  const torch::Tensor& tokens_tensor = tokens;
-  const torch::Tensor& positions_tensor = positions;
-  const ModelInputParams& params_single = params;
+  const torch::Tensor& tokens_tensor = forward_input.token_ids;
   const bool in_decoding_phase =
-      params_single.meta.batch_forward_type.is_decode();
+      forward_input.meta.batch_forward_type.is_decode();
   const bool in_spec_verify_phase =
-      params_single.is_spec_verify &&
-      params_single.meta.batch_forward_type.is_chunked_prefill();
+      forward_input.is_spec_verify &&
+      forward_input.meta.batch_forward_type.is_chunked_prefill();
   VLOG(50) << "in_decoding_phase: " << in_decoding_phase
            << " in_spec_verify_phase: " << in_spec_verify_phase
-           << " q_max_seq_len: " << params_single.meta.q_max_seq_len
+           << " q_max_seq_len: " << forward_input.meta.q_max_seq_len
            << " n_layers: " << args_.n_layers();
   if ((!in_decoding_phase && !in_spec_verify_phase) || args_.n_layers() == 1) {
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in eager mode";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(forward_input, kv_caches);
   }
   if (in_spec_verify_phase && !is_qwen3_5_model_type(args_.model_type())) {
     LOG_FIRST_N(WARNING, 1)
@@ -328,38 +309,38 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
            "chunked-prefill validate graph path is currently only adapted for "
            "Qwen3.5.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(forward_input, kv_caches);
   }
 
   if (in_decoding_phase &&
-      params_single.parallel.dp_global_token_nums.size() > 1) {
-    if (params_single.parallel.dp_is_decode.size() !=
-        params_single.parallel.dp_global_token_nums.size()) {
+      forward_input.parallel.dp_global_token_nums.size() > 1) {
+    if (forward_input.parallel.dp_is_decode.size() !=
+        forward_input.parallel.dp_global_token_nums.size()) {
       LOG_FIRST_N(WARNING, 1)
           << "Falling back to eager mode because dp_is_decode size ("
-          << params_single.parallel.dp_is_decode.size()
+          << forward_input.parallel.dp_is_decode.size()
           << ") does not match dp_global_token_nums size ("
-          << params_single.parallel.dp_global_token_nums.size()
+          << forward_input.parallel.dp_global_token_nums.size()
           << "); ACL graph decode requires valid DP forward metadata. "
           << "dp_global_token_nums="
-          << params_single.parallel.dp_global_token_nums
-          << ", dp_is_decode=" << params_single.parallel.dp_is_decode;
+          << forward_input.parallel.dp_global_token_nums
+          << ", dp_is_decode=" << forward_input.parallel.dp_is_decode;
       COUNTER_INC(num_model_execution_total_eager);
-      return model_->forward(tokens, positions, kv_caches, params);
+      return model_->forward(forward_input, kv_caches);
     }
 
-    if (std::find(params_single.parallel.dp_is_decode.begin(),
-                  params_single.parallel.dp_is_decode.end(),
-                  0) != params_single.parallel.dp_is_decode.end()) {
+    if (std::find(forward_input.parallel.dp_is_decode.begin(),
+                  forward_input.parallel.dp_is_decode.end(),
+                  0) != forward_input.parallel.dp_is_decode.end()) {
       LOG_FIRST_N(WARNING, 1)
           << "Falling back to eager mode because not all DP ranks are in "
              "decode phase; ACL graph decode requires all DP ranks to be "
              "decode to avoid using prefill or chunked-prefill token counts "
              "as graph bucket size. dp_global_token_nums="
-          << params_single.parallel.dp_global_token_nums
-          << ", dp_is_decode=" << params_single.parallel.dp_is_decode;
+          << forward_input.parallel.dp_global_token_nums
+          << ", dp_is_decode=" << forward_input.parallel.dp_is_decode;
       COUNTER_INC(num_model_execution_total_eager);
-      return model_->forward(tokens, positions, kv_caches, params);
+      return model_->forward(forward_input, kv_caches);
     }
   }
 
@@ -367,8 +348,8 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   // For DP, decode graph bucket should be based on global max tokens across dp
   // groups; local shard can be empty on some ranks.
   uint32_t graph_num_tokens = tokens_tensor.size(/*dim=*/0);
-  if (params_single.parallel.dp_global_token_nums.size() > 1) {
-    graph_num_tokens = util::max(params_single.parallel.dp_global_token_nums);
+  if (forward_input.parallel.dp_global_token_nums.size() > 1) {
+    graph_num_tokens = util::max(forward_input.parallel.dp_global_token_nums);
   }
   // Keep actual n_tokens for replay output slicing.
   const uint32_t n_tokens = tokens_tensor.size(/*dim=*/0);
@@ -393,7 +374,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
         << "This message is logged only once. "
         << "Monitor counter 'num_model_execution_total_eager' for frequency.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(forward_input, kv_caches);
   }
 
   const uint32_t bucket_num_tokens = get_bucket_num_tokens(graph_num_tokens);
@@ -401,7 +382,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   // Check if conditions are suitable for graph execution (replay or capture)
   const auto max_seq_len = args_.max_position_embeddings();
   const bool seq_len_supported =
-      params_single.meta.kv_max_seq_len <= max_seq_len;
+      forward_input.meta.kv_max_seq_len <= max_seq_len;
 
   // Combined condition for graph capture support
   // ACL graph executor only supports single tensor inputs (no micro-batching)
@@ -411,14 +392,14 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   if (!capture_supported) {
     LOG_FIRST_N(WARNING, 1)
         << "Falling back to eager mode because kv_max_seq_len ("
-        << params_single.meta.kv_max_seq_len << ") > max_seq_len ("
+        << forward_input.meta.kv_max_seq_len << ") > max_seq_len ("
         << max_seq_len << "). This message is logged only once. "
         << "Monitor counter 'num_model_execution_total_eager' for frequency.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(forward_input, kv_caches);
   }
 
-  const uint64_t graph_key = get_graph_key(bucket_num_tokens, params_single);
+  const uint64_t graph_key = get_graph_key(bucket_num_tokens, forward_input);
 
   // Check if captured graph exists for this bucket num_tokens
   auto it = graphs_.find(graph_key);
@@ -426,8 +407,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     // Replay the existing graph
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in replay mode";
-    auto result = it->second->replay(
-        model_, tokens_tensor, positions_tensor, kv_caches, params_single);
+    auto result = it->second->replay(model_, forward_input, kv_caches);
     // Handle aux_hidden_states based on options
     if (options_.enable_graph_aux_hidden_states()) {
       auto aux_hidden_states = persistent_param_->aux_hidden_states(n_tokens);
@@ -445,19 +425,14 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
       << "AclGraphExecutorImpl::run() in capture mode";
   bool capture_success = false;
   try {
-    capture_success = graph->capture(model_,
-                                     options_,
-                                     tokens_tensor,
-                                     positions_tensor,
-                                     params_single,
-                                     kv_caches,
-                                     bucket_num_tokens);
+    capture_success = graph->capture(
+        model_, options_, forward_input, kv_caches, bucket_num_tokens);
   } catch (const std::exception& e) {
     LOG(ERROR) << "ACL graph capture threw exception for bucket num_tokens="
                << bucket_num_tokens << ": " << e.what()
                << ". Falling back to eager mode.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(forward_input, kv_caches);
   }
 
   if (capture_success) {
@@ -484,7 +459,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   LOG(ERROR) << "Failed to capture ACL graph for bucket num_tokens: "
              << bucket_num_tokens;
   COUNTER_INC(num_model_execution_total_eager);
-  return model_->forward(tokens, positions, kv_caches, params);
+  return model_->forward(forward_input, kv_caches);
 }
 
 void AclGraph::print_graph_tensors() const {
@@ -530,11 +505,11 @@ uint32_t AclGraphExecutorImpl::get_bucket_num_tokens(
 
 uint64_t AclGraphExecutorImpl::get_graph_key(
     uint32_t bucket_num_tokens,
-    const ModelInputParams& params) const {
-  if (params.is_spec_verify &&
-      params.meta.batch_forward_type.is_chunked_prefill()) {
-    const uint64_t q_max_seq_len =
-        static_cast<uint64_t>(std::max<int32_t>(params.meta.q_max_seq_len, 1));
+    const ForwardInput& forward_input) const {
+  if (forward_input.is_spec_verify &&
+      forward_input.meta.batch_forward_type.is_chunked_prefill()) {
+    const uint64_t q_max_seq_len = static_cast<uint64_t>(
+        std::max<int32_t>(forward_input.meta.q_max_seq_len, 1));
     return static_cast<uint64_t>(bucket_num_tokens) | kSpecVerifyGraphKeyMask |
            (q_max_seq_len << kSpecVerifyQMaxSeqLenShift);
   }

@@ -28,7 +28,7 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
 #include "util/timer.h"
@@ -53,21 +53,19 @@ bool EmbedWorkerImpl::init_model(ModelContext& context) {
   return true;
 }
 
-std::optional<ForwardOutput> EmbedWorkerImpl::step(const ForwardInput& input) {
+std::optional<ForwardOutput> EmbedWorkerImpl::step(
+    const ForwardInput& forward_input) {
   torch::DeviceGuard device_guard(device_);
 
   Timer timer;
 
   // TODO to adapt multi stream parallel later, just use [0] temporarily
   // all tensors should be on the same device as model
-  auto flatten_tokens = input.token_ids.to(device_);
-  auto flatten_positions = input.positions.to(device_);
-  auto params = input.input_params.to(device_);
-  auto sampling_params = input.sampling_params.to(device_, dtype_);
+  ForwardInput model_forward_input = forward_input.to(device_, dtype_);
+  auto sampling_params = model_forward_input.sampling_params;
 
   // call model executor forward to get hidden states
-  auto model_output = model_executor_->forward(
-      flatten_tokens, flatten_positions, kv_caches_, params);
+  auto model_output = model_executor_->forward(model_forward_input, kv_caches_);
   auto hidden_states = model_output.hidden_states;
 
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
@@ -80,7 +78,7 @@ std::optional<ForwardOutput> EmbedWorkerImpl::step(const ForwardInput& input) {
   ForwardOutput output;
   SampleOutput sample_output;
   if (sampling_params.selected_token_idxes.defined() &&
-      input.sampling_params.is_embeddings) {
+      forward_input.sampling_params.is_embeddings) {
     // create embeddings
     timer.reset();
     auto embeddings =

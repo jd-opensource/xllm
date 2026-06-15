@@ -23,7 +23,7 @@ limitations under the License.
 #include "deepseek_v2_attention.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -34,6 +34,7 @@ limitations under the License.
 #include "layers/common/rms_norm.h"
 #include "layers/mlu/deepseek_v2_sparse_moe_block.h"
 #include "layers/mlu/deepseek_v32_sp_context.h"
+#include "runtime/forward_params.h"
 
 namespace xllm {
 namespace layer {
@@ -65,7 +66,7 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
       torch::Tensor& positions,
       const AttentionMetadata& attn_metadata,
       KVCache& kv_cache,
-      const ModelInputParams& input_params,
+      const ForwardInput& forward_input,
       const std::optional<torch::Tensor>& input_ids = std::nullopt);
 
  private:
@@ -98,16 +99,16 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
   MoeInputPrepResult prepare_moe_inputs(
       torch::Tensor x,
       const torch::Tensor& residual,
-      const ModelInputParams& input_params,
+      const ForwardInput& forward_input,
       DeepseekV2AttentionImpl::PostAttnLayout attn_layout);
 
   bool can_keep_local_output(const PostAttnCarrier& carrier,
                              ProcessGroup* pg) const;
-  bool can_sp_chunk(const ModelInputParams& input_params) const;
+  bool can_sp_chunk(const ForwardInput& forward_input) const;
   torch::Tensor comm_out(torch::Tensor x,
                          const PostAttnCarrier& carrier,
                          ProcessGroup* pg) const;
-  torch::Tensor run_mlp(torch::Tensor x, const ModelInputParams& input_params);
+  torch::Tensor run_mlp(torch::Tensor x, const ForwardInput& forward_input);
   torch::Tensor restore_ffn_output(torch::Tensor x,
                                    const PostAttnCarrier& carrier);
   torch::Tensor reduce_out(torch::Tensor x, ProcessGroup* pg) const;

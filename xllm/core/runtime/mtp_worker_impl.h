@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "framework/kv_cache/embedding_cache.h"
 #include "framework/kv_cache_transfer/kv_cache_transfer.h"
+#include "runtime/forward_params.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache_transfer/spec_kv_cache_transfer.h"
 #endif
@@ -70,7 +71,8 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
                                    ForwardInput& processed_inputs) override;
 
  protected:
-  std::optional<ForwardOutput> step_prefill(const ForwardInput& input) override;
+  std::optional<ForwardOutput> step_prefill(
+      const ForwardInput& forward_input) override;
   std::optional<ForwardOutput> step_decode(const ForwardInput& inputs) override;
   std::optional<ForwardOutput> step_empty(const ForwardInput& inputs) override;
 
@@ -79,7 +81,7 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
       ForwardInput& validate_input,
       Stream& compute_stream);
   std::optional<ForwardOutput> run_validate(
-      const ForwardInput& input,
+      const ForwardInput& forward_input,
       const std::vector<ForwardOutput>& draft_outputs,
       ForwardInput& validate_input);
 
@@ -114,7 +116,7 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
                             ForwardInput& draft_inputs,
                             int32_t position_offset);
   void update_decode_step_input(
-      ForwardInput& input,
+      ForwardInput& forward_input,
       const std::vector<EmbeddingCache::DecodeState>& last_states) const;
 
   // Build draft-side input from cached target context at decode step start.
@@ -123,7 +125,7 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
       const std::vector<EmbeddingCache::DecodeState>& last_states,
       ForwardInput& extend_input);
 
-  void write_target_context_to_cache(const ForwardInput& input,
+  void write_target_context_to_cache(const ForwardInput& forward_input,
                                      const SampleOutput& validate_output);
 
  protected:

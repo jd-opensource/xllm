@@ -19,7 +19,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_input_types.h"
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
@@ -33,6 +33,7 @@ limitations under the License.
 #include "processors/qwen3_vl_video_processor.h"
 #include "qwen2_5_vl.h"
 #include "qwen3_vl.h"
+#include "runtime/forward_params.h"
 
 namespace xllm::npu::model {
 
@@ -60,10 +61,10 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
         register_module("language_model", Qwen3MoeForCausalLM(context));
   }
 
-  void prepare_encoder_input(const ModelInputParams& input_params,
+  void prepare_encoder_input(const ForwardInput& forward_input,
                              std::optional<Qwen3_VLImageInputs>& image_inputs,
                              std::optional<Qwen3_VLVideoInputs>& video_inputs) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+    const auto& mm_data = forward_input.multimodal.mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
       pixel_values = res.value();
@@ -87,10 +88,10 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
       video_inputs = Qwen3_VLVideoInputs{pixel_values_videos, video_grid_thw};
   }
 
-  MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
+  MMDict get_multimodal_embeddings(const ForwardInput& forward_input) {
     std::optional<Qwen3_VLImageInputs> image_input;
     std::optional<Qwen3_VLVideoInputs> video_input;
-    prepare_encoder_input(input_params, image_input, video_input);
+    prepare_encoder_input(forward_input, image_input, video_input);
 
     MMDict multimodal_embeds;
     if (image_input) {
@@ -98,7 +99,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
       torch::Tensor image_grid =
           image_input->image_grid_thw.to(options_.device());
       std::vector<int32_t> image_token_nums =
-          get_mm_token_nums(input_params.multimodal.mm_data, MMType::IMAGE);
+          get_mm_token_nums(forward_input.multimodal.mm_data, MMType::IMAGE);
       if (!use_encoder_dp_) {
         auto image_embeds = visual_(image_pixels, image_grid);
         multimodal_embeds["image|embedding"] =
@@ -123,7 +124,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
       torch::Tensor video_grid =
           video_input->video_grid_thw.to(options_.device());
       std::vector<int32_t> video_token_nums =
-          get_mm_token_nums(input_params.multimodal.mm_data, MMType::VIDEO);
+          get_mm_token_nums(forward_input.multimodal.mm_data, MMType::VIDEO);
       auto video_embeds = visual_(video_pixels, video_grid);
       multimodal_embeds["video|embedding"] =
           split_by_token_nums(video_embeds, video_token_nums);
@@ -158,8 +159,8 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
   }
 
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
-                                     const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.multimodal.mm_data;
+                                     const ForwardInput& forward_input) {
+    const auto& mm_data = forward_input.multimodal.mm_data;
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
     if (!mm_data.valid()) {
       return inputs_embeds;
@@ -188,15 +189,13 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
 
     merge_modality("image|embedding", "image|mask");
     merge_modality("video|embedding", "video|mask");
-    input_params.multimodal.deep_stacks = std::move(deepstack_input_embeds);
+    forward_input.multimodal.deep_stacks = std::move(deepstack_input_embeds);
     return inputs_embeds;
   }
 
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    return language_model_(tokens, positions, kv_caches, input_params);
+  ModelOutput forward(const ForwardInput& forward_input,
+                      std::vector<KVCache>& kv_caches) {
+    return language_model_->forward(forward_input, kv_caches);
   }
 
   torch::Tensor logits(const torch::Tensor& hidden_states,

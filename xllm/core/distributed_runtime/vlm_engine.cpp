@@ -479,8 +479,8 @@ std::vector<ForwardInput> VLMEngine::prepare_inputs(std::vector<Batch>& batch) {
     if (batch[dp_rank].empty()) {
       // Use value-initialization to zero primitive fields for empty shard.
       ForwardInput empty_input;
-      empty_input.input_params.meta.batch_forward_type = BatchForwardType();
-      empty_input.input_params.meta.batch_id = UNINITIALIZED_BATCH_ID;
+      empty_input.meta.batch_forward_type = BatchForwardType();
+      empty_input.meta.batch_id = UNINITIALIZED_BATCH_ID;
       batched_inputs.emplace_back(std::move(empty_input));
     } else {
       batched_inputs.emplace_back(std::move(
@@ -489,26 +489,21 @@ std::vector<ForwardInput> VLMEngine::prepare_inputs(std::vector<Batch>& batch) {
     dp_global_token_nums[dp_rank] =
         static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
     if (batch_forward_type.is_empty() &&
-        !batched_inputs[dp_rank]
-             .input_params.meta.batch_forward_type.is_empty()) {
-      batch_forward_type =
-          batched_inputs[dp_rank].input_params.meta.batch_forward_type;
+        !batched_inputs[dp_rank].meta.batch_forward_type.is_empty()) {
+      batch_forward_type = batched_inputs[dp_rank].meta.batch_forward_type;
     }
     dp_is_decode[dp_rank] =
-        batched_inputs[dp_rank]
-            .input_params.meta.batch_forward_type.is_decode() &&
-        batched_inputs[dp_rank].input_params.meta.q_max_seq_len == 1;
+        batched_inputs[dp_rank].meta.batch_forward_type.is_decode() &&
+        batched_inputs[dp_rank].meta.q_max_seq_len == 1;
   }
 
   // update dp_global_token_nums and batch_forward_type
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs[dp_rank].input_params.parallel.dp_global_token_nums =
+    batched_inputs[dp_rank].parallel.dp_global_token_nums =
         dp_global_token_nums;
-    batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
-    if (batched_inputs[dp_rank]
-            .input_params.meta.batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].input_params.meta.batch_forward_type =
-          batch_forward_type;
+    batched_inputs[dp_rank].parallel.dp_is_decode = dp_is_decode;
+    if (batched_inputs[dp_rank].meta.batch_forward_type.is_empty()) {
+      batched_inputs[dp_rank].meta.batch_forward_type = batch_forward_type;
     }
   }
 

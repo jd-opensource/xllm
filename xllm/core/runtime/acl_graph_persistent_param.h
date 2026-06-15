@@ -23,7 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/model/model_args.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/runtime/forward_params.h"
 #include "core/runtime/options.h"
 
 // Forward declarations for ATB
@@ -49,18 +49,16 @@ class GraphPersistentParam final {
   ~GraphPersistentParam();
 
   // Update persistent tensors with new input data
-  // If return_capture_params is true, returns a ModelInputParams with
+  // If return_capture_input is true, returns a ForwardInput with
   // persistent buffer references. padded_num_tokens must be > 0 when
-  // return_capture_params is true, used for build new ModelInputParams for
-  // capture. If return_capture_params is false, only updates persistent buffers
+  // return_capture_input is true, used for build new ForwardInput for
+  // capture. If return_capture_input is false, only updates persistent buffers
   // and returns std::nullopt.
-  std::optional<ModelInputParams> update(const torch::Tensor& tokens,
-                                         const torch::Tensor& k_cache,
-                                         const torch::Tensor& v_cache,
-                                         const torch::Tensor& positions,
-                                         const ModelInputParams& params,
-                                         uint32_t padded_num_tokens,
-                                         bool return_capture_params = false);
+  std::optional<ForwardInput> update(const ForwardInput& forward_input,
+                                     const torch::Tensor& k_cache,
+                                     const torch::Tensor& v_cache,
+                                     uint32_t padded_num_tokens,
+                                     bool return_capture_input = false);
 
   // Getter methods for persistent tensors
   torch::Tensor persistent_tokens(uint32_t actual_tokens = 0) const {
@@ -73,10 +71,8 @@ class GraphPersistentParam final {
   torch::Tensor persistent_positions(uint32_t actual_tokens = 0) const {
     if (actual_tokens > 0) {
       int32_t slice_dim = use_mrope_ ? 1 : 0;
-      return persistent_positions_
-          .slice(
-              /*dim=*/slice_dim, /*start=*/0, /*end=*/actual_tokens)
-          .contiguous();
+      return persistent_positions_.slice(
+          /*dim=*/slice_dim, /*start=*/0, /*end=*/actual_tokens);
     }
     return persistent_positions_;
   }
@@ -180,18 +176,18 @@ class GraphPersistentParam final {
   void initialize_paged_attention_plan_context(const torch::Device& device);
 
   // Update attention mask efficiently from input parameters
-  void update_attention_mask(const ModelInputParams& input_params);
+  void update_attention_mask(const ForwardInput& forward_input);
 
   // Update paged attention tiling based on input parameters
   void plan_paged_attention_tiling(const torch::Tensor& tokens,
                                    const torch::Tensor& k_cache,
                                    const torch::Tensor& v_cache,
                                    const torch::Tensor& block_tables,
-                                   const ModelInputParams& input_params,
+                                   const ForwardInput& forward_input,
                                    aclrtStream stream);
 
   std::vector<int32_t> update_expanded_spec_decode_attention(
-      const ModelInputParams& input_params,
+      const ForwardInput& forward_input,
       uint32_t actual_num_tokens,
       uint32_t padded_num_tokens,
       int64_t actual_batch_size);

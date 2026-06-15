@@ -59,26 +59,27 @@ class FluxControlPipelineImpl : public FluxPipelineBaseImpl {
     register_module("clip_text_model", clip_text_model_);
   }
 
-  DiTForwardOutput forward(const DiTForwardInput& input) {
-    const auto& generation_params = input.generation_params;
+  DiTForwardOutput forward(const DiTForwardInput& forward_input) {
+    const auto& generation_params = forward_input.generation_params;
     int64_t height = generation_params.height;
     int64_t width = generation_params.width;
     auto seed = generation_params.seed > 0 ? generation_params.seed : 42;
-    auto prompts = std::make_optional(input.prompts);
-    auto prompts_2 = input.prompts_2.empty()
+    auto prompts = std::make_optional(forward_input.prompts);
+    auto prompts_2 = forward_input.prompts_2.empty()
                          ? std::nullopt
-                         : std::make_optional(input.prompts_2);
+                         : std::make_optional(forward_input.prompts_2);
 
-    auto control_image = input.control_image;
+    auto control_image = forward_input.control_image;
 
-    auto latents = input.latents.defined() ? std::make_optional(input.latents)
-                                           : std::nullopt;
-    auto prompt_embeds = input.prompt_embeds.defined()
-                             ? std::make_optional(input.prompt_embeds)
+    auto latents = forward_input.latents.defined()
+                       ? std::make_optional(forward_input.latents)
+                       : std::nullopt;
+    auto prompt_embeds = forward_input.prompt_embeds.defined()
+                             ? std::make_optional(forward_input.prompt_embeds)
                              : std::nullopt;
     auto pooled_prompt_embeds =
-        input.pooled_prompt_embeds.defined()
-            ? std::make_optional(input.pooled_prompt_embeds)
+        forward_input.pooled_prompt_embeds.defined()
+            ? std::make_optional(forward_input.pooled_prompt_embeds)
             : std::nullopt;
 
     auto output = forward_impl(prompts,
@@ -97,7 +98,7 @@ class FluxControlPipelineImpl : public FluxPipelineBaseImpl {
                                generation_params.max_sequence_length);
 
     DiTForwardOutput out;
-    out.tensors = torch::chunk(output, input.batch_size);
+    out.tensors = torch::chunk(output, forward_input.batch_size);
     return out;
   }
 

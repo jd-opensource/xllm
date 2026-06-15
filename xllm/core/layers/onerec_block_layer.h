@@ -21,7 +21,7 @@ limitations under the License.
 #include <cstdint>
 
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
+#include "runtime/forward_params.h"
 
 #if defined(USE_NPU)
 #include <acl/acl.h>
@@ -30,6 +30,8 @@ using aclrtEvent = void*;
 #endif
 
 namespace xllm {
+struct ForwardInput;
+
 namespace layer {
 
 class OneRecBlockLayer : public torch::nn::Module {
@@ -39,7 +41,7 @@ class OneRecBlockLayer : public torch::nn::Module {
   virtual torch::Tensor forward(torch::Tensor& hidden_states,
                                 torch::Tensor& attn_mask,
                                 KVCache& kv_cache,
-                                ModelInputParams& input_params,
+                                ForwardInput& forward_input,
                                 torch::Tensor* encoder_output = nullptr,
                                 int32_t node_id = 0,
                                 aclrtEvent* event = nullptr,

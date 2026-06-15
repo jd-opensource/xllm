@@ -31,7 +31,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "core/util/rec_model_utils.h"
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
+#include "framework/model/model_input_types.h"
 #include "framework/request/sequence.h"
 #include "framework/request/sequences_group.h"
 #include "framework/sampling/sampling_params.h"
@@ -352,58 +352,57 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
   }
   forward_input.positions_host = forward_input.positions;
 
-  auto& input_params = forward_input.input_params;
-  input_params.meta.batch_forward_type = state.batch_forward_type;
-  input_params.meta.num_sequences = state.block_tables_vec.size();
-  input_params.meta.kv_max_seq_len = state.max_seq_len;
-  input_params.meta.q_max_seq_len = state.q_max_seq_len;
-  input_params.attention.device.kv_seq_lens =
+  forward_input.meta.batch_forward_type = state.batch_forward_type;
+  forward_input.meta.num_sequences = state.block_tables_vec.size();
+  forward_input.meta.kv_max_seq_len = state.max_seq_len;
+  forward_input.meta.q_max_seq_len = state.q_max_seq_len;
+  forward_input.attention.device.kv_seq_lens =
       torch::tensor(state.seq_lens, torch::kInt);
-  input_params.attention.device.q_seq_lens =
+  forward_input.attention.device.q_seq_lens =
       torch::tensor(state.q_seq_lens, torch::kInt);
   std::vector<int32_t> q_cu_seq_lens =
       build_q_cu_seq_lens_vec(state.q_seq_lens);
-  input_params.attention.device.q_cu_seq_lens =
+  forward_input.attention.device.q_cu_seq_lens =
       torch::tensor(q_cu_seq_lens, torch::kInt);
-  input_params.attention.host.kv_seq_lens = std::move(state.seq_lens);
-  input_params.attention.host.q_cu_seq_lens = std::move(q_cu_seq_lens);
-  input_params.attention.host.q_seq_lens = std::move(state.q_seq_lens);
-  input_params.attention.device.new_cache_slots =
+  forward_input.attention.host.kv_seq_lens = std::move(state.seq_lens);
+  forward_input.attention.host.q_cu_seq_lens = std::move(q_cu_seq_lens);
+  forward_input.attention.host.q_seq_lens = std::move(state.q_seq_lens);
+  forward_input.attention.device.new_cache_slots =
       torch::tensor(state.new_token_slot_ids, torch::kInt);
 
   // for flashinfer
-  input_params.attention.device.paged_kv_indptr =
+  forward_input.attention.device.paged_kv_indptr =
       torch::tensor(state.paged_kv_indptr, torch::kInt);
-  input_params.attention.device.paged_kv_indices =
+  forward_input.attention.device.paged_kv_indices =
       torch::tensor(state.paged_kv_indices, torch::kInt);
-  input_params.attention.device.paged_kv_last_page_len =
+  forward_input.attention.device.paged_kv_last_page_len =
       torch::tensor(state.paged_kv_last_page_len, torch::kInt);
 
   // Setup multimodal data
-  input_params.multimodal.mm_data.batch(mm_data_vec_);
+  forward_input.multimodal.mm_data.batch(mm_data_vec_);
 
   // Setup block tables
   util::pad_2d_vector(state.block_tables_vec, /*pad_value=*/0);
-  input_params.attention.device.block_tables =
+  forward_input.attention.device.block_tables =
       create_2d_tensor(state.block_tables_vec, torch::kInt);
-  input_params.attention.host.block_tables =
-      input_params.attention.device.block_tables;
+  forward_input.attention.host.block_tables =
+      forward_input.attention.device.block_tables;
 
   if (input_embeddings_vec_.size() != 0) {
-    input_params.embedding.input_embedding = torch::cat(input_embeddings_vec_);
+    forward_input.embedding.input_embedding = torch::cat(input_embeddings_vec_);
   }
-  input_params.embedding.embedding_ids = std::move(state.embedding_ids);
-  input_params.embedding.linear_state_ids = std::move(state.linear_state_ids);
-  if (!input_params.embedding.linear_state_ids.empty()) {
-    input_params.embedding.linear_state_indices =
-        torch::tensor(input_params.embedding.linear_state_ids, torch::kInt);
+  forward_input.embedding.embedding_ids = std::move(state.embedding_ids);
+  forward_input.embedding.linear_state_ids = std::move(state.linear_state_ids);
+  if (!forward_input.embedding.linear_state_ids.empty()) {
+    forward_input.embedding.linear_state_indices =
+        torch::tensor(forward_input.embedding.linear_state_ids, torch::kInt);
   }
-  input_params.embedding.extra_token_ids = std::move(state.extra_token_ids);
+  forward_input.embedding.extra_token_ids = std::move(state.extra_token_ids);
 
   if (swap_block_transfer_infos_ != nullptr &&
       swap_block_transfer_infos_->size() > 0) {
-    input_params.block_copy.swap_blocks.insert(
-        input_params.block_copy.swap_blocks.end(),
+    forward_input.block_copy.swap_blocks.insert(
+        forward_input.block_copy.swap_blocks.end(),
         swap_block_transfer_infos_->begin(),
         swap_block_transfer_infos_->end());
   }
@@ -484,7 +483,7 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
   }
 
   // Batch ID
-  input_params.meta.batch_id = batch_id_;
+  forward_input.meta.batch_id = batch_id_;
 
   return forward_input;
 }
