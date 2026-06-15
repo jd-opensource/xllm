@@ -98,24 +98,24 @@ struct DeepseekV4GraphMetadataState : ModelGraphMetadataState {
   DSAMetadataPersistent dsa_metadata_persistent;
 };
 
-class DSAGroupKey {
+class DSAGroupKey final {
  public:
-  int32_t ratio = 1;
-  DSACacheType type = DSACacheType::SLIDING_WINDOW;
-  int32_t block_size = 0;
+  int32_t ratio_ = 1;
+  DSACacheType type_ = DSACacheType::SLIDING_WINDOW;
+  int32_t block_size_ = 0;
 
   bool operator==(const DSAGroupKey& other) const {
-    return ratio == other.ratio && type == other.type &&
-           block_size == other.block_size;
+    return ratio_ == other.ratio_ && type_ == other.type_ &&
+           block_size_ == other.block_size_;
   }
 };
 
-class DSAGroupKeyHash {
+class DSAGroupKeyHash final {
  public:
   size_t operator()(const DSAGroupKey& key) const {
-    size_t hash = std::hash<int32_t>()(key.ratio);
-    hash ^= std::hash<int32_t>()(static_cast<int32_t>(key.type)) << 16;
-    hash ^= std::hash<int32_t>()(key.block_size) << 8;
+    size_t hash = std::hash<int32_t>()(key.ratio_);
+    hash ^= std::hash<int32_t>()(static_cast<int32_t>(key.type_)) << 16;
+    hash ^= std::hash<int32_t>()(key.block_size_) << 8;
     return hash;
   }
 };
@@ -533,8 +533,7 @@ class DeepseekV4ModelImpl final
     return dst;
   }
 
-  class CacheEntry {
-   public:
+  struct CacheEntry {
     DSACacheType type = DSACacheType::SLIDING_WINDOW;
     int32_t ratio = 1;
     int32_t block_size = 0;
@@ -600,16 +599,16 @@ class DeepseekV4ModelImpl final
     auto register_group =
         [&](DSACacheType type, int32_t ratio, int32_t block_size) -> int32_t {
       DSAGroupKey key;
-      key.ratio = ratio;
-      key.type = type;
-      key.block_size = block_size;
+      key.ratio_ = ratio;
+      key.type_ = type;
+      key.block_size_ = block_size;
       auto it = group_key_map.find(key);
       if (it != group_key_map.end()) {
         return it->second;
       }
       const int32_t group_id = static_cast<int32_t>(group_infos_.size());
       group_key_map.emplace(key, group_id);
-      group_infos_.push_back({type, ratio, block_size});
+      group_infos_.emplace_back(type, ratio, block_size);
       return group_id;
     };
 
@@ -637,8 +636,8 @@ class DeepseekV4ModelImpl final
       for (const CacheEntry& entry : layer_caches) {
         const int32_t group_id =
             register_group(entry.type, entry.ratio, entry.block_size);
-        caches_info_[static_cast<size_t>(layer_id)].push_back(
-            {group_id, entry.type, entry.ratio, entry.block_size});
+        caches_info_[static_cast<size_t>(layer_id)].emplace_back(
+            group_id, entry.type, entry.ratio, entry.block_size);
       }
     }
   }
@@ -1040,8 +1039,7 @@ inline void load_deepseek_v4_model_args(const JsonReader& json,
   LOAD_ARG_OR(eos_token_id, "eos_token_id", 1);
 }
 
-class DeepseekV4ArgsPolicy {
- public:
+struct DeepseekV4ArgsPolicy {
   std::unordered_set<int32_t> supported_compress_ratios;
   std::unordered_set<int32_t> supported_effective_ratios;
   std::unordered_set<std::string> supported_score_funcs;

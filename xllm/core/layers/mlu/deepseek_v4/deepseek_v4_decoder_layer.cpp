@@ -143,6 +143,8 @@ std::optional<torch::Tensor> DeepseekV4DecoderLayerImpl::route_input_ids(
     return std::nullopt;
   }
 
+  CHECK(input_ids.has_value() && input_ids.value().defined())
+      << "DeepseekV4 hash routing requires input_ids.";
   torch::Tensor flat_ids =
       input_ids.value().reshape({-1}).to(ffn_input.device()).contiguous();
   const int64_t id_count = flat_ids.size(0);

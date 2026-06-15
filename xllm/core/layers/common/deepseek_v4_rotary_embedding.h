@@ -25,7 +25,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class DeepseekV4RotaryEmbedding : public torch::nn::Module {
+class DeepseekV4RotaryEmbedding final : public torch::nn::Module {
  public:
   using CosSinPair = std::pair<torch::Tensor, torch::Tensor>;
   using GroupCosSinMap = std::unordered_map<std::string, CosSinPair>;
