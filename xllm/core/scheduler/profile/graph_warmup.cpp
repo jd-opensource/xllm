@@ -32,6 +32,14 @@ constexpr int32_t kGraphWarmupBarWidth = 20;
 
 }  // namespace
 
+GraphWarmupPlan graph_warmup_plan(InstanceRole role) {
+  if (role == InstanceRole::PREFILL) {
+    return GraphWarmupPlan::PREFILL_ONLY;
+  }
+
+  return GraphWarmupPlan::UNIFIED;
+}
+
 std::vector<int32_t> graph_warmup_buckets(int32_t max_seqs_per_batch) {
   CHECK_GT(max_seqs_per_batch, 0);
 

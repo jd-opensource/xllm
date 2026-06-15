@@ -925,17 +925,34 @@ void ProfileManager::generate_random_decode_batch(
 }
 
 void ProfileManager::warmup_for_graph() {
+  const GraphWarmupPlan plan = graph_warmup_plan(options_.instance_role());
+  if (plan == GraphWarmupPlan::PREFILL_ONLY) {
+    LOG(INFO) << "PREFILL graph warmup: prefill only";
+    warmup_prefill_for_graph();
+    return;
+  }
+
+  warmup_unified_for_graph();
+}
+
+void ProfileManager::warmup_prefill_for_graph() {
   auto& model_args = engine_->model_args();
   int32_t max_context_len = model_args.max_position_embeddings();
 
   int32_t prefill_tokens =
       std::min(options_.max_tokens_per_batch(), max_context_len);
-  int32_t max_seqs_per_batch = options_.max_seqs_per_batch();
-  int32_t decode_seq_len = std::min(16, max_context_len);
-
   double prefill_latency = run_request(prefill_tokens, 0, 1);
   LOG(INFO) << "Prefill warmup completed: tokens=" << prefill_tokens
             << ", latency=" << prefill_latency << " ms";
+}
+
+void ProfileManager::warmup_unified_for_graph() {
+  auto& model_args = engine_->model_args();
+  int32_t max_context_len = model_args.max_position_embeddings();
+  int32_t max_seqs_per_batch = options_.max_seqs_per_batch();
+  int32_t decode_seq_len = std::min(16, max_context_len);
+
+  warmup_prefill_for_graph();
 
   std::vector<int32_t> decode_batch_sizes =
       graph_decode_buckets(max_seqs_per_batch, options_.dp_size());

@@ -19,9 +19,18 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "common/types.h"
+
 namespace xllm {
 
 class Sequence;
+
+enum class GraphWarmupPlan : int8_t {
+  UNIFIED = 0,
+  PREFILL_ONLY = 1,
+};
+
+GraphWarmupPlan graph_warmup_plan(InstanceRole role);
 
 std::vector<int32_t> graph_warmup_buckets(int32_t max_seqs_per_batch);
 

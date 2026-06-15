@@ -124,6 +124,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
       .max_seqs_per_batch(options.max_seqs_per_batch())
       .max_global_tpot_ms(options.max_global_tpot_ms())
       .max_global_ttft_ms(options.max_global_ttft_ms())
+      .instance_role(options.instance_role().value_or(InstanceRole::DEFAULT))
       .enable_profile_token_budget(options.enable_profile_token_budget());
   profile_manager_ =
       std::make_unique<ProfileManager>(engine, profile_manager_options);

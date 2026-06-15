@@ -53,6 +53,8 @@ class ProfileManager {
     PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
 
     PROPERTY(int32_t, max_global_tpot_ms) = std::numeric_limits<int32_t>::max();
+
+    PROPERTY(InstanceRole, instance_role) = InstanceRole::DEFAULT;
   };
 
   struct CopyBlockProfile {
@@ -144,8 +146,12 @@ class ProfileManager {
 
   void profile_token_budget();
 
-  // Warmup ACL graph executor with prefill and decode requests
+  // Warmup ACL graph executor according to the instance role.
   void warmup_for_graph();
+
+  void warmup_prefill_for_graph();
+
+  void warmup_unified_for_graph();
 
   bool check_if_satisfy_slo(int32_t num_tokens, int32_t tpot_slo_ms);
 

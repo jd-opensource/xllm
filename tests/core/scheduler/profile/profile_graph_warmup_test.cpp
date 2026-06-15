@@ -88,6 +88,18 @@ TEST(GraphWarmupTest, AllowsAllBucketsSkipped) {
   EXPECT_TRUE(buckets.empty());
 }
 
+TEST(GraphWarmupTest, PrefillRoleUsesPrefillOnlyPlan) {
+  EXPECT_EQ(graph_warmup_plan(InstanceRole::PREFILL),
+            GraphWarmupPlan::PREFILL_ONLY);
+}
+
+TEST(GraphWarmupTest, NonPrefillRolesUseUnifiedPlan) {
+  EXPECT_EQ(graph_warmup_plan(InstanceRole::DEFAULT), GraphWarmupPlan::UNIFIED);
+  EXPECT_EQ(graph_warmup_plan(InstanceRole::DECODE), GraphWarmupPlan::UNIFIED);
+  EXPECT_EQ(graph_warmup_plan(InstanceRole::MIX), GraphWarmupPlan::UNIFIED);
+  EXPECT_EQ(graph_warmup_plan(InstanceRole::INVALID), GraphWarmupPlan::UNIFIED);
+}
+
 TEST(GraphWarmupTest, FormatsWarmupProgress) {
   const std::string progress = graph_warmup_progress(
       /*completed=*/3, /*total=*/8, /*bucket=*/8, /*latency_ms=*/12.5);
