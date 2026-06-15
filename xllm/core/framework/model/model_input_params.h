@@ -42,6 +42,9 @@ limitations under the License.
 #include "util/tensor_helper.h"
 
 namespace xllm {
+namespace npu {
+struct AclGraphTaskUpdateContext;
+}  // namespace npu
 namespace layer {
 struct AttentionMetadata;
 }  // namespace layer
@@ -861,6 +864,9 @@ struct GraphInput {
   torch::Tensor expanded_block_tables;
   torch::Tensor expanded_tiling_data;
   std::vector<int32_t> expanded_kv_seq_lens_vec;
+#if defined(USE_NPU)
+  std::shared_ptr<npu::AclGraphTaskUpdateContext> acl_graph_task_update_context;
+#endif
 
   GraphInput to(const torch::Device& device) const {
     GraphInput out;
@@ -872,6 +878,9 @@ struct GraphInput {
     out.expanded_block_tables = safe_to(expanded_block_tables, device, true);
     out.expanded_tiling_data = safe_to(expanded_tiling_data, device, true);
     out.expanded_kv_seq_lens_vec = expanded_kv_seq_lens_vec;
+#if defined(USE_NPU)
+    out.acl_graph_task_update_context = acl_graph_task_update_context;
+#endif
     return out;
   }
 };
@@ -890,6 +899,7 @@ struct ModelInputParams {
     params.dit_forward_input = dit_forward_input.to(device);
     params.is_spec_verify = is_spec_verify;
     params.num_accepted_tokens = safe_to(num_accepted_tokens, device, true);
+    params.num_accepted_tokens_host = num_accepted_tokens_host;
     params.dsa_topk_indices = safe_to(dsa_topk_indices, device, true);
     for (const auto& table : multi_block_tables) {
       params.multi_block_tables.push_back(
@@ -1017,6 +1027,7 @@ struct ModelInputParams {
   bool is_spec_verify = false;
   torch::Tensor num_accepted_tokens;
   torch::Tensor dsa_topk_indices;
+  std::vector<int64_t> num_accepted_tokens_host;
 
   RecModelInputParams rec_params;
 

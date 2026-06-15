@@ -67,6 +67,8 @@ class CausalLM : public torch::nn::Module {
 
   virtual bool requires_graph_forward_metadata() { return false; }
 
+  virtual bool is_hybrid_linear_attention() { return false; }
+
   virtual std::unique_ptr<ModelGraphMetadataState>
   create_graph_forward_metadata_state() {
     return nullptr;
@@ -183,6 +185,14 @@ class CausalLMImpl : public CausalLM {
       return model_->requires_graph_forward_metadata();
     } else {
       return CausalLM::requires_graph_forward_metadata();
+    }
+  }
+
+  bool is_hybrid_linear_attention() override {
+    if constexpr (detail::has_is_hybrid_linear_attention<Model>::value) {
+      return model_->is_hybrid_linear_attention();
+    } else {
+      return CausalLM::is_hybrid_linear_attention();
     }
   }
 

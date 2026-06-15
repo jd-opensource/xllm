@@ -19,17 +19,19 @@ limitations under the License.
 
 namespace xllm::kernel::npu {
 
-torch::Tensor causal_conv1d(const torch::Tensor& x,
-                            const torch::Tensor& weight,
-                            const torch::Tensor& conv_state,
-                            const std::optional<torch::Tensor>& bias_opt,
-                            const torch::IntArrayRef query_start_loc_opt,
-                            const torch::IntArrayRef cache_indices_opt,
-                            const torch::IntArrayRef initial_state_mode_opt,
-                            const torch::IntArrayRef num_accepted_tokens_opt,
-                            int64_t activation_mode,
-                            int64_t pad_slot_id,
-                            int64_t run_mode) {
+void causal_conv1d_out(const torch::Tensor& output,
+                       const torch::Tensor& x,
+                       const torch::Tensor& weight,
+                       const torch::Tensor& conv_state,
+                       const std::optional<torch::Tensor>& bias_opt,
+                       const torch::IntArrayRef query_start_loc_opt,
+                       const torch::IntArrayRef cache_indices_opt,
+                       const torch::IntArrayRef initial_state_mode_opt,
+                       const torch::IntArrayRef num_accepted_tokens_opt,
+                       int64_t activation_mode,
+                       int64_t pad_slot_id,
+                       int64_t run_mode) {
+  check_tensor(output, "output", "causal_conv1d");
   check_tensor(x, "x", "causal_conv1d");
   check_tensor(weight, "weight", "causal_conv1d");
   check_tensor(conv_state, "conv_state", "causal_conv1d");
@@ -39,7 +41,6 @@ torch::Tensor causal_conv1d(const torch::Tensor& x,
     bias_tensor = bias_opt.value();
   }
 
-  torch::Tensor output = torch::empty(x.sizes(), x.options());
   EXEC_NPU_CMD(aclnnCausalConv1d,
                x,
                weight,
@@ -53,6 +54,32 @@ torch::Tensor causal_conv1d(const torch::Tensor& x,
                pad_slot_id,
                run_mode,
                output);
+}
+
+torch::Tensor causal_conv1d(const torch::Tensor& x,
+                            const torch::Tensor& weight,
+                            const torch::Tensor& conv_state,
+                            const std::optional<torch::Tensor>& bias_opt,
+                            const torch::IntArrayRef query_start_loc_opt,
+                            const torch::IntArrayRef cache_indices_opt,
+                            const torch::IntArrayRef initial_state_mode_opt,
+                            const torch::IntArrayRef num_accepted_tokens_opt,
+                            int64_t activation_mode,
+                            int64_t pad_slot_id,
+                            int64_t run_mode) {
+  torch::Tensor output = torch::empty(x.sizes(), x.options());
+  causal_conv1d_out(output,
+                    x,
+                    weight,
+                    conv_state,
+                    bias_opt,
+                    query_start_loc_opt,
+                    cache_indices_opt,
+                    initial_state_mode_opt,
+                    num_accepted_tokens_opt,
+                    activation_mode,
+                    pad_slot_id,
+                    run_mode);
   return output;
 }
 

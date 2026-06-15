@@ -18,6 +18,7 @@ limitations under the License.
 #include <tuple>
 
 #include "xllm/core/kernels/ops_api.h"
+#include "xllm/core/platform/npu/acl_graph_task_update_context.h"
 
 namespace xllm {
 namespace layer {
@@ -316,6 +317,67 @@ torch::Tensor expand_sequence_tensor_to_batch(const torch::Tensor& tensor,
       .contiguous();
 }
 
+torch::Tensor run_causal_conv1d_graph_update(
+    const std::shared_ptr<xllm::npu::AclGraphTaskUpdateContext>& graph_context,
+    const torch::Tensor& x,
+    const torch::Tensor& weight,
+    const torch::Tensor& conv_state,
+    const std::optional<torch::Tensor>& bias,
+    const std::vector<int64_t>& query_start_loc,
+    const std::vector<int64_t>& cache_indices,
+    const std::vector<int64_t>& num_accepted_tokens,
+    xllm::npu::CausalConv1dGraphBranch branch) {
+  CHECK(graph_context != nullptr && graph_context->capturing)
+      << "causal_conv1d graph update can only be registered during capture";
+  CHECK(!query_start_loc.empty())
+      << "query_start_loc must be populated for causal_conv1d graph update";
+  CHECK_EQ(query_start_loc.back(), x.size(0))
+      << "query_start_loc must be padded to x.shape[0] during graph capture";
+  CHECK_EQ(cache_indices.size() + 1, query_start_loc.size())
+      << "cache_indices must be sequence-scoped";
+  if (branch == xllm::npu::CausalConv1dGraphBranch::kSpecVerify) {
+    CHECK_EQ(num_accepted_tokens.size(), cache_indices.size())
+        << "num_accepted_tokens must be sequence-scoped for spec verify";
+  }
+
+  const std::vector<int64_t> empty_host_args;
+  torch::Tensor output = torch::empty_like(x);
+  c10_npu::NPUStream stream = c10_npu::getCurrentNPUStream();
+  auto event = std::make_shared<c10_npu::NPUEvent>(ACL_EVENT_EXTERNAL);
+  event->block(stream);
+  event->reset(stream);
+
+  c10_npu::graph_task_group_begin(stream);
+  xllm::kernel::causal_conv1d_out(output,
+                                  x,
+                                  weight,
+                                  conv_state,
+                                  bias,
+                                  torch::IntArrayRef(query_start_loc),
+                                  torch::IntArrayRef(cache_indices),
+                                  torch::IntArrayRef(empty_host_args),
+                                  torch::IntArrayRef(num_accepted_tokens),
+                                  1,
+                                  xllm::npu::kCausalConv1dGraphPadSlotId,
+                                  1);
+  c10_npu::NPUTaskGroupHandle handle = c10_npu::graph_task_group_end(stream);
+
+  xllm::npu::CausalConv1dGraphTask task;
+  task.output = output;
+  task.x = x;
+  task.weight = weight;
+  task.conv_state = conv_state;
+  task.bias = bias;
+  task.activation_mode = 1;
+  task.pad_slot_id = xllm::npu::kCausalConv1dGraphPadSlotId;
+  task.run_mode = 1;
+  task.branch = branch;
+  task.handle = handle;
+  task.event = std::move(event);
+  graph_context->causal_conv1d_tasks.emplace_back(std::move(task));
+  return output;
+}
+
 torch::Tensor run_spec_verify_conv(const torch::Tensor& mixed_qkv,
                                    const torch::Tensor& conv_cache,
                                    const torch::Tensor& logical_state_indices,
@@ -550,6 +612,9 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   const bool use_spec_verify = input_params.is_spec_verify;
   const bool is_any_prefill =
       attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
+  auto graph_context = input_params.graph.acl_graph_task_update_context;
+  const bool register_conv1d_graph_update =
+      graph_context != nullptr && graph_context->capturing;
 
   if (!use_spec_verify && is_any_prefill) {
     torch::IntArrayRef num_accepted_tokens_opt;
@@ -573,37 +638,50 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
 
     mixed_qkv = reshape_qkvz_with_pad(attn_metadata, mixed_qkv);
     mixed_qkv = mixed_qkv.transpose(1, 2);
-  } else if (use_spec_verify) {
-    CHECK(input_params.num_accepted_tokens.defined())
-        << "num_accepted_tokens must be populated for Qwen3.5 spec verify";
-    torch::Tensor conv_weight_for_update =
-        conv_weight.transpose(0, 1).contiguous();
-    torch::Tensor pre_conv_mixed_qkv = mixed_qkv.transpose(1, 2);
-    mixed_qkv =
-        run_spec_verify_conv(pre_conv_mixed_qkv,
-                             conv_cache,
-                             logical_state_indices,
-                             input_params.num_accepted_tokens.to(device),
-                             attn_metadata.q_cu_seq_lens,
-                             conv_weight_for_update,
-                             conv_kernel_size_);
   } else {
-    torch::Tensor conv_weight_for_update =
-        conv_weight.transpose(0, 1).contiguous();
-    xllm::kernel::CausalConv1dUpdateParams conv1d_params;
-    conv1d_params.x = mixed_qkv.reshape({-1, mixed_qkv.size(-1)});
-    conv1d_params.conv_state = conv_cache.transpose(1, 2);
-    conv1d_params.weight = conv_weight_for_update;
-    conv1d_params.conv_state_indices = logical_state_indices;
-    conv1d_params.block_idx_last_scheduled_token =
-        std::optional<torch::Tensor>();
-    conv1d_params.initial_state_idx = std::optional<torch::Tensor>();
-    conv1d_params.query_start_loc = attn_metadata.q_cu_seq_lens;
-    conv1d_params.max_query_len = attn_metadata.max_query_len;
-    mixed_qkv = xllm::kernel::causal_conv1d_update(conv1d_params);
-    // Reshape back to 3D [batch_size, dim, seq_len]
-    mixed_qkv =
-        mixed_qkv.view({batch_size, -1, mixed_qkv.size(-1)}).contiguous();
+    if (use_spec_verify) {
+      CHECK(input_params.num_accepted_tokens.defined())
+          << "num_accepted_tokens must be populated for Qwen3.5 spec verify";
+    }
+    torch::Tensor conv_input = reshape_qkvz_unpad(attn_metadata, mixed_qkv);
+    const auto& num_accepted = use_spec_verify
+                                   ? input_params.num_accepted_tokens_host
+                                   : std::vector<int64_t>();
+    const std::vector<int64_t> linear_state_indices_host(
+        input_params.embedding.linear_state_ids.begin(),
+        input_params.embedding.linear_state_ids.end());
+    if (register_conv1d_graph_update) {
+      const auto conv1d_branch =
+          use_spec_verify ? xllm::npu::CausalConv1dGraphBranch::kSpecVerify
+                          : xllm::npu::CausalConv1dGraphBranch::kDecode;
+      mixed_qkv =
+          run_causal_conv1d_graph_update(graph_context,
+                                         conv_input,
+                                         conv_weight,
+                                         conv_cache,
+                                         std::optional<torch::Tensor>(),
+                                         input_params.parallel.query_start_loc,
+                                         linear_state_indices_host,
+                                         num_accepted,
+                                         conv1d_branch);
+    } else {
+      torch::Tensor output = torch::empty_like(conv_input);
+      xllm::kernel::causal_conv1d_out(
+          output,
+          conv_input,
+          conv_weight,
+          conv_cache,
+          std::optional<torch::Tensor>(),
+          torch::IntArrayRef(input_params.parallel.query_start_loc),
+          torch::IntArrayRef(linear_state_indices_host),
+          torch::IntArrayRef(std::vector<int64_t>()),
+          torch::IntArrayRef(num_accepted),
+          1,
+          xllm::npu::kCausalConv1dGraphPadSlotId,
+          1);
+      mixed_qkv = output;
+    }
+    mixed_qkv = reshape_qkvz_with_pad(attn_metadata, mixed_qkv);
     mixed_qkv = mixed_qkv.transpose(1, 2);
   }
   const bool fla_ssm_state_layout = use_fla_ssm_state_layout();
