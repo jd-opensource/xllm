@@ -905,13 +905,10 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
   CHECK_EQ(last_states.size(),
            input.input_params.embedding.embedding_ids.size())
       << "decode target state count mismatch";
-  // TODO: Revisit bootstrap state validation for graph mode. The check was
-  // disabled because cached target tokens may diverge from the scheduler's
-  // decode input when schedule overlap or graph replay is active.
-  // check_mtp_decode_states(last_states,
-  //                         input.input_params.embedding.request_ids,
-  //                         input.token_ids_host,
-  //                         enable_schedule_overlap());
+  check_mtp_decode_states(last_states,
+                          input.input_params.embedding.request_ids,
+                          input.token_ids_host,
+                          enable_schedule_overlap());
   update_decode_step_input(input, last_states);
   prepare_draft_extend_inputs(input, last_states, current_draft_input);
   draft_outputs.reserve(num_speculative_tokens);

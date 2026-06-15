@@ -18,6 +18,9 @@ limitations under the License.
 #include <framework/graphs/MLUGraph.h>
 #include <torch/torch.h>
 
+#include <cstddef>
+#include <optional>
+
 #include "executor_impl.h"
 #include "executor_impl_factory.h"
 #include "framework/kv_cache/kv_cache.h"
@@ -45,6 +48,8 @@ class GraphPersistentParam {
                            const torch::Tensor& positions,
                            const ModelInputParams& params,
                            uint32_t padding_needed);
+
+  std::size_t get_persistent_tensor_bytes() const;
 
   // input tensors
   torch::Tensor tokens_;
@@ -77,10 +82,14 @@ class MluGraph {
  public:
   MluGraph(GraphPersistentParam* persistent_param, uint32_t padding_num_tokens);
 
-  // Capture computation graph for given bucket num_tokens
+  // Capture computation graph for given bucket num_tokens.
+  // All buckets must capture on the same MLU stream so the caching allocator
+  // can reuse scratch freed by earlier captures within the shared mempool;
+  // capturing on different streams defeats its per-stream block reuse.
   void capture(CausalLM* model,
                std::vector<KVCache>& kv_cache,
-               torch_mlu::MempoolId_t& pool,
+               const torch_mlu::MempoolId_t& pool,
+               const torch_mlu::MLUStream& capture_stream,
                const runtime::Options& options);
 
   // Replay captured graph with new input data
@@ -125,12 +134,19 @@ class MluGraphExecutorImpl : public ExecutorImpl {
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& params);
   void init_param_once();
+  void log_memory_after_capture();
 
   CausalLM* model_;  // not owned
   ModelArgs args_;
   torch::Device device_;
   runtime::Options options_;
-  torch_mlu::MempoolId_t pool_;
+  torch_mlu::MempoolId_t graph_pool_;
+  // Fixed capture stream shared by every bucket capture. Lazily initialized on
+  // the first capture so the allocator can reuse pool scratch across buckets.
+  std::optional<torch_mlu::MLUStream> graph_capture_stream_;
+  int64_t max_tokens_for_graph_mode_ = 0;
+  std::size_t last_pool_reserved_bytes_ = 0;
+  std::size_t peak_pool_reserved_bytes_ = 0;
 
   std::unordered_map<uint32_t, std::unique_ptr<MluGraph>> graphs_;
   std::unique_ptr<GraphPersistentParam> persistent_param_;

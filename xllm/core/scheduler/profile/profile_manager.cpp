@@ -35,6 +35,7 @@ limitations under the License.
 #include "core/framework/config/speculative_config.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request_state.h"
+#include "scheduler/profile/graph_warmup.h"
 #include "util/rec_model_utils.h"
 
 namespace xllm {
@@ -64,7 +65,7 @@ ProfileManager::ProfileManager(Engine* engine, const Options& options)
   // more profile here, such as token_budget profile and decode length
   // prediction.
 
-#if defined(USE_NPU) || defined(USE_CUDA)
+#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU)
   // Warmup ACL graph executor if enabled
   if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     if (!is_rec_multi_round_mode()) {
@@ -601,7 +602,7 @@ std::shared_ptr<Request> ProfileManager::generate_single_request(
   RequestState req_state(token_ids);
   req_state.enable_schedule_overlap = options_.enable_schedule_overlap();
   auto request = std::make_shared<Request>(
-      /*request_id=*/"",
+      /*request_id=*/next_warmup_request_id(),
       /*x_request_id=*/"",
       /*x_request_time=*/"",
       req_state);
@@ -626,7 +627,8 @@ std::shared_ptr<Request> ProfileManager::generate_single_request(
 }
 
 std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
-    int32_t total_length) {
+    int32_t total_length,
+    std::optional<int32_t> dp_rank) {
   CHECK_GT(total_length, 1) << "Decode profiling requires total_length > 1.";
 
   auto& model_args = engine_->model_args();
@@ -658,12 +660,17 @@ std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
   }
   req_state.seq_capacity = seq_capacity;
   auto request = std::make_shared<Request>(
-      /*request_id=*/"",
+      /*request_id=*/next_warmup_request_id(),
       /*x_request_id=*/"",
       /*x_request_time=*/"",
       req_state);
 
   auto* sequence = request->sequences()[0].get();
+  if (dp_rank.has_value()) {
+    CHECK_GE(dp_rank.value(), 0);
+    CHECK_LT(dp_rank.value(), options_.dp_size());
+    sequence->set_dp_rank(dp_rank.value());
+  }
   if (!block_manager_pool_->BlockManagerPool::allocate(sequence,
                                                        seq_capacity)) {
     LOG(FATAL) << "Profiling decode step time failed! Not enough blocks, total "
@@ -676,6 +683,14 @@ std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
   generated_token =
       generated_token == eos_token_id ? generated_token + 1 : generated_token;
   sequence->append_token(generated_token);
+
+  // With MTP speculative decoding the worker's decode path requires a valid
+  // decode state written via the MTP bootstrap channel before validating the
+  // per-token decode state. Inject a placeholder bootstrap embedding so the
+  // synthetic warmup/profile request takes the same bootstrap path as a real
+  // disagg PD decode request instead of reading stale recycled decode state.
+  prepare_warmup_decode_sequence(
+      sequence, model_args.hidden_size(), num_speculative_tokens);
 
   CHECK(sequence->stage() == SequenceStage::DECODE)
       << "Decode profiling request is not in DECODE stage. total_length: "
@@ -812,6 +827,44 @@ double ProfileManager::run_decode_request(
   return latency;
 }
 
+double ProfileManager::run_graph_decode_request(
+    const std::vector<int32_t>& total_length_vec) {
+  CHECK_GT(options_.dp_size(), 0);
+
+  std::vector<Sequence*> sequences;
+  std::vector<size_t> sequences_budget;
+  std::vector<std::shared_ptr<Request>> requests;
+  sequences.reserve(total_length_vec.size());
+  sequences_budget.reserve(total_length_vec.size());
+  requests.reserve(total_length_vec.size());
+
+  for (size_t i = 0; i < total_length_vec.size(); ++i) {
+    int32_t dp_rank = static_cast<int32_t>(i % options_.dp_size());
+    std::shared_ptr<Request> request =
+        generate_single_decode_request(total_length_vec[i], dp_rank);
+    requests.emplace_back(request);
+    sequences.emplace_back(request->sequences()[0].get());
+    sequences_budget.emplace_back(1);
+  }
+
+  auto batches =
+      BatchFactory::get_instance(options_.dp_size())
+          ->create_batches(requests, sequences, sequences_budget, nullptr);
+
+  absl::Time start_time = absl::Now();
+  engine_->step(batches);
+  if (options_.enable_schedule_overlap()) {
+    engine_->update_last_step_result(batches);
+  }
+  double latency = absl::ToDoubleMilliseconds(absl::Now() - start_time);
+  for (auto& request : requests) {
+    block_manager_pool_->deallocate_without_cache(
+        request->sequences()[0].get());
+  }
+
+  return latency;
+}
+
 // Generate a batch of decode requests in DECODE stage and execute one decode
 // step, then return the step latency.
 double ProfileManager::profile_decode_step_time(int32_t token_length,
@@ -893,30 +946,36 @@ void ProfileManager::warmup_for_graph() {
   LOG(INFO) << "Prefill warmup completed: tokens=" << prefill_tokens
             << ", latency=" << prefill_latency << " ms";
 
-  // Generate batch sizes aligned with graph bucket logic.
-  std::vector<int32_t> decode_batch_sizes;
-  const std::vector<int32_t> small_decode_batch_sizes = {1, 2, 4, 8, 16};
-  for (int32_t batch_size : small_decode_batch_sizes) {
-    if (batch_size <= max_seqs_per_batch) {
-      decode_batch_sizes.push_back(batch_size);
-    }
-  }
-  for (int32_t batch_size = 32; batch_size <= max_seqs_per_batch;
-       batch_size += 16) {
-    decode_batch_sizes.push_back(batch_size);
-  }
-  if (decode_batch_sizes.back() != max_seqs_per_batch) {
-    decode_batch_sizes.push_back(max_seqs_per_batch);
-  }
+  std::vector<int32_t> decode_batch_sizes =
+      graph_decode_buckets(max_seqs_per_batch, options_.dp_size());
+  const int32_t decode_bucket_count =
+      static_cast<int32_t>(decode_batch_sizes.size());
 
+  LOG(INFO) << "Graph warmup started: bucket_count=" << decode_bucket_count
+            << ", decode_seq_len=" << decode_seq_len;
+
+  // Capture from the largest bucket down to the smallest so every smaller
+  // bucket reuses the scratch blocks freed by the largest capture within the
+  // shared graph mempool. Ascending capture forces each larger bucket to grab
+  // fresh scratch (the freed smaller blocks cannot satisfy it), which makes the
+  // pool grow linearly with the bucket count.
   double decode_total_latency = 0.0;
-  for (int32_t batch_size : decode_batch_sizes) {
+  for (int32_t bucket_index = decode_bucket_count - 1; bucket_index >= 0;
+       --bucket_index) {
+    const int32_t batch_size =
+        decode_batch_sizes[static_cast<size_t>(bucket_index)];
     std::vector<int32_t> total_length_vec(batch_size, decode_seq_len);
-    decode_total_latency += run_decode_request(total_length_vec);
+    const double decode_latency = run_graph_decode_request(total_length_vec);
+    decode_total_latency += decode_latency;
+    LOG(INFO) << graph_warmup_progress(
+        /*completed=*/decode_bucket_count - bucket_index,
+        /*total=*/decode_bucket_count,
+        /*bucket=*/batch_size,
+        /*latency_ms=*/decode_latency);
   }
 
-  LOG(INFO) << "Decode warmup completed: bucket_count="
-            << decode_batch_sizes.size() << ", decode_max_batch_size="
+  LOG(INFO) << "Decode warmup completed: bucket_count=" << decode_bucket_count
+            << ", decode_max_batch_size="
             << (decode_batch_sizes.empty() ? 0 : decode_batch_sizes.back())
             << ", decode_seq_len=" << decode_seq_len
             << ", decode_total_latency=" << decode_total_latency << " ms";
