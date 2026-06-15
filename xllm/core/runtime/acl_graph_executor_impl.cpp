@@ -383,7 +383,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   const uint32_t decode_batch_size_limit = static_cast<uint32_t>(
       std::max<int32_t>(1,
                         ::xllm::ExecutionConfig::get_instance()
-                            .acl_graph_decode_batch_size_limit()));
+                            .graph_decode_batch_size_limit()));
   if (global_batch_size > decode_batch_size_limit) {
     LOG_FIRST_N(WARNING, 1)
         << "Falling back to eager mode because decode batch_size (global="

@@ -140,7 +140,7 @@ DECLARE_bool(enable_graph_vmm_pool);
 
 DECLARE_int32(max_tokens_for_graph_mode);
 
-DECLARE_int32(acl_graph_decode_batch_size_limit);
+DECLARE_int32(graph_decode_batch_size_limit);
 
 DECLARE_bool(enable_chunked_prefill);
 

@@ -710,12 +710,12 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     torch::Tensor packed_g_tensor = torch::cat(packed_g, 0).unsqueeze(0);
     torch::Tensor packed_beta_tensor = torch::cat(packed_beta, 0).unsqueeze(0);
 
-    xllm::kernel::ChunkGatedDeltaRuleParams chunk_gated_delta_params;
-    chunk_gated_delta_params.q = packed_processed_q;
-    chunk_gated_delta_params.k = packed_processed_k;
-    chunk_gated_delta_params.v = packed_processed_v;
-    chunk_gated_delta_params.g = packed_g_tensor;
-    chunk_gated_delta_params.beta = packed_beta_tensor;
+    xllm::kernel::MegaChunkGdnParams mega_chunk_gdn_params;
+    mega_chunk_gdn_params.q = packed_processed_q;
+    mega_chunk_gdn_params.k = packed_processed_k;
+    mega_chunk_gdn_params.v = packed_processed_v;
+    mega_chunk_gdn_params.g = packed_g_tensor;
+    mega_chunk_gdn_params.beta = packed_beta_tensor;
     // Get initial state from ssm_cache for sequences with previous state
     // Shape: [batch_size, num_heads, head_k_dim, head_v_dim]
     torch::Tensor initial_state_tensor =
@@ -733,14 +733,13 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
       initial_state_tensor =
           initial_state_tensor.transpose(-1, -2).contiguous();
     }
-    chunk_gated_delta_params.initial_state = initial_state_tensor;
-    chunk_gated_delta_params.output_final_state = true;
-    chunk_gated_delta_params.cu_seqlens = attn_metadata.q_cu_seq_lens;
-    chunk_gated_delta_params.head_first = false;
-    chunk_gated_delta_params.use_qk_l2norm_in_kernel = true;
+    mega_chunk_gdn_params.initial_state = initial_state_tensor;
+    mega_chunk_gdn_params.output_final_state = true;
+    mega_chunk_gdn_params.cu_seqlens = attn_metadata.q_cu_seq_lens;
+    mega_chunk_gdn_params.use_qk_l2norm_in_kernel = true;
     torch::Tensor packed_core_attn_out;
     std::tie(packed_core_attn_out, last_recurrent_state) =
-        xllm::kernel::chunk_gated_delta_rule(chunk_gated_delta_params);
+        xllm::kernel::mega_chunk_gdn(mega_chunk_gdn_params);
     core_attn_out = torch::zeros_like(processed_v);
     int64_t packed_offset = 0;
     for (int64_t batch_idx = 0; batch_idx < batch_size; ++batch_idx) {

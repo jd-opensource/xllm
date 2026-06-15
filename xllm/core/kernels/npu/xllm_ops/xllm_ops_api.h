@@ -143,6 +143,18 @@ std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
     double glu_alpha,
     double glu_bias);
 
+std::pair<torch::Tensor, torch::Tensor> npu_mega_chunk_gdn(
+    torch::Tensor& q,
+    torch::Tensor& k,
+    torch::Tensor& v,
+    torch::Tensor& g,
+    torch::Tensor& beta,
+    const std::optional<float>& scale = std::nullopt,
+    const std::optional<torch::Tensor>& initial_state = std::nullopt,
+    bool output_final_state = false,
+    const std::optional<torch::Tensor>& cu_seqlens = std::nullopt,
+    bool use_qk_l2norm_in_kernel = false);
+
 at::Tensor hc_post(const at::Tensor& x,
                    const at::Tensor& residual,
                    const at::Tensor& post,
