@@ -276,6 +276,8 @@ class ContinuousScheduler : public Scheduler {
 
   bool enable_prefix_cache_ = false;
 
+  bool enable_in_batch_prefix_cache_ = false;
+
   // the number of requests that are waiting to be scheduled
   std::atomic<size_t> pending_requests_{0};
 
@@ -343,6 +345,12 @@ class ContinuousScheduler : public Scheduler {
                                 Sequence* prefill_sequence,
                                 size_t max_handle_num_tokens,
                                 size_t& num_request_to_evict);
+
+  // Publish the full prefill blocks admitted in this scheduling step into the
+  // prefix cache, so later requests in the same batch can share them.
+  void cache_in_batch_prefix(
+      const std::vector<Sequence*>& sequences,
+      const std::vector<size_t>& current_step_token_budgets);
 
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch();

@@ -46,6 +46,7 @@ class KVCacheConfig final {
          "max_memory_utilization",
          "kv_cache_dtype",
          "enable_prefix_cache",
+         "enable_in_batch_prefix_cache",
          "xxh3_128bits_seed",
          "enable_xtensor",
          "phy_page_granularity_size"}};
@@ -61,6 +62,8 @@ class KVCacheConfig final {
   PROPERTY(std::string, kv_cache_dtype) = "auto";
 
   PROPERTY(bool, enable_prefix_cache) = true;
+
+  PROPERTY(bool, enable_in_batch_prefix_cache) = false;
 
   PROPERTY(uint32_t, xxh3_128bits_seed) = 1024;
 
