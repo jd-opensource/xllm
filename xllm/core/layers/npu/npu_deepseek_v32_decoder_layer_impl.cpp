@@ -378,6 +378,17 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
       prefill_param_, model_args, parallel_args, /*is_prefill=*/true);
   param_from_args(
       decode_param_, model_args, parallel_args, /*is_prefill=*/false);
+  has_mtp_topk_fallback_ =
+      skip_topk_ && model_args.index_share_for_mtp_iteration() &&
+      model_args.model_type().find("_mtp") != std::string::npos;
+  if (has_mtp_topk_fallback_) {
+    mtp_prefill_fallback_param_ = prefill_param_;
+    mtp_prefill_fallback_param_.skipTopk = false;
+    mtp_prefill_fallback_param_.outputTopk = true;
+    mtp_decode_fallback_param_ = decode_param_;
+    mtp_decode_fallback_param_.skipTopk = false;
+    mtp_decode_fallback_param_.outputTopk = true;
+  }
 
   loader_ = std::make_unique<DeekseekV32DecoderLoader>(
       WEIGHT_COUNT_PER_LAYER,
@@ -395,7 +406,7 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
       prefill_param_.isBF16,
       decode_param_.isBF16,
       attn_linear_quant_types_,
-      skip_topk_,
+      skip_topk_ && !has_mtp_topk_fallback_,
       ::xllm::LoadConfig::get_instance().enable_manual_loader()
           ? LoadMode::kManual
           : LoadMode::kEager);
@@ -929,6 +940,12 @@ void NpuDeepseekV32DecoderLayerImpl::update_expert_weight() {
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[index]);
     prefill_node_.inTensors.at(index) = &atb_weight_tensors_[index];
     decode_node_.inTensors.at(index) = &atb_weight_tensors_[index];
+    if (has_mtp_topk_fallback_) {
+      mtp_prefill_fallback_node_.inTensors.at(index) =
+          &atb_weight_tensors_[index];
+      mtp_decode_fallback_node_.inTensors.at(index) =
+          &atb_weight_tensors_[index];
+    }
   }
   expert_routing_map_[layer_id_ - first_k_dense_replace_] =
       expert_routing_map_buffer_;
@@ -940,6 +957,12 @@ int64_t NpuDeepseekV32DecoderLayerImpl::init_layer() {
   model_name_ = "DeepSeek_V2";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
   CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
+  if (has_mtp_topk_fallback_) {
+    CHECK_OPERATION_STATUS_RETURN(
+        init_node(mtp_prefill_fallback_node_, mtp_prefill_fallback_param_));
+    CHECK_OPERATION_STATUS_RETURN(
+        init_node(mtp_decode_fallback_node_, mtp_decode_fallback_param_));
+  }
   return atb::NO_ERROR;
 }
 
@@ -1036,7 +1059,9 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward_with_topk(
                             input_params_new,
                             false,
                             shared_topk_indices,
-                            output_topk_indices);
+                            output_topk_indices,
+                            skip_topk_,
+                            output_topk_);
     st = execute_node(decode_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "execute prefill layer fail, error code: " << st;
@@ -1050,11 +1075,67 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward_with_topk(
                             input_params_new,
                             true,
                             shared_topk_indices,
-                            output_topk_indices);
+                            output_topk_indices,
+                            skip_topk_,
+                            output_topk_);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "execute prefill layer fail, error code: " << st;
   }
+  return tensor_placeholder_;
+}
+
+torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward_with_mtp_topk_fallback(
+    torch::Tensor& x,
+    torch::Tensor& cos_pos,
+    torch::Tensor& sin_pos,
+    torch::Tensor& attn_mask,
+    KVCache& kv_cache,
+    const ModelInputParams& input_params,
+    torch::Tensor* output_topk_indices,
+    aclrtEvent* event,
+    std::atomic<bool>* event_flag,
+    int node_id) {
+  CHECK(has_mtp_topk_fallback_)
+      << "MTP top-k fallback is only valid for NextN sharing layers.";
+  CHECK(output_topk_indices != nullptr && output_topk_indices->defined())
+      << "MTP top-k fallback requires an output top-k tensor.";
+
+  atb::Status st;
+  ModelInputParams& input_params_new =
+      const_cast<ModelInputParams&>(input_params);
+  if (input_params_new.meta.batch_forward_type.is_decode()) {
+    build_node_variant_pack(mtp_decode_fallback_node_,
+                            x,
+                            cos_pos,
+                            sin_pos,
+                            attn_mask,
+                            kv_cache,
+                            input_params_new,
+                            false,
+                            torch::Tensor(),
+                            output_topk_indices,
+                            false,
+                            true);
+    st = execute_node(mtp_decode_fallback_node_, node_id, event, event_flag);
+  } else {
+    build_node_variant_pack(mtp_prefill_fallback_node_,
+                            x,
+                            cos_pos,
+                            sin_pos,
+                            attn_mask,
+                            kv_cache,
+                            input_params_new,
+                            true,
+                            torch::Tensor(),
+                            output_topk_indices,
+                            false,
+                            true);
+    st = execute_node(mtp_prefill_fallback_node_, node_id, event, event_flag);
+  }
+  LOG_IF(FATAL, st != 0)
+      << model_name_
+      << "execute MTP top-k fallback layer fail, error code: " << st;
   return tensor_placeholder_;
 }
 
@@ -1068,7 +1149,9 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
     ModelInputParams& input_params,
     bool is_prefill,
     const torch::Tensor& shared_topk_indices,
-    torch::Tensor* output_topk_indices) {
+    torch::Tensor* output_topk_indices,
+    bool skip_topk,
+    bool output_topk) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
   // final_hidden_states_ = torch::zeros_like(x);
   int32_t input_idx = 0;
@@ -1250,11 +1333,11 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
         atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
   }
 
-  if (skip_topk_ || output_topk_) {
+  if (skip_topk || output_topk) {
     // TODO: support DSA top-k sharing for CP prefill.
     CHECK(!(cp_size_ > 1 && is_prefill))
         << "DSA top-k sharing does not support CP prefill yet.";
-    if (skip_topk_) {
+    if (skip_topk) {
       CHECK(shared_topk_indices.defined())
           << "DSA top-k sharing requires previous top-k indices.";
       node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 32) =
@@ -1294,7 +1377,7 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   }
 
   node.variantPack.outTensors.at(0) = internal_tensor_;
-  if (output_topk_) {
+  if (output_topk) {
     CHECK(output_topk_indices != nullptr && output_topk_indices->defined())
         << "DSA top-k sharing output tensor is not initialized.";
     node.variantPack.outTensors.at(node.variantPack.outTensors.size() - 1) =

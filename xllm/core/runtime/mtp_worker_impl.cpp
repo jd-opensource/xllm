@@ -141,6 +141,29 @@ bool should_reuse_mtp_topk_indices(const ModelArgs& model_args) {
          model_args.index_n_heads() > 0 && model_args.index_topk() > 0;
 }
 
+torch::Tensor select_mtp_topk_indices_for_next_step(
+    const torch::Tensor& topk_indices,
+    const SamplingParameters& sampling_params) {
+  if (!topk_indices.defined() ||
+      !sampling_params.selected_token_idxes.defined()) {
+    return topk_indices;
+  }
+  const torch::Tensor& selected_idxes = sampling_params.selected_token_idxes;
+  if (selected_idxes.numel() == 0 ||
+      topk_indices.size(0) == selected_idxes.numel()) {
+    return topk_indices;
+  }
+  CHECK_GE(topk_indices.dim(), 1)
+      << "MTP DSA top-k indices must have at least one dimension.";
+  CHECK_GT(topk_indices.size(0), selected_idxes.max().item<int64_t>())
+      << "MTP selected top-k index exceeds top-k rows.";
+  torch::Tensor index =
+      selected_idxes
+          .to(torch::dtype(torch::kLong).device(topk_indices.device()))
+          .contiguous();
+  return topk_indices.index_select(/*dim=*/0, index);
+}
+
 std::optional<ForwardOutput> run_llm_no_sync_impl(LLMWorkerImpl& worker,
                                                   const ForwardInput& input,
                                                   Stream& prepare_stream,
@@ -934,7 +957,9 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
 
     draft_outputs.emplace_back(std::move(draft_output_opt.value()));
     if (reuse_mtp_topk_indices) {
-      mtp_topk_indices = draft_outputs.back().dsa_topk_indices;
+      mtp_topk_indices = select_mtp_topk_indices_for_next_step(
+          draft_outputs.back().dsa_topk_indices,
+          current_draft_input.sampling_params);
     }
     process_draft_sample_output(draft_outputs.back().sample_output);
     if (draft_idx == num_speculative_tokens - 1) {
