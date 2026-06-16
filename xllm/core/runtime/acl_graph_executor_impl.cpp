@@ -89,7 +89,8 @@ bool AclGraph::capture(CausalLM* model,
   // have valid kv caches. Using layer 0's cache directly would be incorrect
   // if layer 0 is a GDN layer.
   auto [k_cache, v_cache] = find_attention_plan_kv_cache(kv_cache);
-  const uint32_t actual_num_tokens = tokens.size(0);
+  const uint32_t actual_num_tokens =
+      static_cast<uint32_t>(tokens.size(/*dim=*/0));
   CHECK_GE(num_tokens_, actual_num_tokens)
       << "num_tokens_ >= actual_num_tokens";
   auto graph_params = persistent_param_.update(tokens,
@@ -300,7 +301,8 @@ ModelOutput AclGraph::replay(CausalLM* model,
                              const torch::Tensor& positions,
                              std::vector<KVCache>& kv_cache,
                              const ModelInputParams& params) {
-  const uint32_t actual_num_tokens = tokens.size(0);
+  const uint32_t actual_num_tokens =
+      static_cast<uint32_t>(tokens.size(/*dim=*/0));
   CHECK_LE(actual_num_tokens, num_tokens_)
       << "num_tokens mismatch: expected <= " << num_tokens_ << ", got "
       << actual_num_tokens;
@@ -362,7 +364,8 @@ void AclGraph::prepare_replay_inputs(const torch::Tensor& tokens,
                                      const torch::Tensor& positions,
                                      std::vector<KVCache>& kv_cache,
                                      const ModelInputParams& params) {
-  const uint32_t actual_num_tokens = tokens.size(0);
+  const uint32_t actual_num_tokens =
+      static_cast<uint32_t>(tokens.size(/*dim=*/0));
   CHECK_LE(actual_num_tokens, num_tokens_)
       << "num_tokens mismatch: expected <= " << num_tokens_ << ", got "
       << actual_num_tokens;
@@ -544,11 +547,11 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     // Replay the existing graph
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in replay mode";
-    auto result = replay_graph->replay(
+    ModelOutput result = replay_graph->replay(
         model_, tokens_tensor, positions_tensor, kv_caches, params_single);
     // Handle aux_hidden_states based on options
     if (options_.enable_graph_aux_hidden_states()) {
-      auto aux_hidden_states =
+      torch::Tensor aux_hidden_states =
           active_persistent_param.aux_hidden_states(n_tokens);
       if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
         return ModelOutput(
@@ -590,10 +593,10 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
 
     // Return the output from capture (no need to replay since capture
     // already executed)
-    auto hidden_states =
+    torch::Tensor hidden_states =
         active_slot.graphs[graph_key]->get_hidden_states(n_tokens);
     if (options_.enable_graph_aux_hidden_states()) {
-      auto aux_hidden_states =
+      torch::Tensor aux_hidden_states =
           active_persistent_param.aux_hidden_states(n_tokens);
       if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
         return ModelOutput(hidden_states, torch::Tensor(), aux_hidden_states);

@@ -44,10 +44,10 @@ class ExecutorImpl {
                           std::vector<KVCache>& kv_caches,
                           const ModelInputParams& params) = 0;
 
-  virtual void prepare_graph_input(const torch::Tensor& tokens,
-                                   const torch::Tensor& positions,
-                                   std::vector<KVCache>& kv_caches,
-                                   const ModelInputParams& params) {}
+  virtual void prepare_graph_input(const torch::Tensor& /*tokens*/,
+                                   const torch::Tensor& /*positions*/,
+                                   std::vector<KVCache>& /*kv_caches*/,
+                                   const ModelInputParams& /*params*/) {}
 };
 
 }  // namespace xllm

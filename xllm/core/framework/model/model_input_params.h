@@ -906,7 +906,8 @@ struct GraphInput {
 #if defined(USE_NPU)
     out.acl_graph_task_update_context = acl_graph_task_update_context;
 #endif
-    out.input_tokens_override = safe_to(input_tokens_override, device, true);
+    out.input_tokens_override =
+        safe_to(input_tokens_override, device, /*non_blocking=*/true);
     return out;
   }
 };
