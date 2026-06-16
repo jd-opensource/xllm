@@ -36,7 +36,6 @@ class SpeculativeEngineBase : public Engine {
 
   ~SpeculativeEngineBase() override;
 
-  bool init() override;
   bool init(MasterStatus master_status) override;
 
   // step the engine forward
@@ -88,8 +87,7 @@ class SpeculativeEngineBase : public Engine {
                       const int32_t src_kv_split_size = 1) override;
 
  protected:
-  SpeculativeEngineBase(const runtime::Options& options,
-                        bool use_draft_engine);
+  SpeculativeEngineBase(const runtime::Options& options, bool use_draft_engine);
 
  private:
   bool init_model(MasterStatus master_status);

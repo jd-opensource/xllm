@@ -48,21 +48,26 @@ SpeculativeEngineBase<TargetEngine>::SpeculativeEngineBase(
   dist_options.enable_speculative_decode(true);
   dist_manager_ = std::make_shared<DistManager>(dist_options);
 
-  runtime::Options engine_options = options_;
-  engine_options.num_decoding_tokens(options.num_speculative_tokens() + 1);
-  engine_ = std::make_unique<TargetEngine>(engine_options, dist_manager_);
+  runtime::Options target_engine_options = options_;
+  target_engine_options.num_decoding_tokens(options.num_speculative_tokens() +
+                                            1);
+  engine_ =
+      std::make_unique<TargetEngine>(target_engine_options, dist_manager_);
 
   if (use_draft_engine_) {
     // draft engine
-    runtime::Options draft_options = engine_options;
-    draft_options.model_path(options_.draft_model_path().value_or(""))
+    // In vlm mtp case, we'd like to use llm backend instead of vlm backend for
+    // draft engine.
+    runtime::Options draft_engine_options = options_;
+    draft_engine_options.model_path(options_.draft_model_path().value_or(""))
         .devices(options.draft_devices())
         .backend("llm")
         .num_decoding_tokens(1)
         .enable_speculative_decode(/*enable_speculative_decode=*/false)
         .enable_graph(/*enable_graph=*/false)
         .is_draft_engine(true);
-    draft_engine_ = std::make_unique<LLMEngine>(draft_options, dist_manager_);
+    draft_engine_ =
+        std::make_unique<LLMEngine>(draft_engine_options, dist_manager_);
 
     // Currently target and draft engines must use the same device list.
     if (options.devices() != options.draft_devices()) {
@@ -76,11 +81,6 @@ SpeculativeEngineBase<TargetEngine>::SpeculativeEngineBase(
 SuffixSpeculativeEngine::SuffixSpeculativeEngine(
     const runtime::Options& options)
     : SpeculativeEngineBase<LLMEngine>(options, /*use_draft_engine=*/false) {}
-
-template <typename TargetEngine>
-bool SpeculativeEngineBase<TargetEngine>::init() {
-  return init(MasterStatus::WAKEUP);
-}
 
 template <typename TargetEngine>
 bool SpeculativeEngineBase<TargetEngine>::init(MasterStatus master_status) {
@@ -98,14 +98,7 @@ bool SpeculativeEngineBase<TargetEngine>::init(MasterStatus master_status) {
 template <typename TargetEngine>
 bool SpeculativeEngineBase<TargetEngine>::init_model(
     MasterStatus master_status) {
-  bool target_initialized = false;
-  if constexpr (std::is_same_v<TargetEngine, VLMEngine>) {
-    (void)master_status;
-    target_initialized = engine_->init_model();
-  } else {
-    target_initialized = engine_->init_model(master_status);
-  }
-  if (!target_initialized) {
+  if (!engine_->init_model(master_status)) {
     return false;
   }
 

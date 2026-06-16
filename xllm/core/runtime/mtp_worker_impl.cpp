@@ -383,18 +383,6 @@ void check_mtp_decode_states(
     CHECK(state.embedding.defined())
         << "MTP decode target state embedding is undefined, request_id="
         << request_ids[i];
-    if (state.token_id != token_id) {
-      LOG(ERROR) << "[MTP_DECODE_STATE_MISMATCH] seq_id=" << i
-                 << ", request_id=" << request_ids[i]
-                 << ", input_token_id=" << token_id
-                 << ", cached_token_id=" << state.token_id
-                 << ", cached_position_offset=" << state.position_offset
-                 << ", cached_prev_token_id=" << state.prev_token_id
-                 << ", all_draft_accepted=" << state.all_draft_accepted
-                 << ", token_ids_host="
-                 << summarize_int_tensor(token_ids_host)
-                 << ", decode_states=" << summarize_decode_states(states);
-    }
     if (token_id < 0) {
       CHECK(allow_overlap_fake_token)
           << "MTP decode fake token is only allowed with schedule overlap, "
@@ -405,8 +393,14 @@ void check_mtp_decode_states(
       continue;
     }
     CHECK_EQ(state.token_id, token_id)
-        << "MTP decode target state token mismatch, request_id="
-        << request_ids[i];
+        << "[MTP_DECODE_STATE_MISMATCH] seq_id=" << i
+        << ", request_id=" << request_ids[i] << ", input_token_id=" << token_id
+        << ", cached_token_id=" << state.token_id
+        << ", cached_position_offset=" << state.position_offset
+        << ", cached_prev_token_id=" << state.prev_token_id
+        << ", all_draft_accepted=" << state.all_draft_accepted
+        << ", token_ids_host=" << summarize_int_tensor(token_ids_host)
+        << ", decode_states=" << summarize_decode_states(states);
   }
 }
 
@@ -1085,21 +1079,18 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
   CHECK_EQ(last_states.size(),
            input.input_params.embedding.embedding_ids.size())
       << "decode target state count mismatch";
-  VLOG(1) << "[MTP_DECODE_INPUT] num_sequences="
-          << input.input_params.meta.num_sequences
-          << ", token_ids_host=" << summarize_int_tensor(input.token_ids_host)
-          << ", q_seq_lens="
-          << summarize_int32_vector(
-                 input.input_params.attention.host.q_seq_lens)
-          << ", kv_seq_lens="
-          << summarize_int32_vector(
-                 input.input_params.attention.host.kv_seq_lens)
-          << ", embedding_ids="
-          << summarize_int32_vector(
-                 input.input_params.embedding.embedding_ids)
-          << ", request_ids="
-          << summarize_string_vector(
-                 input.input_params.embedding.request_ids);
+  VLOG(1)
+      << "[MTP_DECODE_INPUT] num_sequences="
+      << input.input_params.meta.num_sequences
+      << ", token_ids_host=" << summarize_int_tensor(input.token_ids_host)
+      << ", q_seq_lens="
+      << summarize_int32_vector(input.input_params.attention.host.q_seq_lens)
+      << ", kv_seq_lens="
+      << summarize_int32_vector(input.input_params.attention.host.kv_seq_lens)
+      << ", embedding_ids="
+      << summarize_int32_vector(input.input_params.embedding.embedding_ids)
+      << ", request_ids="
+      << summarize_string_vector(input.input_params.embedding.request_ids);
   VLOG(1) << "[MTP_DECODE_CACHE] states="
           << summarize_decode_states(last_states);
   check_mtp_decode_states(last_states,
@@ -1237,16 +1228,15 @@ void MTPWorkerImpl::write_target_context_to_cache(
   const bool has_multi_token_accept =
       has_accepted_prefix_longer_than_one(validate_output.next_tokens);
   if (has_multi_token_accept) {
-    LOG(INFO) << "[MTP_ACCEPTED_PREFIX] multi-token accepted prefix detected, "
-              << "num_speculative_tokens=" << options_.num_speculative_tokens()
-              << ", embedding_ids="
-              << summarize_int32_vector(
-                     input.input_params.embedding.embedding_ids)
-              << ", request_ids="
-              << summarize_string_vector(
-                     input.input_params.embedding.request_ids)
-              << ", accepted_tokens="
-              << summarize_accepted_tokens(validate_output.next_tokens);
+    LOG(INFO)
+        << "[MTP_ACCEPTED_PREFIX] multi-token accepted prefix detected, "
+        << "num_speculative_tokens=" << options_.num_speculative_tokens()
+        << ", embedding_ids="
+        << summarize_int32_vector(input.input_params.embedding.embedding_ids)
+        << ", request_ids="
+        << summarize_string_vector(input.input_params.embedding.request_ids)
+        << ", accepted_tokens="
+        << summarize_accepted_tokens(validate_output.next_tokens);
   } else {
     VLOG(1) << "[MTP_ACCEPTED_PREFIX] accepted_tokens="
             << summarize_accepted_tokens(validate_output.next_tokens);
@@ -1421,15 +1411,15 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
   const bool use_atb_spec_kernel =
       ::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel() ||
       use_qwen3_5_spec_verify_path();
-  LOG_FIRST_N(INFO, 4)
-      << "[MTP_VALIDATE_LAYOUT] use_atb_spec_kernel=" << use_atb_spec_kernel
-      << ", original_num_sequences=" << num_sequences
-      << ", num_speculative_tokens=" << num_speculative_tokens
-      << ", num_val_tokens=" << num_val_tokens
-      << ", total_num_val_tokens=" << total_num_val_tokens
-      << ", layout="
-      << (use_atb_spec_kernel ? "chunked_prefill_rows"
-                              : "expanded_decode_rows");
+  LOG_FIRST_N(INFO, 4) << "[MTP_VALIDATE_LAYOUT] use_atb_spec_kernel="
+                       << use_atb_spec_kernel
+                       << ", original_num_sequences=" << num_sequences
+                       << ", num_speculative_tokens=" << num_speculative_tokens
+                       << ", num_val_tokens=" << num_val_tokens
+                       << ", total_num_val_tokens=" << total_num_val_tokens
+                       << ", layout="
+                       << (use_atb_spec_kernel ? "chunked_prefill_rows"
+                                               : "expanded_decode_rows");
   specBuilder::DecodeBuildBuffers buf;
   buf.out_token_ids.reserve(total_num_val_tokens);
   buf.out_positions.reserve(input.positions_host.dim() == 2

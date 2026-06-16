@@ -72,7 +72,7 @@ VLMMaster::VLMMaster(const Options& options)
     : Master(options,
              should_use_ssm_engine(options) ? EngineType::VLMSSM
                                             : EngineType::VLM) {
-  CHECK(engine_->init());
+  CHECK(engine_->init(master_status_));
 
   model_args_ = engine_->model_args();
 
