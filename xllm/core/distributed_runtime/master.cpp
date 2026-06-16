@@ -50,7 +50,6 @@ limitations under the License.
 #include "rec_engine.h"
 #include "rec_master.h"
 #include "speculative_engine.h"
-#include "util/device_name_utils.h"
 #include "util/model_config_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
