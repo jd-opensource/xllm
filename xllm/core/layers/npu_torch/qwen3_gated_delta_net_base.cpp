@@ -378,49 +378,6 @@ torch::Tensor run_causal_conv1d_graph_update(
   return output;
 }
 
-torch::Tensor run_spec_verify_conv(const torch::Tensor& mixed_qkv,
-                                   const torch::Tensor& conv_cache,
-                                   const torch::Tensor& logical_state_indices,
-                                   const torch::Tensor& num_accepted_tokens,
-                                   const torch::Tensor& q_cu_seq_lens,
-                                   const torch::Tensor& conv_weight,
-                                   int32_t conv_kernel_size) {
-  const int64_t batch_size = mixed_qkv.size(0);
-  const int64_t seq_len = mixed_qkv.size(2);
-  const int64_t expanded_state_len = conv_cache.size(1);
-  CHECK_EQ(expanded_state_len, conv_kernel_size - 1 + seq_len - 1)
-      << "unexpected speculative conv cache len, expected "
-      << (conv_kernel_size - 1 + seq_len - 1) << ", got " << expanded_state_len;
-
-  xllm::kernel::CausalConv1dUpdateParams conv1d_params;
-  conv1d_params.x = mixed_qkv.transpose(1, 2)
-                        .reshape({batch_size * seq_len, mixed_qkv.size(1)})
-                        .contiguous();
-  conv1d_params.conv_state = conv_cache.transpose(1, 2);
-  conv1d_params.weight = conv_weight;
-  conv1d_params.activation = true;
-  conv1d_params.conv_state_indices =
-      expand_sequence_tensor_to_batch(
-          logical_state_indices, batch_size, "logical_state_indices")
-          .contiguous();
-  conv1d_params.num_accepted_tokens =
-      expand_sequence_tensor_to_batch(
-          num_accepted_tokens.to(mixed_qkv.device(), torch::kInt32),
-          batch_size,
-          "num_accepted_tokens")
-          .contiguous();
-  conv1d_params.query_start_loc = q_cu_seq_lens;
-  conv1d_params.max_query_len = static_cast<int32_t>(seq_len);
-
-  torch::Tensor conv_output =
-      xllm::kernel::causal_conv1d_update(conv1d_params)
-          .view({batch_size, seq_len, mixed_qkv.size(1)})
-          .transpose(1, 2)
-          .contiguous();
-
-  return conv_output;
-}
-
 torch::Tensor run_spec_verify_gated_delta_rule(
     torch::Tensor query,
     torch::Tensor key,

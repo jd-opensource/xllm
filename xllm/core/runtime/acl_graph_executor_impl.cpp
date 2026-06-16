@@ -67,8 +67,7 @@ bool AclGraph::capture(CausalLM* model,
                        const torch::Tensor& positions,
                        const ModelInputParams& params,
                        std::vector<KVCache>& kv_cache,
-                       uint32_t bucket_num_tokens,
-                       const ModelArgs& args) {
+                       uint32_t bucket_num_tokens) {
   // Save bucket num_tokens for this graph instance
   num_tokens_ = bucket_num_tokens;
 
@@ -522,8 +521,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
                                      positions_tensor,
                                      params_single,
                                      kv_caches,
-                                     bucket_num_tokens,
-                                     args_);
+                                     bucket_num_tokens);
   } catch (const std::exception& e) {
     LOG(ERROR) << "ACL graph capture threw exception for bucket num_tokens="
                << bucket_num_tokens << ": " << e.what()
