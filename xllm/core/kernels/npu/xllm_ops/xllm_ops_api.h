@@ -205,10 +205,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> moe_gating_top_k_hash(
     int64_t norm_type,
     bool out_flag);
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor> moe_gating_top_k(
-    const at::Tensor& x,
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> moe_gating_top_k(
+    const torch::Tensor& x,
     int64_t k,
-    const c10::optional<at::Tensor>& bias,
+    const std::optional<torch::Tensor>& bias,
     int64_t k_group,
     int64_t group_count,
     double routed_scaling_factor,

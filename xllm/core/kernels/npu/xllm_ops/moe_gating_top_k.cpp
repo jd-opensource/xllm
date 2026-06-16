@@ -15,6 +15,8 @@ limitations under the License.
 
 #include <torch/library.h>
 
+#include <optional>
+
 #include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
 #include "xllm_ops_api.h"
 
@@ -22,67 +24,61 @@ namespace xllm::kernel::npu {
 namespace {
 
 void check_moe_gating_top_k_shape_and_dtype(
-    const at::Tensor& x,
-    const c10::optional<at::Tensor>& bias,
+    const torch::Tensor& x,
+    const std::optional<torch::Tensor>& bias,
     int64_t k) {
-  TORCH_CHECK(x.dim() == 2,
-              "Input tensor x's dim num should be 2, actual ",
-              x.dim(),
-              ".");
-  TORCH_CHECK(x.size(1) > 0,
-              "Input tensor x's expert dim should be positive, actual ",
-              x.size(1),
-              ".");
-  TORCH_CHECK(k > 0, "Attribute k should be greater than 0, actual ", k, ".");
-  TORCH_CHECK(k <= x.size(1),
-              "Attribute k should be no greater than x.shape[-1], actual k is ",
-              k,
-              ", x.shape[-1] is ",
-              x.size(1),
-              ".");
-  TORCH_CHECK(x.dtype() == at::kFloat || x.dtype() == at::kHalf ||
-                  x.dtype() == at::kBFloat16,
-              "x should be FLOAT16, BFLOAT16, or FLOAT32.");
+  CHECK_EQ(x.dim(), 2) << "Input tensor x's dim num should be 2, actual "
+                       << x.dim() << ".";
+  CHECK_GT(x.size(1), 0)
+      << "Input tensor x's expert dim should be positive, actual " << x.size(1)
+      << ".";
+  CHECK_GT(k, 0) << "Attribute k should be greater than 0, actual " << k << ".";
+  CHECK_LE(k, x.size(1))
+      << "Attribute k should be no greater than x.shape[-1], actual k is " << k
+      << ", x.shape[-1] is " << x.size(1) << ".";
+  CHECK(x.dtype() == torch::kFloat || x.dtype() == torch::kHalf ||
+        x.dtype() == torch::kBFloat16)
+      << "x should be FLOAT16, BFLOAT16, or FLOAT32.";
 
   if (bias.has_value()) {
-    const at::Tensor& bias_tensor = bias.value();
-    TORCH_CHECK(bias_tensor.dtype() == x.dtype(),
-                "bias's dtype should be equal to x's dtype.");
-    TORCH_CHECK(bias_tensor.dim() == 1,
-                "bias's dim num should be 1, actual ",
-                bias_tensor.dim(),
-                ".");
-    TORCH_CHECK(bias_tensor.size(0) == x.size(1),
-                "bias's first dim should be equal to x's expert dim.");
+    const torch::Tensor& bias_tensor = bias.value();
+    CHECK_EQ(bias_tensor.dtype(), x.dtype())
+        << "bias's dtype should be equal to x's dtype.";
+    CHECK_EQ(bias_tensor.dim(), 1)
+        << "bias's dim num should be 1, actual " << bias_tensor.dim() << ".";
+    CHECK_EQ(bias_tensor.size(0), x.size(1))
+        << "bias's first dim should be equal to x's expert dim.";
   }
 }
 
-c10::optional<at::Tensor> defined_tensor_or_nullopt(
-    const c10::optional<at::Tensor>& tensor) {
+std::optional<torch::Tensor> defined_tensor_or_nullopt(
+    const std::optional<torch::Tensor>& tensor) {
   if (tensor.has_value() && tensor->defined()) {
     return tensor.value();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
-at::Tensor construct_moe_gating_top_k_y_tensor(const at::Tensor& x, int64_t k) {
-  return at::empty({x.size(0), k}, x.options().dtype(x.dtype()));
+torch::Tensor construct_moe_gating_top_k_y_tensor(const torch::Tensor& x,
+                                                  int64_t k) {
+  return torch::empty({x.size(0), k}, x.options().dtype(x.dtype()));
 }
 
-at::Tensor construct_moe_gating_top_k_expert_idx_tensor(const at::Tensor& y) {
-  return at::empty(y.sizes(), y.options().dtype(at::kInt));
+torch::Tensor construct_moe_gating_top_k_expert_idx_tensor(
+    const torch::Tensor& y) {
+  return torch::empty(y.sizes(), y.options().dtype(torch::kInt));
 }
 
-at::Tensor construct_moe_gating_top_k_out_tensor(const at::Tensor& x) {
-  return at::empty(x.sizes(), x.options().dtype(at::kFloat));
+torch::Tensor construct_moe_gating_top_k_out_tensor(const torch::Tensor& x) {
+  return torch::empty(x.sizes(), x.options().dtype(torch::kFloat));
 }
 
 }  // namespace
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor> moe_gating_top_k(
-    const at::Tensor& x,
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> moe_gating_top_k(
+    const torch::Tensor& x,
     int64_t k,
-    const c10::optional<at::Tensor>& bias,
+    const std::optional<torch::Tensor>& bias,
     int64_t k_group,
     int64_t group_count,
     double routed_scaling_factor,
@@ -91,15 +87,18 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> moe_gating_top_k(
     int64_t renorm,
     int64_t norm_type,
     bool out_flag) {
-  const c10::optional<at::Tensor> bias_opt = defined_tensor_or_nullopt(bias);
+  const std::optional<torch::Tensor> bias_opt = defined_tensor_or_nullopt(bias);
   check_moe_gating_top_k_shape_and_dtype(x, bias_opt, k);
-  at::Tensor y = construct_moe_gating_top_k_y_tensor(x, k);
-  at::Tensor expert_idx = construct_moe_gating_top_k_expert_idx_tensor(y);
-  at::Tensor out = construct_moe_gating_top_k_out_tensor(x);
+  torch::Tensor y = construct_moe_gating_top_k_y_tensor(x, k);
+  torch::Tensor expert_idx = construct_moe_gating_top_k_expert_idx_tensor(y);
+  torch::Tensor out = construct_moe_gating_top_k_out_tensor(x);
+  const c10::optional<torch::Tensor> bias_for_aclnn =
+      bias_opt.has_value() ? c10::optional<torch::Tensor>(bias_opt.value())
+                           : c10::nullopt;
 
   EXEC_NPU_CMD(aclnnMoeGatingTopK,
                x,
-               bias_opt,
+               bias_for_aclnn,
                k,
                k_group,
                group_count,
