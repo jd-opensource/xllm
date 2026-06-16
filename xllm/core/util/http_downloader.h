@@ -65,4 +65,13 @@ class BRpcDownloader : public HttpDownloader {
       channels_;
 };
 
+// Parse a JSON string of headers into a key-value map.
+// Returns empty map on empty input or parse failure.
+// Exposed for testing.
+std::unordered_map<std::string, std::string> parse_headers_json(
+    const std::string& raw);
+
+// Parse the --mm_download_headers gflag. Cached after first call.
+std::unordered_map<std::string, std::string> parse_global_headers();
+
 }  // namespace xllm
