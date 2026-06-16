@@ -1,11 +1,19 @@
-# 使用 xLLM 在 Ascend A3设备 推理 GLM-5/5.1/5.2 - W8A8/W4A8/BF16 基座模型
+# 使用 xLLM 在 Ascend A3设备 推理 GLM-5/5.1/5.2 - BF16/W8A8/W4A8 基座模型
 
 + 源码地址：https://github.com/jd-opensource/xllm
 
 + 国内可用: https://gitcode.com/xLLM-AI/xllm
 
-+ 权重下载: [modelscope-GLM-5-W8A8](https://www.modelscope.cn/models/Eco-Tech/GLM-5-W8A8-xLLM-0403/files)
-  
++ 权重下载: 
+
+  [modelscope-GLM-5-W8A8](https://www.modelscope.cn/models/Eco-Tech/GLM-5-W8A8-xLLM-0403/files)
+
+  [modelscope-GLM-5.1-W8A8](https://www.modelscope.cn/models/Eco-Tech/GLM-5.1-W8A8-xLLM/files)
+
+  [modelscope-GLM-5.1-W4A8](https://www.modelscope.cn/models/Eco-Tech/GLM-5.1-w4a8)
+
+  [modelscope-GLM-5.2-W8A8](https://www.modelscope.cn/models/Eco-Tech/GLM-5.2-W8A8/files)
+
 ## 1.拉取镜像环境
 
 首先下载xLLM提供的镜像：
@@ -62,7 +70,7 @@ yum install numactl
 执行编译，在`build/`下生成可执行文件`build/xllm/core/server/xllm`：
 
 ```bash
-python setup.py build
+python setup.py build --device npu
 ```
 
 ## 3.启动模型
@@ -76,11 +84,11 @@ python -c "import torch_npu
 for i in range(16):torch_npu.npu.set_device(i)"
 ```
 
-### 启动前CHECK
+### 导出MTP权重
 
-若权重为W4A8，模型config中需要确认有字段："quantize": "w4a8_dynamic"
-若权重为W8A8，模型config中需要确认有字段："quantize": "w8a8_dynamic"
-(后续导出的mtp权重也遵守该规则，如GLM5.2的mtp权重一般不量化，此时要保证没有quantize字段或值为空)
+```bash
+python tools/export_mtp.py --input-dir ${W4A8/W8A8权重目录} --output-dir ${导出MTP权重目录}
+```
 
 ### 环境变量
 
@@ -121,9 +129,9 @@ BATCH_SIZE=256
 XLLM_PATH="./myxllm/xllm/build/xllm/core/server/xllm"
 #推理入口文件路径（上一步中编译产物）
 MODEL_PATH=/path/to/GLM-5.2-W4A8/
-#模型路径（此处为int4量化的Glm-5.2）
-DRAFT_MODEL_PATH=/path/to/GLM-5.2-W4A8-MTP/
-#Glm-5/2 导出的mtp权重（后面有导出指导）
+#模型路径（以Glm-5.2-w4a8为例）
+DRAFT_MODEL_PATH=/path/to/GLM-5.2-MTP/
+#前面导出的mtp权重
 
 MASTER_NODE_ADDR="11.87.49.110:10015"
 LOCAL_HOST="11.87.49.110"
@@ -138,7 +146,7 @@ do
   PORT=$((START_PORT + i))
   DEVICE=$((START_DEVICE + i))
   LOG_FILE="$LOG_DIR/node_$i.log"
-  #可选：numactl绑核
+  #可选：numactl绑核 (NUMA亲和性查询命令： npu-smi info -t topo)
   #nohup numactl -C $((DEVICE*40))-$((DEVICE*40+39)) $XLLM_PATH \
   nohup $XLLM_PATH \
     --model $MODEL_PATH \
@@ -147,15 +155,16 @@ do
     --master_node_addr=$MASTER_NODE_ADDR \
     --nnodes=$NNODES \
     --node_rank=$i \
-    --max_memory_utilization=0.85 \
+    --max_memory_utilization=0.92 \
     --max_tokens_per_batch=8192 \
     --max_seqs_per_batch=32 \
     --block_size=128 \
-    --enable_prefix_cache=false \
-    --enable_chunked_prefill=false \
+    --enable_prefix_cache=true \
+    --enable_chunked_prefill=true \
     --communication_backend="hccl" \
     --enable_schedule_overlap=false \
-    --enable_graph=true \
+    --enable_graph=false \
+    --acl_graph_decode_batch_size_limit=4 \
     --draft_model=$DRAFT_MODEL_PATH \
     --draft_devices="npu:$DEVICE" \
     --num_speculative_tokens=3 \
@@ -164,7 +173,6 @@ do
     > $LOG_FILE 2>&1 &
 done
 
-# numactl -C xxxxx          亲和性绑核(NUMA亲和性查询命令： npu-smi info -t topo)
 #--max_memory_utilization   单卡最大显存占用比例
 #--max_tokens_per_batch     单batch最大token数  （主要限制prefill）
 #--max_seqs_per_batch       单batch最大请求数   （主要限制decode）
@@ -172,7 +180,8 @@ done
 #--enable_schedule_overlap  开启异步调度
 #--enable_prefix_cache      开启prefix_cache
 #--enable_chunked_prefill   开启chunked_prefill
-#--enable_graph             开启aclgraph
+#--enable_graph             开启aclgraph(需要额外显存，单机拉起w8a8建议关闭)
+#--acl_graph_decode_batch_size_limit    抓图的最大bs，当前需<= 32 / (预测token数 + 1)
 #--draft_model              mtp - mtp权重路径
 #--draft_devices            mtp - mtp推理设备(与主模型同一)
 #--num_speculative_tokens   mtp - 预测token数
@@ -220,13 +229,17 @@ for (( i=0; i<$LOCAL_NODES; i++ ))do
     --node_rank=$i \
     --max_memory_utilization=0.85 \
     --max_tokens_per_batch=8192 \
-    --max_seqs_per_batch=4 \
+    --max_seqs_per_batch=128 \
     --block_size=128 \
-    --enable_prefix_cache=false \
-    --enable_chunked_prefill=false \
+    --enable_prefix_cache=true \
+    --enable_chunked_prefill=true \
     --communication_backend="hccl" \
     --enable_schedule_overlap=false \
     --enable_graph=true \
+    --acl_graph_decode_batch_size_limit=4 \
+    --draft_model=$DRAFT_MODEL_PATH \
+    --draft_devices="npu:$DEVICE" \
+    --num_speculative_tokens=3 \
     --ep_size=32 \
     --dp_size=4 \
     --rank_tablefile=/yourPath/ranktable.json \
@@ -259,13 +272,17 @@ for (( i=0; i<$LOCAL_NODES; i++ ))do
     --node_rank=$((i + LOCAL_NODES)) \
     --max_memory_utilization=0.85 \
     --max_tokens_per_batch=8192 \
-    --max_seqs_per_batch=4 \
+    --max_seqs_per_batch=128 \
     --block_size=128 \
-    --enable_prefix_cache=false \
-    --enable_chunked_prefill=false \
+    --enable_prefix_cache=true \
+    --enable_chunked_prefill=true \
     --communication_backend="hccl" \
     --enable_schedule_overlap=false \
     --enable_graph=true \
+    --acl_graph_decode_batch_size_limit=4 \
+    --draft_model=$DRAFT_MODEL_PATH \
+    --draft_devices="npu:$DEVICE" \
+    --num_speculative_tokens=3 \
     --ep_size=32 \
     --dp_size=4 \
     --rank_tablefile=/yourPath/ranktable.json \
