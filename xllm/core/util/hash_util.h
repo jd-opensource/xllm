@@ -32,7 +32,12 @@ constexpr uint32_t XXH3_128BITS_HASH_VALUE_LEN = sizeof(XXH128_hash_t);
 struct XXH3Key {
   uint8_t data[XXH3_128BITS_HASH_VALUE_LEN];
 
-  XXH3Key() {}
+  // Zero-initialize `data` so a default-constructed key never holds
+  // uninitialized bytes. Some call sites (e.g. shared-memory serialization of
+  // MMItemState) copy `data` out unconditionally, and reading uninitialized
+  // memory is undefined behavior. Hot-path callers overwrite `data` right
+  // away, so the cost is a negligible 16-byte clear.
+  XXH3Key() : data{} {}
   XXH3Key(const uint8_t* const input_data) {
     std::memcpy(data, input_data, XXH3_128BITS_HASH_VALUE_LEN);
   }
