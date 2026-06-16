@@ -45,6 +45,8 @@ DECLARE_int32(device_id);
 
 DECLARE_int32(limit_image_per_prompt);
 
+DECLARE_string(mm_download_headers);
+
 // --- kvcache config ---
 DECLARE_int32(block_size);
 DECLARE_int64(max_cache_size);

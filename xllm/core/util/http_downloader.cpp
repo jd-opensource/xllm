@@ -43,10 +43,6 @@ std::unordered_map<std::string, std::string> parse_global_headers() {
   static const std::unordered_map<std::string, std::string> cached =
       parse_headers_json(
           ModelConfig::get_instance().mm_download_headers());
-  if (!cached.empty()) {
-    LOG(INFO) << "Loaded " << cached.size()
-              << " mm_download_headers from config";
-  }
   return cached;
 }
 
