@@ -46,6 +46,29 @@ constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
 
 namespace {
 
+// The TP consensus group whose post-attention all-reduce the draft decoder
+// runs on. Speculative sampling results must be unified across exactly this
+// group so the next draft-extend step lays out identical rows on every rank
+// (see ADR-0001). Falls back to the global process group when no dedicated TP
+// group exists.
+ProcessGroup* spec_consensus_group(const ParallelArgs& parallel_args) {
+  return parallel_args.tp_group_ != nullptr ? parallel_args.tp_group_
+                                            : parallel_args.process_group_;
+}
+
+// In-place unify a speculative-decoding token tensor across the consensus group
+// to root_rank's copy. No-op for single-rank groups or undefined tensors. Must
+// be issued under the stream that produced the tensor so the collective orders
+// after the sampler kernel without a host sync.
+void unify_spec_tokens_across_tp(torch::Tensor& tokens,
+                                 ProcessGroup* pg,
+                                 int32_t root_rank = 0) {
+  if (pg == nullptr || pg->world_size() <= 1 || !tokens.defined()) {
+    return;
+  }
+  pg->broadcast(tokens, root_rank);
+}
+
 int64_t get_dp_local_tp_size(const ParallelArgs& parallel_args) {
   const int64_t dp_size = std::max<int64_t>(parallel_args.dp_size(), 1);
   const int64_t cp_size = std::max<int64_t>(parallel_args.cp_size(), 1);
@@ -1085,6 +1108,21 @@ std::optional<ForwardOutput> MTPWorkerImpl::run_validate(
       validate(input.sampling_params, draft_outputs, target_output);
   COUNTER_ADD(speculative_execution_latency_seconds_validation,
               timer.elapsed_seconds());
+
+  // Catch-all for cross-rank RNG divergence: unify the accepted next_tokens to
+  // the consensus group's rank 0 so all_draft_accepted and the next
+  // draft-extend row layout agree across ranks (see ADR-0001). Issued under
+  // compute_stream_ (the sampler kernel's stream) so the collective orders
+  // after the kernel without a host sync; must run before the device->host copy
+  // below. Only on MLU + overlap; collective is called unconditionally on every
+  // rank to avoid hangs.
+  if (get_optimization_config().enable_spec_token_broadcast &&
+      enable_schedule_overlap()) {
+    c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
+    val_output.next_tokens = val_output.next_tokens.contiguous();
+    unify_spec_tokens_across_tp(val_output.next_tokens,
+                                spec_consensus_group(parallel_args_));
+  }
 
   compute_stream_->synchronize();
   val_output.next_tokens = val_output.next_tokens.to(torch::kCPU);

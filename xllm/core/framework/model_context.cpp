@@ -103,6 +103,7 @@ void ModelContext::derive_optimization_config() {
   optimization_config_.enable_fused_spec_kernel = false;
   optimization_config_.enable_fused_mla_kernel = false;
   optimization_config_.enable_fused_indexer_qk = false;
+  optimization_config_.enable_spec_token_broadcast = false;
 
   // determine whether to enable fused kernel based on backend
   std::string backend = Device::type_str();
@@ -116,6 +117,9 @@ void ModelContext::derive_optimization_config() {
     // The current implementation of fused indexer qk is missing the
     //  weights and bias loading.
     optimization_config_.enable_fused_indexer_qk = true;
+    // Unify speculative sampling results across TP ranks to guard against
+    // per-rank RNG divergence under enable_schedule_overlap (see ADR-0001).
+    optimization_config_.enable_spec_token_broadcast = true;
   }
 }
 
