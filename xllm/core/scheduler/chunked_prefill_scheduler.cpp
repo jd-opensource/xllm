@@ -672,7 +672,14 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
 
   // step-3. remaining_token_budget > 0, try to allocate more tokens to
   // prefill stage reuquests.
-  if (remaining_token_budget > 0 && latency_budget > estimate_latency) {
+  // When prefix_cache is enabled and linear attention layers exist, skip
+  // this step to preserve the max_tokens_per_chunk_for_prefill chunk limit,
+  // which is required for correct linear state alignment.
+  static const bool has_linear_attention =
+      has_linear_attention_layers(engine_->model_args());
+  const bool has_linear_cache = enable_prefix_cache_ && has_linear_attention;
+  if (remaining_token_budget > 0 && latency_budget > estimate_latency &&
+      !has_linear_cache) {
     handle_remaining_budget(latency_budget,
                             estimate_latency,
                             remaining_token_budget,
