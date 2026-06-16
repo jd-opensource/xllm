@@ -221,6 +221,7 @@ class ExtBuild(build_ext):
             f"-DDEVICE_ARCH={self.arch.upper()}",
             f"-DXLLM_ATB_LAYERS_SOURCE_DIR={os.path.join(self.base_dir, 'third_party', 'xllm_atb_layers')}",
             f"-DCMAKE_JOB_POOLS=archive={archive_jobs}",
+            "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         ]
 
         if self.device == "npu":

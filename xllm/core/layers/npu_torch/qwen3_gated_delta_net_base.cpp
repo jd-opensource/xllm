@@ -334,7 +334,7 @@ torch::Tensor run_spec_verify_conv(const torch::Tensor& mixed_qkv,
   conv1d_params.x = mixed_qkv.transpose(1, 2)
                         .reshape({batch_size * seq_len, mixed_qkv.size(1)})
                         .contiguous();
-  conv1d_params.conv_state = conv_cache.transpose(1, 2);
+  conv1d_params.conv_state = conv_cache;
   conv1d_params.weight = conv_weight;
   conv1d_params.activation = true;
   conv1d_params.conv_state_indices =
@@ -576,8 +576,6 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   } else if (use_spec_verify) {
     CHECK(input_params.num_accepted_tokens.defined())
         << "num_accepted_tokens must be populated for Qwen3.5 spec verify";
-    torch::Tensor conv_weight_for_update =
-        conv_weight.transpose(0, 1).contiguous();
     torch::Tensor pre_conv_mixed_qkv = mixed_qkv.transpose(1, 2);
     mixed_qkv =
         run_spec_verify_conv(pre_conv_mixed_qkv,
@@ -585,15 +583,13 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
                              logical_state_indices,
                              input_params.num_accepted_tokens.to(device),
                              attn_metadata.q_cu_seq_lens,
-                             conv_weight_for_update,
+                             conv_weight,
                              conv_kernel_size_);
   } else {
-    torch::Tensor conv_weight_for_update =
-        conv_weight.transpose(0, 1).contiguous();
     xllm::kernel::CausalConv1dUpdateParams conv1d_params;
     conv1d_params.x = mixed_qkv.reshape({-1, mixed_qkv.size(-1)});
-    conv1d_params.conv_state = conv_cache.transpose(1, 2);
-    conv1d_params.weight = conv_weight_for_update;
+    conv1d_params.conv_state = conv_cache;
+    conv1d_params.weight = conv_weight;
     conv1d_params.conv_state_indices = logical_state_indices;
     conv1d_params.block_idx_last_scheduled_token =
         std::optional<torch::Tensor>();

@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <optional>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -71,5 +72,56 @@ split_qkv_rmsnorm_mrope(const torch::Tensor& qkvg,
 bool has_split_qkv_rmsnorm_mrope_specialization(int64_t num_q_heads,
                                                 int64_t num_kv_heads,
                                                 int64_t head_size);
+
+// CausalConv1D decode kernel for batched single-token decode on NPU.
+//
+// Expects tensors in kernel-native layout:
+//   x:            [batch, dim]                     contiguous, float16
+//   conv_state:   [cache_lines, state_len, dim]    contiguous, float16
+//                (in/out: last state_len positions written back)
+//   weight:       [width, dim]                     contiguous, float16
+//   bias:         [dim]                            contiguous, float16
+//   init_indices: [batch]                          contiguous, int32
+//   current_indices: [batch]                       contiguous, int32
+//   initial_state_mode: [batch]                    contiguous, int32
+//
+// All batches must have seqlen=1 (one token per batch).
+// Returns y: [batch, dim] float16.
+torch::Tensor causal_conv1d_decode(torch::Tensor& conv_state,
+                                   const torch::Tensor& x,
+                                   const torch::Tensor& weight,
+                                   const torch::Tensor& bias,
+                                   const torch::Tensor& init_indices,
+                                   const torch::Tensor& current_indices,
+                                   const torch::Tensor& initial_state_mode,
+                                   bool has_silu);
+
+// Check whether a decode kernel specialization exists for the given
+// batch_size and dim. Returns false if no compiled variant matches,
+// in which case callers should fall back to the per-batch prefill kernel.
+bool has_causal_conv1d_decode_specialization(int64_t batch_size, int64_t dim);
+
+// CausalConv1D general kernel for variable-length batches on NPU.
+//
+// Expects tensors in kernel-native layout:
+//   x:            [total_tokens, dim]               contiguous, fp16
+//   conv_state:   [cache_lines, state_len, dim]     contiguous, fp16
+//   weight:       [width, dim]                      contiguous, fp16
+//   bias:         [dim]                             contiguous, fp16
+//   cu_seqlens:   [batch+1]                         contiguous, int32
+//   init_indices: [batch]                           contiguous, int32
+//   current_indices: [batch]                        contiguous, int32
+//   initial_state_mode: [batch]                     contiguous, int32
+//
+// Returns y: [total_tokens, dim] fp16.
+torch::Tensor causal_conv1d(torch::Tensor& conv_state,
+                            const torch::Tensor& x,
+                            const torch::Tensor& weight,
+                            const torch::Tensor& bias,
+                            const torch::Tensor& cu_seqlens,
+                            const torch::Tensor& init_indices,
+                            const torch::Tensor& current_indices,
+                            const torch::Tensor& initial_state_mode,
+                            bool has_silu);
 
 }  // namespace xllm::kernel::npu::tilelang
