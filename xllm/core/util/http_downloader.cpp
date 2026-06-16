@@ -41,8 +41,7 @@ std::unordered_map<std::string, std::string> parse_headers_json(
 
 std::unordered_map<std::string, std::string> parse_global_headers() {
   static const std::unordered_map<std::string, std::string> cached =
-      parse_headers_json(
-          ModelConfig::get_instance().mm_download_headers());
+      parse_headers_json(ModelConfig::get_instance().mm_download_headers());
   return cached;
 }
 

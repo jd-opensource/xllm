@@ -15,9 +15,9 @@ limitations under the License.
 
 #include "core/util/http_downloader.h"
 
-#include "core/common/message.h"
-
 #include <gtest/gtest.h>
+
+#include "core/common/message.h"
 
 namespace xllm {
 

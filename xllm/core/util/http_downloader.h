@@ -31,18 +31,18 @@ class HttpDownloader {
   HttpDownloader() = default;
   virtual ~HttpDownloader() {}
 
-  bool fetch_data(const std::string& url,
-                  std::string& data,
-                  const std::unordered_map<std::string, std::string>& headers =
-                      {});
+  bool fetch_data(
+      const std::string& url,
+      std::string& data,
+      const std::unordered_map<std::string, std::string>& headers = {});
 
  protected:
   bool parse_url(const std::string& url, std::string& host);
-  virtual bool download(const std::string& host,
-                        const std::string& url,
-                        std::string& data,
-                        const std::unordered_map<std::string, std::string>&
-                            headers = {}) = 0;
+  virtual bool download(
+      const std::string& host,
+      const std::string& url,
+      std::string& data,
+      const std::unordered_map<std::string, std::string>& headers = {}) = 0;
 };
 
 class BRpcDownloader : public HttpDownloader {
