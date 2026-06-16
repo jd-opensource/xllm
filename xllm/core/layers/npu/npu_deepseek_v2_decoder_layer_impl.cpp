@@ -792,7 +792,7 @@ torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
     st = execute_node(prefill_node_prefixcache_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0)
         << model_name_
-        << "excute is_chunked_prefill layer fail, error code: " << st;
+        << "execute is_chunked_prefill layer fail, error code: " << st;
   } else if (input_params_new.meta.batch_forward_type.is_prefill()) {
     build_node_variant_pack(prefill_node_,
                             x,
@@ -804,7 +804,7 @@ torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
                             true);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute prefill layer fail, error code: " << st;
+                           << "execute prefill layer fail, error code: " << st;
   } else {
     const int num_tokens = x.sizes().at(0);
     // decode phase with tokens more than this limit will lead to error in
@@ -823,7 +823,7 @@ torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
                               false);
       st = execute_node(decode_node_, node_id + 1000, event, event_flag);
       LOG_IF(FATAL, st != 0)
-          << model_name_ << "excute decode layer fail, error code: " << st;
+          << model_name_ << "execute decode layer fail, error code: " << st;
     } else {
       build_node_variant_pack(decode_mla_node_,
                               x,
@@ -835,7 +835,7 @@ torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
                               false);
       st = execute_node(decode_mla_node_, node_id + 1000, event, event_flag);
       LOG_IF(FATAL, st != 0)
-          << model_name_ << "excute decode layer fail, error code: " << st;
+          << model_name_ << "execute decode layer fail, error code: " << st;
     }
   }
   return tensor_placeholder_;
