@@ -120,8 +120,6 @@ class SpeculativeEngineBase : public Engine {
   std::shared_ptr<DistManager> dist_manager_ = nullptr;
 };
 
-using SpeculativeEngine = SpeculativeEngineBase<LLMEngine>;
-
 class SuffixSpeculativeEngine : public SpeculativeEngineBase<LLMEngine> {
  public:
   explicit SuffixSpeculativeEngine(const runtime::Options& options);

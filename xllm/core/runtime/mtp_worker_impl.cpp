@@ -944,20 +944,22 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
   CHECK_EQ(last_states.size(),
            input.input_params.embedding.embedding_ids.size())
       << "decode target state count mismatch";
-  VLOG(1)
-      << "[MTP_DECODE_INPUT] num_sequences="
-      << input.input_params.meta.num_sequences
-      << ", token_ids_host=" << summarize_int_tensor(input.token_ids_host)
-      << ", q_seq_lens="
-      << summarize_int32_vector(input.input_params.attention.host.q_seq_lens)
-      << ", kv_seq_lens="
-      << summarize_int32_vector(input.input_params.attention.host.kv_seq_lens)
-      << ", embedding_ids="
-      << summarize_int32_vector(input.input_params.embedding.embedding_ids)
-      << ", request_ids="
-      << summarize_string_vector(input.input_params.embedding.request_ids);
-  VLOG(1) << "[MTP_DECODE_CACHE] states="
-          << summarize_decode_states(last_states);
+  if (VLOG_IS_ON(50)) {
+    VLOG(50)
+        << "[MTP_DECODE_INPUT] num_sequences="
+        << input.input_params.meta.num_sequences
+        << ", token_ids_host=" << summarize_int_tensor(input.token_ids_host)
+        << ", q_seq_lens="
+        << summarize_int32_vector(input.input_params.attention.host.q_seq_lens)
+        << ", kv_seq_lens="
+        << summarize_int32_vector(input.input_params.attention.host.kv_seq_lens)
+        << ", embedding_ids="
+        << summarize_int32_vector(input.input_params.embedding.embedding_ids)
+        << ", request_ids="
+        << summarize_string_vector(input.input_params.embedding.request_ids);
+    VLOG(50) << "[MTP_DECODE_CACHE] states="
+        << summarize_decode_states(last_states);
+  }
   check_mtp_decode_states(last_states,
                           input.input_params.embedding.request_ids,
                           input.token_ids_host,
@@ -1090,21 +1092,23 @@ void MTPWorkerImpl::write_target_context_to_cache(
       << "embedding_cache_ must be initialized before target cache write";
   CHECK(!input.input_params.embedding.embedding_ids.empty())
       << "target context cache write requires embedding ids";
-  const bool has_multi_token_accept =
-      has_accepted_prefix_longer_than_one(validate_output.next_tokens);
-  if (has_multi_token_accept) {
-    LOG(INFO)
-        << "[MTP_ACCEPTED_PREFIX] multi-token accepted prefix detected, "
-        << "num_speculative_tokens=" << options_.num_speculative_tokens()
-        << ", embedding_ids="
-        << summarize_int32_vector(input.input_params.embedding.embedding_ids)
-        << ", request_ids="
-        << summarize_string_vector(input.input_params.embedding.request_ids)
-        << ", accepted_tokens="
-        << summarize_accepted_tokens(validate_output.next_tokens);
-  } else {
-    VLOG(1) << "[MTP_ACCEPTED_PREFIX] accepted_tokens="
+  if (VLOG_IS_ON(50)) {
+    const bool has_multi_token_accept =
+        has_accepted_prefix_longer_than_one(validate_output.next_tokens);
+    if (has_multi_token_accept) {
+      LOG(INFO)
+          << "[MTP_ACCEPTED_PREFIX] multi-token accepted prefix detected, "
+          << "num_speculative_tokens=" << options_.num_speculative_tokens()
+          << ", embedding_ids="
+          << summarize_int32_vector(input.input_params.embedding.embedding_ids)
+          << ", request_ids="
+          << summarize_string_vector(input.input_params.embedding.request_ids)
+          << ", accepted_tokens="
+          << summarize_accepted_tokens(validate_output.next_tokens);
+    } else {
+      VLOG(50) << "[MTP_ACCEPTED_PREFIX] accepted_tokens="
             << summarize_accepted_tokens(validate_output.next_tokens);
+    }
   }
   embedding_cache_->write_target_context(
       input.input_params.embedding.embedding_ids,

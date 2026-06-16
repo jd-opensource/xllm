@@ -348,7 +348,7 @@ Master::Master(const Options& options, EngineType type)
         engine_ =
             std::make_unique<SpeculativeEngineBase<VLMEngine>>(spec_options);
       } else {
-        engine_ = std::make_unique<SpeculativeEngine>(spec_options);
+        engine_ = std::make_unique<SpeculativeEngineBase<LLMEngine>>(spec_options);
       }
     }
   } else if (type == EngineType::LLM) {
