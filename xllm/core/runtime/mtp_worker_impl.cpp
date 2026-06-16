@@ -1025,6 +1025,23 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
     if (reuse_mtp_topk_indices) {
       mtp_topk_indices = draft_outputs.back().dsa_topk_indices;
     }
+    // Unify this step's draft next_tokens across the consensus group before
+    // process_draft_sample_output() compresses the still-full [batch, vocab]
+    // probs into the cache: gathering the cached prob with a unified token
+    // yields a unified prob, so we only broadcast the [batch] token tensor (see
+    // ADR-0001). The single broadcast also feeds identical draft tokens to the
+    // next-step draft input and to the validate forward, so every TP rank's
+    // model shard consumes the same token. Same gating/stream as the validate
+    // exit; runs every step (including the last, since
+    // process_draft_sample_output precedes the draft_idx==last continue).
+    if (get_optimization_config().enable_spec_token_broadcast &&
+        enable_schedule_overlap()) {
+      c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
+      SampleOutput& draft_sample = draft_outputs.back().sample_output;
+      draft_sample.next_tokens = draft_sample.next_tokens.contiguous();
+      unify_spec_tokens_across_tp(draft_sample.next_tokens,
+                                  spec_consensus_group(parallel_args_));
+    }
     process_draft_sample_output(draft_outputs.back().sample_output);
     if (draft_idx == num_speculative_tokens - 1) {
       continue;
