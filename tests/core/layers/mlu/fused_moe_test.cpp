@@ -565,6 +565,99 @@ TEST_F(FusedMoETest, PrepRouteMatchesBaseForward) {
   verify_tensor_close(actual, expected, 1e-3, 1e-4);
 }
 
+TEST_F(FusedMoETest, ForwardSelectedMatchesRouteInfoWithPreselectedRoutes) {
+  const int64_t batch_size = 4;
+  const int64_t seq_len = 8;
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 256;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 4;
+  const int64_t topk_group = 4;
+  const int64_t top_k = 2;
+  const double route_scale = 2.5;
+
+  FusedMoE fused_moe = create_fused_moe(num_experts,
+                                        top_k,
+                                        num_expert_group,
+                                        topk_group,
+                                        route_scale,
+                                        hidden_size,
+                                        intermediate_size,
+                                        /*n_shared_experts=*/0);
+
+  std::unordered_map<std::string, torch::Tensor> weight_dict =
+      create_test_weights(num_experts, hidden_size, intermediate_size);
+  StateDict state_dict(weight_dict);
+  fused_moe->load_state_dict(state_dict);
+
+  torch::Tensor hidden_states = create_custom_input(
+      {batch_size, seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
+  torch::Tensor hidden_states_2d =
+      hidden_states.reshape({batch_size * seq_len, hidden_size});
+  FusedMoEImpl::RouteInfo route_info = fused_moe->prep_route(hidden_states_2d);
+  torch::Tensor topk_weights =
+      route_info.reduce_weight.reshape({batch_size, seq_len, top_k});
+  torch::Tensor topk_ids =
+      route_info.expert_id.reshape({batch_size, seq_len, top_k})
+          .to(torch::kLong);
+  torch::Tensor expected_weights =
+      topk_weights.reshape({batch_size * seq_len, top_k});
+  torch::Tensor expected_ids =
+      topk_ids.reshape({batch_size * seq_len, top_k}).to(torch::kInt);
+
+  torch::Tensor expected = fused_moe->forward_experts(
+      hidden_states,
+      /*enable_all2all_communication=*/false,
+      FusedMoEImpl::RouteInfo{.reduce_weight = expected_weights,
+                              .expert_id = expected_ids});
+  torch::Tensor actual =
+      fused_moe->forward_selected(hidden_states, topk_weights, topk_ids);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  EXPECT_EQ(actual.dim(), hidden_states.dim());
+  EXPECT_EQ(actual.size(0), batch_size);
+  EXPECT_EQ(actual.size(1), seq_len);
+  EXPECT_EQ(actual.size(2), hidden_size);
+  verify_tensor_close(actual, expected, 1e-3, 1e-4);
+}
+
+TEST_F(FusedMoETest, ForwardSelectedChecksRouteShape) {
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 256;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 4;
+  const int64_t topk_group = 4;
+  const int64_t top_k = 2;
+  const double route_scale = 2.5;
+
+  FusedMoE fused_moe = create_fused_moe(num_experts,
+                                        top_k,
+                                        num_expert_group,
+                                        topk_group,
+                                        route_scale,
+                                        hidden_size,
+                                        intermediate_size,
+                                        /*n_shared_experts=*/0);
+
+  torch::Tensor hidden_states = create_custom_input(
+      {3, hidden_size}, std::vector<float>(3 * hidden_size, 0.05f));
+  torch::Tensor topk_weights = torch::ones({2, top_k}, options_);
+  torch::Tensor topk_ids =
+      torch::zeros({2, top_k}, options_.dtype(torch::kInt32));
+  torch::Tensor bad_topk_weights = torch::ones({3, top_k + 1}, options_);
+
+  EXPECT_DEATH(
+      fused_moe->forward_selected(hidden_states, bad_topk_weights, topk_ids),
+      "topk_weights last dimension mismatch.*expected 2.*actual 3");
+
+  EXPECT_DEATH(
+      fused_moe->forward_selected(hidden_states, topk_weights, topk_ids),
+      "topk_weights row count mismatch.*expected 3.*actual 2");
+}
+
 TEST_F(FusedMoETest, NoReductionModeMatchesExternalReduce) {
   set_tp_ctx(/*world_size=*/2);
 
