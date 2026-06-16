@@ -148,16 +148,15 @@ void Qwen3DecoderLoader::merge_host_at_weights() {
   if (enableAddNorm_) {
     if (quantize_type_.compare("w8a8") == 0) {
       torch::ScalarType weight_fill_dtype = torch::kBFloat16;
-      int64_t weight_attn_shape = t[IN_Q_WEIGHT].size(-1);
-      int64_t weight_mlp_shape = t[IN_MLP_W2_WEIGHT].size(-1);
+      int64_t hidden_size = t[IN_NORM_WEIGHT].size(0);
       t[IN_QKV_SCALE_FILL] =
-          t[IN_Q_SCALE].repeat(weight_attn_shape).to(weight_fill_dtype);
+          t[IN_Q_SCALE].repeat(hidden_size).to(weight_fill_dtype);
       t[IN_MLP_SCALE_FILL] =
-          t[IN_MLP_W2_SCALE].repeat(weight_mlp_shape).to(weight_fill_dtype);
+          t[IN_MLP_W2_SCALE].repeat(hidden_size).to(weight_fill_dtype);
       t[IN_QKV_OFFSET_FILL] =
-          t[IN_Q_OFFSET].repeat(weight_attn_shape).to(weight_fill_dtype);
+          t[IN_Q_OFFSET].repeat(hidden_size).to(weight_fill_dtype);
       t[IN_MLP_OFFSET_FILL] =
-          t[IN_MLP_W2_OFFSET].repeat(weight_mlp_shape).to(weight_fill_dtype);
+          t[IN_MLP_W2_OFFSET].repeat(hidden_size).to(weight_fill_dtype);
     } else {
       for (auto idx : {IN_QKV_SCALE_FILL,
                        IN_QKV_OFFSET_FILL,
