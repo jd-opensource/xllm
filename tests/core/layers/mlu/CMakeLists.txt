@@ -111,6 +111,7 @@ cc_test(
     moe_gate_test.cpp
     fused_moe_test.cpp
     deepseek_v2_sparse_moe_block_test.cpp
+    deepseek_v4_sparse_moe_block_test.cpp
     tests_utils.cpp
   DEPS
     :config
