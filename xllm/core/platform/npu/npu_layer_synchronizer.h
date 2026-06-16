@@ -38,6 +38,7 @@ class NPULayerSynchronizerImpl {
   std::vector<aclrtEvent> events_;
   std::vector<std::atomic<bool>> event_record_flags_;
   const int32_t timeout_;
+  aclrtContext context_ = nullptr;
 };
 
 }  // namespace xllm
