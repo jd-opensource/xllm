@@ -36,6 +36,7 @@ limitations under the License.
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request_state.h"
 #include "util/rec_model_utils.h"
+#include "util/utils.h"
 
 namespace xllm {
 
@@ -676,6 +677,19 @@ std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
   generated_token =
       generated_token == eos_token_id ? generated_token + 1 : generated_token;
   sequence->append_token(generated_token);
+
+  // MTP decode validates a bootstrap state in the worker-side embedding cache
+  // (keyed by single block id), but profiling decode requests never run
+  // prefill, so the slot is either empty or holds a stale state from a freed
+  // warmup sequence. Attach a placeholder bootstrap embedding so the worker
+  // rewrites the slot from this sequence's appended token; numeric output is
+  // irrelevant for profiling.
+  if (num_speculative_tokens > 0) {
+    torch::ScalarType dtype =
+        util::parse_dtype(model_args.dtype(), /*device=*/std::nullopt);
+    sequence->update_mtp_bootstrap_embedding(
+        torch::zeros({model_args.hidden_size()}, torch::dtype(dtype)));
+  }
 
   CHECK(sequence->stage() == SequenceStage::DECODE)
       << "Decode profiling request is not in DECODE stage. total_length: "
