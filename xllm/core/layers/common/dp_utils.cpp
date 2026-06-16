@@ -49,6 +49,41 @@ int64_t get_tp_size(const ParallelArgs& args) {
   return args.tp_group_ ? args.tp_group_->world_size() : 1;
 }
 
+void check_selected_shapes(const torch::Tensor& hidden_states,
+                           const torch::Tensor& topk_weights,
+                           const torch::Tensor& topk_ids) {
+  CHECK_GT(hidden_states.dim(), 0) << "hidden_states must have rows";
+  CHECK_GT(topk_weights.dim(), 0) << "topk_weights must have rows";
+  CHECK_GT(topk_ids.dim(), 0) << "topk_ids must have rows";
+  CHECK_EQ(topk_weights.size(0), hidden_states.size(0))
+      << "topk_weights rows " << topk_weights.size(0)
+      << " must match hidden_states rows " << hidden_states.size(0);
+  CHECK_EQ(topk_ids.size(0), hidden_states.size(0))
+      << "topk_ids rows " << topk_ids.size(0)
+      << " must match hidden_states rows " << hidden_states.size(0);
+}
+
+void check_selected_dp(const std::vector<int32_t>& dp_token_nums,
+                       const ParallelArgs& args) {
+  CHECK(args.dp_local_process_group_ != nullptr)
+      << "dp_local_process_group_ is not initialized";
+  CHECK(!dp_token_nums.empty()) << "dp_token_nums is empty";
+
+  const int64_t group_size = args.dp_local_process_group_->world_size();
+  CHECK_EQ(static_cast<int64_t>(args.dp_size()), group_size)
+      << "dp_size " << args.dp_size()
+      << " does not match dp_local_process_group_ world_size " << group_size;
+  CHECK_EQ(static_cast<int64_t>(dp_token_nums.size()), group_size)
+      << "dp_token_nums size " << dp_token_nums.size()
+      << " does not match dp_local_process_group_ world_size " << group_size;
+}
+
+int64_t selected_dp_rank(const ParallelArgs& args) {
+  CHECK(args.dp_local_process_group_ != nullptr)
+      << "dp_local_process_group_ is not initialized";
+  return args.dp_local_process_group_->rank();
+}
+
 GatherPlan build_gather_plan(const std::vector<int32_t>& dp_tokens,
                              int64_t tp_size) {
   CHECK(!dp_tokens.empty()) << "dp_tokens is empty";
@@ -180,6 +215,10 @@ bool need_dp_moe_gather(const ParallelArgs& args, bool enable_moe_all2all) {
   return args.dp_size() > 1 && args.ep_size() > 1 && !enable_moe_all2all;
 }
 
+bool need_selected_moe_dp_gather(const ParallelArgs& args) {
+  return args.dp_size() > 1 && args.ep_size() > 1;
+}
+
 torch::Tensor gather_dp_tokens(const torch::Tensor& input,
                                const ModelInputParams& params,
                                const ParallelArgs& args) {
@@ -190,6 +229,56 @@ torch::Tensor gather_dp_tokens(const torch::Tensor& input,
   return parallel_state::gather(input,
                                 args.dp_local_process_group_,
                                 params.parallel.dp_global_token_nums);
+}
+
+SelectedMoeInputs gather_selected_moe_inputs(
+    const torch::Tensor& hidden_states,
+    const torch::Tensor& topk_weights,
+    const torch::Tensor& topk_ids,
+    const std::vector<int32_t>& dp_token_nums,
+    const ParallelArgs& args) {
+  check_selected_shapes(hidden_states, topk_weights, topk_ids);
+  if (!need_selected_moe_dp_gather(args)) {
+    return {hidden_states, topk_weights, topk_ids, false};
+  }
+
+  check_selected_dp(dp_token_nums, args);
+  const int64_t rank = selected_dp_rank(args);
+  CHECK_EQ(hidden_states.size(0), dp_token_nums[rank])
+      << "selected MoE local rows " << hidden_states.size(0)
+      << " must match dp_token_nums[" << rank << "] " << dp_token_nums[rank];
+
+  return {parallel_state::gather(
+              hidden_states, args.dp_local_process_group_, dp_token_nums),
+          parallel_state::gather(
+              topk_weights, args.dp_local_process_group_, dp_token_nums),
+          parallel_state::gather(
+              topk_ids, args.dp_local_process_group_, dp_token_nums),
+          true};
+}
+
+torch::Tensor slice_selected_moe_output(
+    torch::Tensor output,
+    const std::vector<int32_t>& dp_token_nums,
+    const ParallelArgs& args) {
+  if (!need_selected_moe_dp_gather(args)) {
+    return output;
+  }
+
+  check_selected_dp(dp_token_nums, args);
+  const int64_t rank = selected_dp_rank(args);
+  const int64_t total_rows =
+      std::accumulate(dp_token_nums.begin(), dp_token_nums.end(), int64_t{0});
+  CHECK_EQ(output.size(0), total_rows)
+      << "selected MoE output rows " << output.size(0)
+      << " must match sum of dp_token_nums " << total_rows;
+
+  int64_t start = 0;
+  for (int64_t i = 0; i < rank; ++i) {
+    start += dp_token_nums[i];
+  }
+  const int64_t end = start + dp_token_nums[rank];
+  return output.slice(0, start, end);
 }
 
 torch::Tensor get_dp_local_slice(const torch::Tensor& input,
