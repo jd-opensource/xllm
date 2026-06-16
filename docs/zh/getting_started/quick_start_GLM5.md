@@ -121,15 +121,15 @@ export HCCL_OP_EXPANSION_MODE="AIV"
 export HCCL_IF_BASE_PORT=2864
 ```
 
-## 启动命令 - GLM-5.2-W4A8
+## 启动命令 - GLM-5.2-W8A8
 
 ```bash
 BATCH_SIZE=256
 #推理最大batch数量
 XLLM_PATH="./myxllm/xllm/build/xllm/core/server/xllm"
 #推理入口文件路径（上一步中编译产物）
-MODEL_PATH=/path/to/GLM-5.2-W4A8/
-#模型路径（以Glm-5.2-w4a8为例）
+MODEL_PATH=/path/to/GLM-5.2-W8A8/
+#模型路径（以Glm-5.2-w8a8为例）
 DRAFT_MODEL_PATH=/path/to/GLM-5.2-MTP/
 #前面导出的mtp权重
 
