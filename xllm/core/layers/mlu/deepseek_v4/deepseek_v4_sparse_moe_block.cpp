@@ -64,6 +64,12 @@ void DeepseekV4SparseMoEBlockImpl::verify_loaded_weights() const {
   moe_->verify_loaded_weights();
 }
 
+FusedMoEImpl::RouteInfo DeepseekV4SparseMoEBlockImpl::prep_route(
+    torch::Tensor& hidden_states,
+    const std::optional<torch::Tensor>& input_ids) {
+  return moe_->prep_route(hidden_states, input_ids);
+}
+
 bool DeepseekV4SparseMoEBlockImpl::need_gather() const {
   return need_selected_moe_dp_gather(parallel_args_);
 }

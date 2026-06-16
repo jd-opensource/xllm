@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "framework/model/model_args.h"
@@ -44,6 +45,9 @@ class DeepseekV4SparseMoEBlockImpl final : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict);
   void verify_loaded_weights() const;
 
+  FusedMoEImpl::RouteInfo prep_route(
+      torch::Tensor& hidden_states,
+      const std::optional<torch::Tensor>& input_ids = std::nullopt);
   torch::Tensor forward_selected(const torch::Tensor& hidden_states,
                                  const torch::Tensor& topk_weights,
                                  const torch::Tensor& topk_ids,
