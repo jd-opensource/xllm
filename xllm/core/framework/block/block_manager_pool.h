@@ -15,8 +15,8 @@ limitations under the License.
 
 #pragma once
 
-#include <mutex>
 #include <queue>
+#include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -114,13 +114,32 @@ class BlockManagerPool : public KVCacheManager {
   void deallocate_single_block(Sequence* sequence, int32_t dp_rank);
   int32_t find_sticky_dp_rank(Sequence* sequence) const;
   void update_sticky_prefix_routes(Sequence* sequence, int32_t dp_rank);
+  size_t max_sticky_prefix_routes() const;
+
+  struct StickyPrefixRoute {
+    int32_t dp_rank_ = -1;
+    size_t slot_ = 0;
+    uint64_t generation_ = 0;
+  };
+
+  struct StickyPrefixRouteSlot {
+    XXH3Key key_;
+    uint64_t generation_ = 0;
+    bool occupied_ = false;
+  };
 
  private:
   std::vector<std::vector<BlockTransferInfo>> swap_block_transfer_infos_;
   std::vector<std::unique_ptr<SingleBlockManager>> single_block_managers_;
-  mutable std::mutex sticky_prefix_routes_mutex_;
-  std::unordered_map<XXH3Key, int32_t, FixedStringKeyHash, FixedStringKeyEqual>
+  mutable std::shared_mutex sticky_prefix_routes_mutex_;
+  std::unordered_map<XXH3Key,
+                     StickyPrefixRoute,
+                     FixedStringKeyHash,
+                     FixedStringKeyEqual>
       sticky_prefix_routes_;
+  std::vector<StickyPrefixRouteSlot> sticky_prefix_route_slots_;
+  size_t sticky_prefix_route_cursor_ = 0;
+  uint64_t sticky_prefix_route_generation_ = 0;
 
  protected:
   // the options for the block manager
