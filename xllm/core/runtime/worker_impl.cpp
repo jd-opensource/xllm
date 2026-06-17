@@ -861,8 +861,8 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
               .device(torch::kCPU)
               .dtype(torch::kInt32)
               .pinned_memory(true));
-      bool is_prefill =
-          processed_input.input_params.meta.batch_forward_type.is_prefill();
+      const bool is_prefill =
+          processed_input.input_params.meta.batch_forward_type.no_decode();
       DpEpPadding dp_ep_padding(token_size_per_dp_group,
                                 context_.get_model_args().num_experts_per_tok(),
                                 context_.get_parallel_args().mapping_data(),
@@ -1547,6 +1547,15 @@ void WorkerImpl::init_hierarchy_kv_cache_transfer() {
 }
 void WorkerImpl::prepare_mla_prefixcache_inputs(
     ModelInputParams& input_params) {
+  const bool has_prefixcache_metadata =
+      input_params.meta.num_sequences > 0 &&
+      input_params.attention.device.kv_cache_tokens_nums.defined() &&
+      input_params.attention.device.kv_cache_tokens_nums.numel() > 0 &&
+      input_params.attention.device.q_seq_lens.defined() &&
+      input_params.attention.device.q_seq_lens.numel() > 0;
+  if (!has_prefixcache_metadata) {
+    return;
+  }
   int32_t sum_prefix =
       input_params.attention.device.kv_cache_tokens_nums.sum().item<int>();
   input_params.attention.device.history_compressed_kv =
