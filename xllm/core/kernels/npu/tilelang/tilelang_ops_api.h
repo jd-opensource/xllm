@@ -97,9 +97,11 @@ torch::Tensor causal_conv1d_decode(torch::Tensor& conv_state,
                                    bool has_silu);
 
 // Check whether a decode kernel specialization exists for the given
-// batch_size and dim. Returns false if no compiled variant matches,
+// batch_size, dim, and has_silu. Returns false if no compiled variant matches,
 // in which case callers should fall back to the per-batch prefill kernel.
-bool has_causal_conv1d_decode_specialization(int64_t batch_size, int64_t dim);
+bool has_causal_conv1d_decode_specialization(int64_t batch_size,
+                                             int64_t dim,
+                                             bool has_silu);
 
 // CausalConv1D general kernel for variable-length batches on NPU.
 //

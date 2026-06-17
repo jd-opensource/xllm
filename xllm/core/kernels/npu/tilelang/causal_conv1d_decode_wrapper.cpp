@@ -62,7 +62,7 @@ CausalConv1dDecodeSpecialization build_decode_runtime_specialization(
       CausalConv1dDecodeBatchSize{batch_size},
       CausalConv1dDecodeDim{dim},
       CausalConv1dDecodeWidth{width},
-      CausalConv1dDecodeHasSilu{1},
+      CausalConv1dDecodeHasSilu{has_silu ? 1 : 0},
       CausalConv1dDecodeDType{to_tilelang_dtype(
           x.scalar_type() == c10::ScalarType::Half ? c10::ScalarType::BFloat16
                                                    : x.scalar_type())});
@@ -200,15 +200,16 @@ void run_tilelang_causal_conv1d_decode_once(
 
 }  // namespace
 
-bool has_causal_conv1d_decode_specialization(int64_t batch_size, int64_t dim) {
+bool has_causal_conv1d_decode_specialization(int64_t batch_size,
+                                             int64_t dim,
+                                             bool has_silu) {
   const int32_t width = 4;
-  const int32_t has_silu = 1;
   CausalConv1dDecodeSpecialization spec =
       make_causal_conv1d_decode_specialization(
           CausalConv1dDecodeBatchSize{static_cast<int32_t>(batch_size)},
           CausalConv1dDecodeDim{static_cast<int32_t>(dim)},
           CausalConv1dDecodeWidth{width},
-          CausalConv1dDecodeHasSilu{has_silu},
+          CausalConv1dDecodeHasSilu{has_silu ? 1 : 0},
           CausalConv1dDecodeDType{TilelangDType::kBF16});
   return find_causal_conv1d_decode_kernel_entry(spec) != nullptr;
 }

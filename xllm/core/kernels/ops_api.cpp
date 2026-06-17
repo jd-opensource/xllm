@@ -1337,7 +1337,8 @@ torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params) {
   const bool is_3d = (x_work.dim() == 3);
   auto x_flat = is_3d ? x_work.reshape({-1, dim}) : x_work;
 
-  if (npu::tilelang::has_causal_conv1d_decode_specialization(batch, dim)) {
+  if (npu::tilelang::has_causal_conv1d_decode_specialization(
+          batch, dim, has_silu)) {
     auto conv_state_t_nonconst = conv_state_t;
     auto y = npu::tilelang::causal_conv1d_decode(
         /*conv_state=*/conv_state_t_nonconst,

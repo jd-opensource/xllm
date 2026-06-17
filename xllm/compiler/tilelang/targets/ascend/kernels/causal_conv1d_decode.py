@@ -126,7 +126,10 @@ def build_causal_conv1d_decode_kernel(
             T.tile.add(state0, state0, tmp)
             T.tile.mul_add_dst(state0, x_ub, w3)
             T.tile.add(tmp, state0, bias_ub)
-            T.tile.silu(y_ub, tmp)
+            if has_silu:
+                T.tile.silu(y_ub, tmp)
+            else:
+                T.copy(tmp, y_ub)
 
             T.tile.cast(y_half, y_ub, "CAST_RINT", dim_per_core)
             T.set_flag("v", "mte3", 0)
@@ -179,15 +182,26 @@ class CausalConv1dDecodeKernel(TilelangKernel):
     ]
     SPECIALIZATIONS = [
         {
-            "variant_key": "bs{}_d{}_w4_silu1_bf16".format(bs, dim),
+            "variant_key": f"bs{bs}_d{d}_w4_silu{s}_bf16",
             "batch_size": bs,
-            "dim": dim,
+            "dim": d,
             "width": 4,
-            "has_silu": 1,
+            "has_silu": s,
             "dtype": "bfloat16",
         }
-        for bs in range(1, 9)
-        for dim in [2048, 4096, 8192]
+        for bs, d in sorted(
+            {
+                (bs // tp, d // tp)
+                for bs, d in [
+                    (bs, dim)
+                    for bs in range(1, 9)
+                    for dim in [2048, 4096, 8192]
+                ]
+                for tp in [1, 2, 4, 8]
+                if bs % tp == 0 and d % tp == 0
+            }
+        )
+        for s in [0, 1]
     ]
 
     @staticmethod
