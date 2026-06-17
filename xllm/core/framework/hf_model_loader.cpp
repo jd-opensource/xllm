@@ -36,6 +36,8 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/version_singleton.h"
+#include "core/framework/config/model_config.h"
+#include "core/framework/config/rec_config.h"
 #include "core/framework/state_dict/rec_vocab_dict.h"
 #include "core/framework/state_dict/safetensors/safetensors.h"
 #include "core/framework/tokenizer/fast_tokenizer.h"
@@ -46,6 +48,7 @@ limitations under the License.
 #include "core/platform/device.h"
 #include "core/util/blocking_counter.h"
 #include "core/util/json_reader.h"
+#include "core/util/model_config_utils.h"
 #include "core/util/rec_model_utils.h"
 #include "core/util/scope_guard.h"
 #include "core/util/tensor_helper.h"
@@ -74,6 +77,20 @@ bool is_compressed_tensors_fp8_scheme(const nlohmann::json& config) {
          num_bits_it != config.end() && !num_bits_it->is_null() &&
          boost::iequals(type_it->get<std::string>(), "float") &&
          num_bits_it->get<int64_t>() == 8;
+}
+
+bool is_compressed_tensors_int8_scheme(const nlohmann::json& config,
+                                       bool expected_dynamic) {
+  auto type_it = config.find("type");
+  auto num_bits_it = config.find("num_bits");
+  auto dynamic_it = config.find("dynamic");
+  const bool dynamic = dynamic_it != config.end() && !dynamic_it->is_null()
+                           ? dynamic_it->get<bool>()
+                           : false;
+  return type_it != config.end() && !type_it->is_null() &&
+         num_bits_it != config.end() && !num_bits_it->is_null() &&
+         boost::iequals(type_it->get<std::string>(), "int") &&
+         num_bits_it->get<int64_t>() == 8 && dynamic == expected_dynamic;
 }
 
 bool try_load_compressed_tensors_quant_cfg(const JsonReader& reader,
@@ -115,6 +132,23 @@ bool try_load_compressed_tensors_quant_cfg(const JsonReader& reader,
 
     if (!is_compressed_tensors_fp8_scheme(*weights_it) ||
         !is_compressed_tensors_fp8_scheme(*input_activations_it)) {
+      // Check for INT8 W8A8 (compressed-tensors int quantized)
+      if (Device::type_str() == "dcu" &&
+          is_compressed_tensors_int8_scheme(*weights_it,
+                                            /*expected_dynamic=*/false) &&
+          is_compressed_tensors_int8_scheme(*input_activations_it,
+                                            /*expected_dynamic=*/true)) {
+        quant_args.bits() = 8;
+        quant_args.moe_weight_bits() = 8;
+        quant_args.activation_dynamic() = true;
+        quant_args.is_compressed_tensors_w8a8_dynamic() = true;
+        if (const auto ignore = reader.value<std::vector<std::string>>(
+                "quantization_config.ignore");
+            ignore.has_value()) {
+          quant_args.ignored_modules() = *ignore;
+        }
+        return true;
+      }
       continue;
     }
 
@@ -355,10 +389,10 @@ bool load_quant_cfg(const JsonReader& reader, QuantArgs& quant_args) {
   if (auto v = reader.value<std::string>("quantization_config.quant_method")) {
     quant_args.quant_method() = v.value();
   }
-  // Only CUDA currently adapts this compressed-tensors JSON layout.
+  // Only CUDA and DCU currently adapts this compressed-tensors JSON layout.
   // For other backends, skip this special parsing path and continue with the
   // generic quantization config parsing path.
-  if (Device::type_str() == "cuda" &&
+  if ((Device::type_str() == "cuda" || Device::type_str() == "dcu") &&
       try_load_compressed_tensors_quant_cfg(reader, quant_args)) {
     return true;
   }
@@ -426,8 +460,12 @@ HFModelLoader::HFModelLoader(const std::string& model_weights_path)
   // sort the model weights files by name
   std::sort(model_weights_files_.begin(), model_weights_files_.end());
 
-  threadpool_ = std::make_unique<ThreadPool>(32);
-  if (FLAGS_backend == "rec" && is_onerec_model_type(args_.model_type())) {
+  threadpool_ = std::make_unique<ThreadPool>(
+      /*num_threads=*/32,
+      /*cpu_binding=*/false,
+      /*pool_name=*/"HFModelLoader.load_weights");
+  if (::xllm::ModelConfig::get_instance().backend() == "rec" &&
+      is_onerec_model_type(args_.model_type())) {
     CHECK(load_rec_vocab(model_weights_path))
         << "Failed to load rec content from " << model_weights_path;
   }
@@ -675,7 +713,7 @@ bool HFModelLoader::load_rec_vocab(const std::string& model_weights_path) {
               ->initialize(vocab_full_path))
         << "Failed to initialize vocab dict from " << vocab_full_path;
   } else {
-    if (FLAGS_enable_constrained_decoding) {
+    if (::xllm::RecConfig::get_instance().enable_constrained_decoding()) {
       LOG(ERROR) << "Vocab file is not set for OneRec REC tokenizer under "
                  << model_weights_path
                  << ". Constrained decoding requires `vocab_file` in "
@@ -741,13 +779,8 @@ bool HFModelLoader::load_model_args(const std::string& model_weights_path) {
     return false;
   }
 
-  std::string model_type;
-  if (auto data = reader.value<std::string>("model_type")) {
-    model_type = data.value();
-  } else {
-    LOG(ERROR) << "Failed to find model_type in " << args_file_path;
-    return false;
-  }
+  const std::string model_type = util::get_model_type(
+      reader, std::filesystem::path(model_weights_path), FLAGS_backend);
 
   std::string resolved_model_type;
   std::string error_message;
@@ -766,8 +799,8 @@ bool HFModelLoader::load_model_args(const std::string& model_weights_path) {
   }
   const JsonReader config_reader = normalize_config_torch_dtype(reader);
   model_args_loader(config_reader, &args_);
-  args_.enable_mla(
-      util::should_enable_mla(std::filesystem::path(model_weights_path)));
+  args_.enable_mla(util::should_enable_mla(
+      std::filesystem::path(model_weights_path), FLAGS_backend));
 
   return true;
 }

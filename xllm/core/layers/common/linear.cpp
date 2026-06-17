@@ -202,6 +202,28 @@ void resolve_weight_quant_method_for_linear_load(
     resolved_weight_quant_method = to_lower_copy(resolved.value());
     return;
   }
+  if (quant_args.is_compressed_tensors_w8a8_dynamic()) {
+    bool is_w8a8_dynamic = false;
+    if (prefixes.empty()) {
+      torch::Tensor weight = state_dict.get_tensor("weight");
+      is_w8a8_dynamic = state_dict.has("weight_scale") && weight.defined() &&
+                        weight.scalar_type() == torch::kInt8;
+    } else {
+      is_w8a8_dynamic = true;
+      for (const std::string& prefix : prefixes) {
+        torch::Tensor weight = state_dict.get_tensor(prefix + "weight");
+        if (!state_dict.has(prefix + "weight_scale") || !weight.defined() ||
+            weight.scalar_type() != torch::kInt8) {
+          is_w8a8_dynamic = false;
+          break;
+        }
+      }
+    }
+    if (is_w8a8_dynamic) {
+      resolved_weight_quant_method = "w8a8_dynamic";
+      return;
+    }
+  }
   if (!quant_args.quant_descs().empty()) {
     LOG(WARNING) << "[LinearLoad][QuantMethod] quant_descs is not empty but "
                     "quant method was not resolved from state_dict prefixes. "
@@ -271,12 +293,12 @@ void ensure_w8a8_params_for_linear_load(
 
   if (!is_w8a8_quant(resolved_weight_quant_method) &&
       !is_w8a8_dynamic_quant(resolved_weight_quant_method)) {
-    if (!quant_args.quant_descs().empty()) {
-      // quant_descs is not empty but the resolved quant method is not
-      // w8a8_dynamic (e.g., no quant method resolved, or a non-quantized
-      // checkpoint). The weights were initialized as kInt8 in the constructor;
-      // re-register them back to the original dtype so that the subsequent
-      // load_experts can copy the checkpoint weights correctly.
+    if (!quant_args.quant_descs().empty() ||
+        quant_args.is_compressed_tensors_w8a8_dynamic()) {
+      // Quant args indicated a checkpoint that may be quantized, so the
+      // constructor initialized weights as kInt8. If the actual checkpoint is
+      // not resolved to a W8A8 method, re-register the weight in the original
+      // dtype so the subsequent load can copy checkpoint weights correctly.
       CHECK(refs.weight.defined())
           << "weight must be registered before lazy quant fallback";
       const int64_t out_features = refs.weight.size(0);
@@ -455,6 +477,36 @@ torch::Tensor npu_w8a8_dynamic_linear_forward(
   return output;
 }
 
+#if defined(USE_DCU)
+torch::Tensor dcu_w8a8_dynamic_linear_forward(
+    const torch::Tensor& input,
+    const torch::Tensor& weight,
+    const torch::Tensor& weight_scale,
+    const std::optional<torch::Tensor>& bias,
+    at::ScalarType output_dtype) {
+  xllm::kernel::ScaledQuantizeParams quantize_params;
+  quantize_params.x = input;
+  quantize_params.smooth = torch::Tensor();  // no smooth factor
+
+  torch::Tensor quantized_input;
+  torch::Tensor input_scale;
+  std::tie(quantized_input, input_scale) =
+      xllm::kernel::scaled_quantize(quantize_params);
+
+  xllm::kernel::ScaledMatmulParams matmul_params;
+  matmul_params.a = quantized_input;
+  matmul_params.b = weight;
+  matmul_params.a_scale = input_scale;
+  matmul_params.b_scale = weight_scale;
+  matmul_params.output_dtype = output_dtype;
+  matmul_params.bias = bias;
+  matmul_params.beta = 0.0;
+  matmul_params.a_quant_bit_size = 8;
+
+  return xllm::kernel::scaled_matmul(matmul_params);
+}
+#endif  // USE_DCU
+
 }  // namespace
 
 ColumnParallelLinearImpl::ColumnParallelLinearImpl(const ModelContext& context)
@@ -528,7 +580,8 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
                              torch::empty({1}, options.dtype(torch::kFloat32)),
                              /*requires_grad=*/false);
     }
-  } else if (!quant_args_.quant_descs().empty()) {
+  } else if (!quant_args_.quant_descs().empty() ||
+             quant_args_.is_compressed_tensors_w8a8_dynamic()) {
     // quant_descs is not empty: default initialize weight as kInt8.
     // During load_state_dict, the weight will be lazily re-registered to the
     // appropriate dtype based on the resolved quant method.
@@ -633,8 +686,13 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
                             : std::nullopt;
     CHECK(weight_scale.has_value() && weight_scale.value().defined())
         << "weight_scale is required for w8a8_dynamic quant matmul.";
+#if defined(USE_DCU)
+    output = dcu_w8a8_dynamic_linear_forward(
+        input, weight_, weight_scale.value(), bias, output_dtype_);
+#elif defined(USE_NPU)
     output = npu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, output_dtype_);
+#endif
   } else {
     xllm::kernel::MatmulParams matmul_params;
     matmul_params.a = input;
@@ -649,8 +707,30 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
   return output;
 }
 
+bool ColumnParallelLinearImpl::uses_w8a8_dynamic_quant() const {
+  return is_w8a8_dynamic_quant(resolved_weight_quant_method_);
+}
+
+torch::Tensor ColumnParallelLinearImpl::w8a8_dynamic_weight_scale() const {
+  CHECK(uses_w8a8_dynamic_quant())
+      << "w8a8_dynamic_weight_scale requires w8a8_dynamic quant method.";
+  CHECK(weight_scale_is_loaded_ && weight_scale_.defined())
+      << "weight_scale is required for w8a8_dynamic quant matmul.";
+  return weight_scale_;
+}
+
+std::optional<torch::Tensor> ColumnParallelLinearImpl::bias() const {
+  if (bias_.defined()) {
+    return bias_;
+  }
+  return std::nullopt;
+}
+
 // load the weight from the checkpoint
 void ColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
+  if (state_dict.size() == 0) {
+    return;
+  }
   const int64_t rank = world_size_ == 1 ? 0 : rank_;
   const int64_t world_size = world_size_;
   resolve_weight_quant_method_for_linear_load(
@@ -717,6 +797,9 @@ void ColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
 void ColumnParallelLinearImpl::load_state_dict(
     const StateDict& state_dict,
     const std::vector<std::string>& prefixes) {
+  if (state_dict.size() == 0) {
+    return;
+  }
   const int64_t rank = world_size_ == 1 ? 0 : rank_;
   const int64_t world_size = world_size_;
   resolve_weight_quant_method_for_linear_load(
@@ -854,6 +937,9 @@ void ColumnParallelLinearImpl::load_state_dict(
     const StateDict& state_dict,
     int32_t shard_tensor_count,
     const std::vector<int64_t>& shard_sizes) {
+  if (state_dict.size() == 0) {
+    return;
+  }
   const int64_t rank = rank_;
   const int64_t world_size = world_size_;
   resolve_weight_quant_method_for_linear_load(
@@ -962,7 +1048,8 @@ QKVParallelLinearImpl::QKVParallelLinearImpl(
                              torch::empty({3}, options.dtype(torch::kFloat32)),
                              /*requires_grad=*/false);
     }
-  } else if (!quant_args_.quant_descs().empty()) {
+  } else if (!quant_args_.quant_descs().empty() ||
+             quant_args_.is_compressed_tensors_w8a8_dynamic()) {
     // quant_descs is not empty: default initialize weight as kInt8.
     // During load_state_dict, the weight will be lazily re-registered to the
     // appropriate dtype based on the resolved quant method.
@@ -1028,8 +1115,13 @@ torch::Tensor QKVParallelLinearImpl::forward(torch::Tensor input) {
                             : std::nullopt;
     CHECK(weight_scale.has_value() && weight_scale.value().defined())
         << "weight_scale is required for w8a8_dynamic quant matmul.";
+#if defined(USE_DCU)
+    output = dcu_w8a8_dynamic_linear_forward(
+        input, weight_, weight_scale.value(), bias, output_dtype_);
+#elif defined(USE_NPU)
     output = npu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, output_dtype_);
+#endif
   } else {
     xllm::kernel::MatmulParams matmul_params;
     matmul_params.a = input;
@@ -1048,6 +1140,9 @@ torch::Tensor QKVParallelLinearImpl::forward(torch::Tensor input) {
 void QKVParallelLinearImpl::load_state_dict(
     const StateDict& state_dict,
     const std::vector<std::string>& prefixes) {
+  if (state_dict.size() == 0) {
+    return;
+  }
   const int64_t rank = rank_;
   const int64_t world_size = world_size_;
   resolve_weight_quant_method_for_linear_load(
@@ -1149,6 +1244,9 @@ void QKVParallelLinearImpl::load_state_dict(
 }
 
 void QKVParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
+  if (state_dict.size() == 0) {
+    return;
+  }
   const int64_t rank = rank_;
   const int64_t world_size = world_size_;
   const int32_t shard_tensor_count = 3;
@@ -1272,7 +1370,8 @@ RowParallelLinearImpl::RowParallelLinearImpl(
                              torch::empty({1}, options.dtype(torch::kFloat32)),
                              /*requires_grad=*/false);
     }
-  } else if (!quant_args_.quant_descs().empty()) {
+  } else if (!quant_args_.quant_descs().empty() ||
+             quant_args_.is_compressed_tensors_w8a8_dynamic()) {
     // quant_descs is not empty: default initialize weight as kInt8.
     // During load_state_dict, the weight will be lazily re-registered to the
     // appropriate dtype based on the resolved quant method.
@@ -1391,8 +1490,13 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
                             : std::nullopt;
     CHECK(weight_scale.has_value() && weight_scale.value().defined())
         << "weight_scale is required for w8a8_dynamic quant matmul.";
+#if defined(USE_DCU)
+    output = dcu_w8a8_dynamic_linear_forward(
+        input, weight_, weight_scale.value(), bias, output_dtype_);
+#elif defined(USE_NPU)
     output = npu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, output_dtype_);
+#endif
   } else {
     if (!input_is_parallelized_) {
       input = xllm::parallel_state::scatter(input, process_group_);
@@ -1411,6 +1515,9 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
 
 // load the weight from the checkpoint
 void RowParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
+  if (state_dict.size() == 0) {
+    return;
+  }
   const int64_t rank = world_size_ == 1 ? 0 : rank_;
   const int64_t world_size = world_size_;
   resolve_weight_quant_method_for_linear_load(
@@ -1484,9 +1591,12 @@ ReplicatedLinearImpl::ReplicatedLinearImpl(
     const QuantArgs& quant_args,
     const torch::TensorOptions& options,
     const LinearExtraArgs& linear_extra_args)
-    : quant_args_(quant_args), options_(options) {
+    : quant_args_(quant_args),
+      options_(options),
+      output_dtype_(c10::typeMetaToScalarType(options.dtype())) {
   (void)linear_extra_args;
-  if (!quant_args_.quant_descs().empty()) {
+  if (!quant_args_.quant_descs().empty() ||
+      quant_args_.is_compressed_tensors_w8a8_dynamic()) {
     // quant_descs is not empty: default initialize weight as kInt8.
     // During load_state_dict, the weight will be lazily re-registered to the
     // appropriate dtype based on the resolved quant method.
@@ -1535,8 +1645,13 @@ torch::Tensor ReplicatedLinearImpl::forward(torch::Tensor input) {
                             : std::nullopt;
     CHECK(weight_scale.has_value() && weight_scale.value().defined())
         << "weight_scale is required for w8a8_dynamic quant matmul.";
+#if defined(USE_DCU)
+    return dcu_w8a8_dynamic_linear_forward(
+        input, weight_, weight_scale.value(), bias, input.scalar_type());
+#elif defined(USE_NPU)
     return npu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, input.scalar_type());
+#endif
   }
   xllm::kernel::MatmulParams matmul_params;
   matmul_params.a = input;
@@ -1547,8 +1662,34 @@ torch::Tensor ReplicatedLinearImpl::forward(torch::Tensor input) {
   return output;
 }
 
+bool ReplicatedLinearImpl::uses_w8a8_dynamic_quant() const {
+  return is_w8a8_dynamic_quant(resolved_weight_quant_method_);
+}
+
+torch::Tensor ReplicatedLinearImpl::w8a8_dynamic_weight_scale() const {
+  CHECK(uses_w8a8_dynamic_quant())
+      << "w8a8_dynamic_weight_scale requires w8a8_dynamic quant method.";
+  CHECK(weight_scale_is_loaded_ && weight_scale_.defined())
+      << "weight_scale is required for w8a8_dynamic quant matmul.";
+  return weight_scale_;
+}
+
+at::ScalarType ReplicatedLinearImpl::output_dtype() const {
+  return output_dtype_;
+}
+
+std::optional<torch::Tensor> ReplicatedLinearImpl::bias() const {
+  if (bias_.defined()) {
+    return bias_;
+  }
+  return std::nullopt;
+}
+
 // load the weight from the checkpoint
 void ReplicatedLinearImpl::load_state_dict(const StateDict& state_dict) {
+  if (state_dict.size() == 0) {
+    return;
+  }
   resolve_weight_quant_method_for_linear_load(
       quant_args_, state_dict, nullptr, resolved_weight_quant_method_);
   ensure_w8a8_params_for_linear_load(

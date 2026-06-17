@@ -80,12 +80,12 @@ void EtcdClient::add_watch(const std::string& key_prefix,
   }
 
   uint64_t prefix_len = etcd_namespace_prefix_.size();
-  auto bound_callback = std::bind(callback, std::placeholders::_1, prefix_len);
-
   auto watcher = std::make_unique<etcd::Watcher>(
       client_,
       namespaced_key(key_prefix),
-      [bound_callback](etcd::Response response) { bound_callback(response); },
+      [callback, prefix_len](const etcd::Response& response) {
+        callback(response, prefix_len);
+      },
       recursive);
 
   watchers_[key_prefix] = {std::move(watcher), callback};

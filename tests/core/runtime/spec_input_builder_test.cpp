@@ -67,6 +67,21 @@ ForwardInput make_forward_input(const torch::Tensor& token_ids,
   return input;
 }
 
+ForwardInput make_multiblock_forward_input(
+    const torch::Tensor& token_ids,
+    const torch::Tensor& positions,
+    const std::vector<torch::Tensor>& multi_block_tables,
+    const std::vector<int32_t>& kv_seq_lens) {
+  ForwardInput input;
+  input.input_params.meta.num_sequences =
+      static_cast<int32_t>(positions.numel());
+  input.token_ids_host = token_ids;
+  input.positions_host = positions;
+  input.input_params.multi_block_tables = multi_block_tables;
+  input.input_params.attention.host.kv_seq_lens = kv_seq_lens;
+  return input;
+}
+
 TEST(SpecDecodeInputBuilderTest, DraftInputsSingleRowPerSeq) {
   ModelInputParams params;
   params.meta.num_sequences = 2;
@@ -405,6 +420,18 @@ TEST(SpecDecodeInputBuilderTest, QCuSeqLensConsistency) {
             std::vector<int32_t>({1, 3, 6}));
 }
 
+TEST(SpecDecodeInputBuilderTest, QCuSeqLensWithLeadingZero) {
+  ModelInputParams params;
+  params.meta.num_sequences = 3;
+  params.attention.host.q_seq_lens = to_layout_seq_lens({1, 2, 3});
+  params.attention.host.q_cu_seq_lens = {1, 3, 6};
+
+  torch::Tensor q_cu_seq_lens =
+      build_q_cu_seq_lens_tensor(params, torch::kCPU, true);
+  EXPECT_EQ(tensor_to_vec_int32(q_cu_seq_lens),
+            std::vector<int32_t>({0, 1, 3, 6}));
+}
+
 TEST(SpecDecodeInputBuilderTest, CalcSlotIdOutOfRangeDeath) {
   std::vector<int32_t> block_table = {0};
   EXPECT_DEATH(calc_slot_id(/*position=*/4,
@@ -500,6 +527,134 @@ TEST(DraftProbsBuilderTest, BuildValidateTensorsDenseInputFallback) {
   EXPECT_EQ(draft_probs.size(1), 1);
   EXPECT_TRUE(torch::allclose(
       draft_probs, torch::tensor({{0.7f}, {0.6f}}, torch::kFloat32)));
+}
+
+TEST(SpecDecodeInputBuilderTest, MultiBlockDraftSingleRowPerSeq) {
+  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
+  torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
+  std::vector<torch::Tensor> multi_block_tables = {
+      torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt),
+      torch::tensor({{10, 11, 12}, {13, 14, 15}}, torch::kInt)};
+  ForwardInput input = make_multiblock_forward_input(
+      torch::Tensor(), positions, multi_block_tables, kv_seq_lens);
+  DecodeRowContext ctx = make_decode_row_context(input);
+
+  EXPECT_TRUE(ctx.model_managed_multiblock);
+  EXPECT_EQ(ctx.multi_block_tables.size(), 2);
+  EXPECT_EQ(ctx.multi_block_tables[0].size(), 2);
+  EXPECT_EQ(ctx.multi_block_tables[1].size(), 2);
+
+  DecodeBuildBuffers buf;
+  for (int32_t seq_id = 0; seq_id < input.input_params.meta.num_sequences;
+       ++seq_id) {
+    RowSpec row;
+    row.seq_id = seq_id;
+    row.position_offset = 1;
+    row.append_token = false;
+    row.append_block_table = true;
+    append_decode_row(ctx, row, /*block_size=*/4, buf);
+  }
+
+  EXPECT_TRUE(buf.out_token_ids.empty());
+  EXPECT_EQ(buf.out_positions, std::vector<int32_t>({5, 9}));
+  EXPECT_EQ(buf.out_new_cache_slots, std::vector<int32_t>({0, 0}));
+  EXPECT_TRUE(buf.out_block_tables.empty());
+
+  ASSERT_EQ(buf.out_multi_block_tables.size(), 2);
+  ASSERT_EQ(buf.out_multi_block_tables[0].size(), 2);
+  EXPECT_EQ(buf.out_multi_block_tables[0][0], std::vector<int32_t>({0, 1, 2}));
+  EXPECT_EQ(buf.out_multi_block_tables[0][1], std::vector<int32_t>({3, 4, 5}));
+  ASSERT_EQ(buf.out_multi_block_tables[1].size(), 2);
+  EXPECT_EQ(buf.out_multi_block_tables[1][0],
+            std::vector<int32_t>({10, 11, 12}));
+  EXPECT_EQ(buf.out_multi_block_tables[1][1],
+            std::vector<int32_t>({13, 14, 15}));
+}
+
+TEST(SpecDecodeInputBuilderTest, MultiBlockKeepsSparseAbsoluteRows) {
+  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({24, 20});
+  torch::Tensor positions = torch::tensor({23, 19}, torch::kInt);
+  std::vector<torch::Tensor> multi_block_tables = {torch::tensor(
+      {{-1, -1, -1, -1, -1, 50}, {-1, -1, -1, -1, 60, -1}}, torch::kInt)};
+  ForwardInput input = make_multiblock_forward_input(
+      torch::Tensor(), positions, multi_block_tables, kv_seq_lens);
+  DecodeRowContext ctx = make_decode_row_context(input);
+
+  DecodeBuildBuffers buf;
+  for (int32_t seq_id = 0; seq_id < input.input_params.meta.num_sequences;
+       ++seq_id) {
+    RowSpec row;
+    row.seq_id = seq_id;
+    row.position_offset = 0;
+    row.append_token = false;
+    row.append_block_table = true;
+    append_decode_row(ctx, row, /*block_size=*/4, buf);
+  }
+
+  ASSERT_EQ(buf.out_multi_block_tables.size(), 1);
+  ASSERT_EQ(buf.out_multi_block_tables[0].size(), 2);
+  EXPECT_EQ(buf.out_multi_block_tables[0][0],
+            std::vector<int32_t>({-1, -1, -1, -1, -1, 50}));
+  EXPECT_EQ(buf.out_multi_block_tables[0][1],
+            std::vector<int32_t>({-1, -1, -1, -1, 60, -1}));
+}
+
+TEST(SpecDecodeInputBuilderTest, MultiBlockValidateExpansion) {
+  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
+  torch::Tensor token_ids = torch::tensor({10, 20}, torch::kInt);
+  torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
+  std::vector<torch::Tensor> multi_block_tables = {
+      torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt)};
+  ForwardInput input = make_multiblock_forward_input(
+      token_ids, positions, multi_block_tables, kv_seq_lens);
+  DecodeRowContext ctx = make_decode_row_context(input);
+
+  EXPECT_TRUE(ctx.model_managed_multiblock);
+  const int32_t num_val_tokens = 3;
+
+  DecodeBuildBuffers buf;
+  for (int32_t seq_id = 0; seq_id < input.input_params.meta.num_sequences;
+       ++seq_id) {
+    for (int32_t val_idx = 0; val_idx < num_val_tokens; ++val_idx) {
+      RowSpec row;
+      row.seq_id = seq_id;
+      if (val_idx == 0) {
+        row.use_input_token = true;
+      } else {
+        row.token_id = -1 * val_idx;
+      }
+      row.position_offset = 1 + val_idx;
+      row.append_q_len_one = true;
+      row.append_block_table = true;
+      row.append_kv_len = true;
+      append_decode_row(ctx, row, /*block_size=*/4, buf);
+    }
+  }
+
+  EXPECT_EQ(buf.out_token_ids, std::vector<int32_t>({10, -1, -2, 20, -1, -2}));
+  EXPECT_EQ(buf.out_positions, std::vector<int32_t>({5, 6, 7, 9, 10, 11}));
+  EXPECT_EQ(buf.out_new_cache_slots, std::vector<int32_t>({0, 0, 0, 0, 0, 0}));
+  EXPECT_EQ(buf.out_kv_seq_lens, to_layout_seq_lens({6, 7, 8, 10, 11, 12}));
+  EXPECT_EQ(buf.out_q_seq_lens, to_layout_seq_lens({1, 1, 1, 1, 1, 1}));
+  EXPECT_TRUE(buf.out_block_tables.empty());
+
+  ASSERT_EQ(buf.out_multi_block_tables.size(), 1);
+  ASSERT_EQ(buf.out_multi_block_tables[0].size(), 6);
+  EXPECT_EQ(buf.out_multi_block_tables[0][0], std::vector<int32_t>({0, 1, 2}));
+  EXPECT_EQ(buf.out_multi_block_tables[0][3], std::vector<int32_t>({3, 4, 5}));
+}
+
+TEST(SpecDecodeInputBuilderTest, MakeDecodeRowContextRejectsEmptyBlockTables) {
+  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
+  torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
+  ForwardInput input;
+  input.input_params.meta.num_sequences =
+      static_cast<int32_t>(positions.numel());
+  input.positions_host = positions;
+  input.input_params.attention.host.kv_seq_lens = kv_seq_lens;
+
+  EXPECT_DEATH(make_decode_row_context(input),
+               "host block_tables must be defined");
 }
 
 }  // namespace

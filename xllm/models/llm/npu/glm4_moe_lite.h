@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/framework/model_context.h"
 #include "core/framework/parallel_state/npu_dp_ep_padding.h"
 #include "core/layers/npu/npu_glm4_moe_lite_decoder_layer.h"
@@ -127,7 +129,9 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
 
     max_seq_len_ = model_args.max_position_embeddings();
     // int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
-    // int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
+    // int32_t mask_value =
+    // ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ? -9984
+    // : 1;
     int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
@@ -187,7 +191,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
     auto sin_pos = cos_sin_chunks[1].contiguous();
 
     torch::Tensor attn_mask;
-    if (FLAGS_enable_prefix_cache &&
+    if (::xllm::KVCacheConfig::get_instance().enable_prefix_cache() &&
         !input_params.meta.batch_forward_type.is_decode()) {
       attn_mask = attn_mask_.get_attn_mask(512, dtype_, device_);
     } else if (input_params.meta.batch_forward_type.is_prefill()) {

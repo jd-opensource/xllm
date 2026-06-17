@@ -22,7 +22,8 @@ namespace layer {
 
 MoEGateImpl::MoEGateImpl(const ModelArgs& model_args,
                          const QuantArgs& quant_args,
-                         const torch::TensorOptions& options)
+                         const torch::TensorOptions& options,
+                         bool use_hash)
     : num_experts_(model_args.n_routed_experts()),
       topk_(model_args.num_experts_per_tok()),
       num_expert_group_(model_args.n_group()),
@@ -39,6 +40,17 @@ MoEGateImpl::MoEGateImpl(const ModelArgs& model_args,
         false);
   }
 
+  if (scoring_func_ == "sqrtsoftplus") {
+    moe_softplus_topk_ =
+        register_module("moe_softplus_topk",
+                        MOESoftPlusTopK(model_args.n_routed_experts(),
+                                        model_args.num_experts_per_tok(),
+                                        model_args.routed_scaling_factor(),
+                                        model_args.vocab_size(),
+                                        use_hash,
+                                        options));
+  }
+
   gate_ = register_module("gate_proj",
                           ReplicatedLinear(model_args.hidden_size(),
                                            model_args.n_routed_experts(),
@@ -48,10 +60,15 @@ MoEGateImpl::MoEGateImpl(const ModelArgs& model_args,
 }
 
 std::tuple<torch::Tensor, torch::Tensor> MoEGateImpl::forward(
-    torch::Tensor& hidden_states) {
+    torch::Tensor& hidden_states,
+    const std::optional<torch::Tensor>& input_ids) {
   torch::Tensor router_logits = gate_->forward(hidden_states);
   torch::Tensor router_logits_2d =
       router_logits.reshape({-1, router_logits.size(-1)});
+
+  if (moe_softplus_topk_) {
+    return moe_softplus_topk_->forward(router_logits_2d, input_ids);
+  }
 
   std::optional<torch::Tensor> e_score_correction_bias = std::nullopt;
   if (e_score_correction_bias_.defined()) {
@@ -77,6 +94,9 @@ void MoEGateImpl::load_state_dict(const StateDict& state_dict) {
   if (e_score_correction_bias_.defined() &&
       !e_score_correction_bias_is_loaded_) {
     LOAD_WEIGHT(e_score_correction_bias);
+  }
+  if (moe_softplus_topk_) {
+    moe_softplus_topk_->load_state_dict(state_dict);
   }
 }
 

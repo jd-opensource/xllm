@@ -24,7 +24,13 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "common/global_flags.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/config/scheduler_config.h"
+#include "core/layers/common/dsa_topk_share_plan.h"
 #include "framework/parallel_state/npu_cp_prepare.h"
 #include "layers/common/rotary_embedding_util.h"
 #include "loader/deepseek_v32_decoder_loader.h"
@@ -194,6 +200,10 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
   auto parallel_args = context.get_parallel_args();
   auto model_args = context.get_model_args();
   auto options = context.get_tensor_options();
+  const DsaTopkShareDecision topk_decision =
+      get_dsa_topk_share_decision(model_args, layer_id_);
+  skip_topk_ = topk_decision.reuse_topk;
+  output_topk_ = topk_decision.output_topk;
 
   rank_ = parallel_args.rank();
   first_k_dense_replace_ = model_args.first_k_dense_replace();
@@ -205,8 +215,9 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
   CHECK_EQ(parallel_args.world_size(), ep_size_ * ep_local_tp_size_);
   ep_local_tp_rank_ = parallel_args.rank() % ep_local_tp_size_;
   num_experts_per_partition_ = model_args.n_routed_experts() / ep_size_;
-  redundant_experts_num_ = FLAGS_redundant_experts_num;
-  if (FLAGS_enable_eplb) {
+  redundant_experts_num_ =
+      ::xllm::EPLBConfig::get_instance().redundant_experts_num();
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     num_experts_per_partition_ += redundant_experts_num_;
   }
   ep_rank_ = parallel_args.rank() / ep_local_tp_size_;
@@ -239,7 +250,9 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
       v_head_dim_,
       prefill_param_.isBF16,
       decode_param_.isBF16,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
   initialize_tensors(options);
 }
 
@@ -264,7 +277,7 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_tensors(
           .to(device_);
 
   auto& device_expert_list = loader_->get_device_expert_list();
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     auto layer_expert_routing_map_ =
         build_expert_routing_map(device_expert_list);
     std::vector<torch::Tensor> tensors_vec;
@@ -314,8 +327,9 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
   param.numKeyValueHeadsPerRank = 1;
   // static_cast<int>(optionalValue.value()) / param.worldSize;
   param.rank = parallel_args.rank();
-  param.backend = FLAGS_communication_backend;
-  param.rankTableFile = FLAGS_rank_tablefile;
+  param.backend =
+      ::xllm::ParallelConfig::get_instance().communication_backend();
+  param.rankTableFile = ::xllm::EPLBConfig::get_instance().rank_tablefile();
 
   param.layerId = layer_id_;
   param.numHiddenLayers = args.n_layers();
@@ -334,7 +348,23 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
     param.enableSpeculate = true;
   }
   param.maskfree = true;  // TODO
-  param.enableSwiGLUQuantForSharedExperts = false;
+  const bool is_shared_expert_layer =
+      layer_id_ >= args.first_k_dense_replace() && args.n_shared_experts() > 0;
+  param.enableSwiGLUQuantForSharedExperts =
+      quantize_type_ == "w8a8_dynamic" && is_shared_expert_layer;
+  if ((::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
+       ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) &&
+      ::xllm::ParallelConfig::get_instance().cp_size() > 1 && is_prefill) {
+    param.enablePrefixCacheCP = true;
+    // When kv_split_size collapses to 1 (each CP rank owns a full KV replica)
+    // the ATB prefix AllGather is replaced by an identity reshape so the
+    // downstream SparseFlashAttention input contract stays unchanged.
+    // See `sparse_latent_attention.cpp::AddPrefixConcatCpNode` and S6 in the
+    // KV-split / CP decoupling plan. The default (kv_split_size == cp_size)
+    // keeps this false, preserving legacy behavior byte-for-byte.
+    param.enablePrefixCacheLocal =
+        (parallel_args.kv_split_size_effective() == 1);
+  }
   num_key_value_heads_ = static_cast<int>(args.n_kv_heads().value());
   qk_nope_head_dim_ = args.qk_nope_head_dim();
   v_head_dim_ = args.v_head_dim();
@@ -372,6 +402,8 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_attention_parameters(
   param.index_head_dim = args.index_head_dim();
   param.index_n_heads = args.index_n_heads();
   param.index_topk = args.index_topk();
+  param.skipTopk = skip_topk_;
+  param.outputTopk = output_topk_;
 }
 
 void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
@@ -385,7 +417,8 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
   param.numOfSelectedExperts = {args.num_experts_per_tok()};
 
   if (ep_size_ > 1) {
-    param.expertParallelDegree = std::max(FLAGS_expert_parallel_degree, 1);
+    param.expertParallelDegree = std::max(
+        ::xllm::EPLBConfig::get_instance().expert_parallel_degree(), 1);
   } else {
     param.expertParallelDegree = 0;
   }
@@ -430,13 +463,18 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
   param.enableATBGateMatmul = true;
 
   param.enableIndexGmm = false;
-  param.enableLcocAll2All = param.isPrefill && dp_size_ == 1;
+  // LCOC fused all2all path is unstable under ACL graph launch in current
+  // runtime; keep it for eager mode and fall back to the standard dynamic-ep
+  // path when graph is enabled.
+  param.enableLcocAll2All =
+      param.isPrefill && cp_size_ == 1 && dp_size_ == 1 &&
+      !::xllm::ExecutionConfig::get_instance().enable_graph();
 
   if (layer_id_ >= param.firstKDenseReplace) {
     param.enableQkvdownDp = false;
     param.enableSharedExpertDp = false;
     param.enableGatingDp = false;
-    if (FLAGS_enable_eplb) {
+    if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
       param.enableExpertCumSumOutput = param.isPrefill ? false : true;
       param.enableEPWB = true;
       param.numOfRedundantExpert = ep_size_ * redundant_experts_num_;
@@ -725,7 +763,7 @@ int64_t NpuDeepseekV32DecoderLayerImpl::init_layer() {
 int64_t NpuDeepseekV32DecoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::deepseekV2::DecoderLayerParam& param) {
-  bool eplb_enabled = FLAGS_enable_eplb &&
+  bool eplb_enabled = ::xllm::EPLBConfig::get_instance().enable_eplb() &&
                       layer_id_ >= decode_param_.firstKDenseReplace &&
                       !decode_param_.isPrefill;
   atb::Operation* operation = nullptr;
@@ -741,11 +779,14 @@ int64_t NpuDeepseekV32DecoderLayerImpl::init_node(
   }
   node.inTensors.resize(node.operation->GetInputNum());
 
+  size_t out_tensor_num = 1;
   if (eplb_enabled) {
-    node.outTensors.resize(2);
-  } else {
-    node.outTensors.resize(1);
+    ++out_tensor_num;
   }
+  if (param.outputTopk) {
+    ++out_tensor_num;
+  }
+  node.outTensors.resize(out_tensor_num);
 
   size_t inTensorId = 1;
 
@@ -757,15 +798,8 @@ int64_t NpuDeepseekV32DecoderLayerImpl::init_node(
   node.variantPack.inTensors.reserve(node.inTensors.size());
   node.variantPack.inTensors.resize(node.inTensors.size());
 
-  // eplb used in decode stage, while multi stream parallel used in prefill
-  // stage
-  if (eplb_enabled) {
-    node.variantPack.outTensors.reserve(2);
-    node.variantPack.outTensors.resize(2);  // TODO
-  } else {
-    node.variantPack.outTensors.reserve(1);
-    node.variantPack.outTensors.resize(1);
-  }
+  node.variantPack.outTensors.reserve(out_tensor_num);
+  node.variantPack.outTensors.resize(out_tensor_num);
   return atb::NO_ERROR;
 }
 
@@ -776,6 +810,33 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
     const ModelInputParams& input_params,
+    aclrtEvent* event,
+    std::atomic<bool>* event_flag,
+    int node_id) {
+  CHECK(!is_topk_sharing_enabled())
+      << "DSA top-k sharing layer requires forward_with_topk.";
+  return forward_with_topk(x,
+                           cos_pos,
+                           sin_pos,
+                           attn_mask,
+                           kv_cache,
+                           input_params,
+                           torch::Tensor(),
+                           nullptr,
+                           event,
+                           event_flag,
+                           node_id);
+}
+
+torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward_with_topk(
+    torch::Tensor& x,
+    torch::Tensor& cos_pos,
+    torch::Tensor& sin_pos,
+    torch::Tensor& attn_mask,
+    KVCache& kv_cache,
+    const ModelInputParams& input_params,
+    const torch::Tensor& shared_topk_indices,
+    torch::Tensor* output_topk_indices,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
     int node_id) {
@@ -790,7 +851,9 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
                             attn_mask,
                             kv_cache,
                             input_params_new,
-                            false);
+                            false,
+                            shared_topk_indices,
+                            output_topk_indices);
     st = execute_node(decode_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "execute prefill layer fail, error code: " << st;
@@ -802,7 +865,9 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
                             attn_mask,
                             kv_cache,
                             input_params_new,
-                            true);
+                            true,
+                            shared_topk_indices,
+                            output_topk_indices);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "execute prefill layer fail, error code: " << st;
@@ -818,7 +883,9 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
     ModelInputParams& input_params,
-    bool is_prefill) {
+    bool is_prefill,
+    const torch::Tensor& shared_topk_indices,
+    torch::Tensor* output_topk_indices) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
   // final_hidden_states_ = torch::zeros_like(x);
   int32_t input_idx = 0;
@@ -836,7 +903,9 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   // set micro batch 0 input part
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.expert_array());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.expert_array()
+                                            : dp_ep_padding.expert_array());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 2) =
       atb_speed::Utils::AtTensor2Tensor(expert_group_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =
@@ -946,14 +1015,23 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 25) =
       atb_speed::Utils::AtTensor2Tensor(at_in_device_expert_count_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 26) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.padding_idx()
+                                            : dp_ep_padding.padding_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 27) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.un_padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.un_padding_idx()
+                                            : dp_ep_padding.un_padding_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 28) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.dynamic_ep_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.dynamic_ep_idx()
+                                            : dp_ep_padding.dynamic_ep_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 29) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.moe_idx());
-  if (FLAGS_enable_eplb && layer_id_ >= decode_param_.firstKDenseReplace) {
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.moe_idx()
+                                            : dp_ep_padding.moe_idx());
+  if (::xllm::EPLBConfig::get_instance().enable_eplb() &&
+      layer_id_ >= decode_param_.firstKDenseReplace) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 30) =
         atb_speed::Utils::AtTensor2Tensor(expert_routing_map_);
     if (!is_prefill) {
@@ -972,13 +1050,33 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 30) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_index_cache());
 
-  if (input_params.attention.device.q_seq_lens.numel() != 0) {
+  const bool empty_eager_batch =
+      !input_params.enable_graph && input_params.meta.num_sequences == 0;
+  const bool empty_graph_batch =
+      input_params.enable_graph && input_params.meta.actual_num_sequences == 0;
+  const bool empty_batch = empty_eager_batch || empty_graph_batch;
+  const bool use_q_cu_seq_lens =
+      !empty_batch && input_params.attention.device.q_cu_seq_lens.defined() &&
+      input_params.attention.device.q_cu_seq_lens.numel() != 0;
+  if (use_q_cu_seq_lens) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 31) =
         atb_speed::Utils::AtTensor2Tensor(
             input_params.attention.device.q_cu_seq_lens);
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 31) =
         atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
+  }
+
+  if (skip_topk_ || output_topk_) {
+    // TODO: support DSA top-k sharing for CP prefill.
+    CHECK(!(cp_size_ > 1 && is_prefill))
+        << "DSA top-k sharing does not support CP prefill yet.";
+    if (skip_topk_) {
+      CHECK(shared_topk_indices.defined())
+          << "DSA top-k sharing requires previous top-k indices.";
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 32) =
+          atb_speed::Utils::AtTensor2Tensor(shared_topk_indices);
+    }
   }
 
   if (cp_size_ > 1 && is_prefill) {
@@ -1004,9 +1102,21 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 40) =
         atb_speed::Utils::AtTensor2Tensor(
             cp_inputs.actual_seq_lengths_key_next);
+    if (::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 41) =
+          atb_speed::Utils::AtTensor2Tensor(
+              input_params.attention.device.in_prefix_slots);
+    }
   }
 
   node.variantPack.outTensors.at(0) = internal_tensor_;
+  if (output_topk_) {
+    CHECK(output_topk_indices != nullptr && output_topk_indices->defined())
+        << "DSA top-k sharing output tensor is not initialized.";
+    node.variantPack.outTensors.at(node.variantPack.outTensors.size() - 1) =
+        atb_speed::Utils::AtTensor2Tensor(*output_topk_indices);
+  }
 }
 
 }  // namespace layer

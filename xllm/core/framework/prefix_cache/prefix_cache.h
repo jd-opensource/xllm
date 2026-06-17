@@ -26,7 +26,10 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
+#include "block_hasher.h"
+#include "common/macros.h"
 #include "common/types.h"
+#include "core/framework/multimodal/mm_data.h"
 #include "framework/block/block.h"
 #include "framework/kv_cache/kv_cache_event.h"
 #include "util/hash_util.h"
@@ -39,39 +42,47 @@ inline size_t round_down(size_t n, size_t multiple) {
   return (n / multiple) * multiple;
 }
 
-void xxh3_128bits_hash(const uint8_t* pre_hash_value,
-                       const Slice<int32_t>& token_ids,
-                       uint8_t* hash_value);
-
 class PrefixCache {
  public:
+  struct Options {
+    PROPERTY(int32_t, block_size) = 128;
+    PROPERTY(bool, enable_cache_upload) = false;
+    PROPERTY(BlockHasherType, hasher_type) = BlockHasherType::TEXT;
+  };
+
   PrefixCache(const PrefixCache&) = delete;
   PrefixCache(PrefixCache&&) = delete;
   PrefixCache& operator=(const PrefixCache&) = delete;
   PrefixCache& operator=(PrefixCache&&) = delete;
 
-  explicit PrefixCache(uint32_t block_size)
-      : block_size_(block_size), num_blocks_(0) {}
+  explicit PrefixCache(uint32_t block_size,
+                       BlockHasherType hasher_type = BlockHasherType::TEXT)
+      : block_size_(block_size), hasher_type_(hasher_type), num_blocks_(0) {}
 
   virtual ~PrefixCache() {
     exited_.store(true);
     sleep(2);
   };
 
-  std::vector<Block> match(const std::vector<int32_t>& token_ids) {
-    return match(Slice<int32_t>(token_ids), {});
-  }
-
+  // When `block_hashes` covers all matchable blocks, the chained hash is reused
+  // directly and no hash is recomputed; otherwise it is computed on the fly
+  // from `token_ids`/`mm_data` (backward-compatible fallback).
   virtual std::vector<Block> match(
       const Slice<int32_t>& token_ids,
-      const Slice<Block>& existed_shared_blocks = {});
+      const Slice<Block>& existed_shared_blocks = {},
+      const MMData& mm_data = MMData(),
+      const Slice<XXH3Key>& block_hashes = {});
 
   // insert the token ids and blocks into the prefix tree
   // and set hash key to the corresponding block
-  // return the length of new inserted tokens
+  // return the length of new inserted tokens.
+  // `block_hashes` carries the precomputed chained hash and is reused when it
+  // covers all inserted blocks; otherwise the hash is computed on the fly.
   virtual size_t insert(const Slice<int32_t>& token_ids,
                         std::vector<Block>& blocks,
-                        size_t existed_shared_blocks_num = 0);
+                        size_t existed_shared_blocks_num = 0,
+                        const MMData& mm_data = MMData(),
+                        const Slice<XXH3Key>& block_hashes = {});
 
   // insert the blocks with hash key into the prefix tree
   virtual size_t insert(Slice<Block>& blocks);
@@ -103,10 +114,12 @@ class PrefixCache {
                                     const size_t cached_blocks = 0);
 
  protected:
-  size_t insert(const Slice<int32_t>& token_ids,
-                std::vector<Block>& blocks,
-                size_t existed_shared_blocks_num,
-                std::vector<XXH3Key>* insert_keys);
+  virtual size_t insert(const Slice<int32_t>& token_ids,
+                        std::vector<Block>& blocks,
+                        size_t existed_shared_blocks_num,
+                        const MMData& mm_data,
+                        const Slice<XXH3Key>& block_hashes,
+                        std::vector<XXH3Key>* insert_keys);
 
   size_t insert(Slice<Block>& blocks, std::vector<XXH3Key>* insert_keys);
 
@@ -199,6 +212,9 @@ class PrefixCache {
 
   // the block size of the memory blocks
   uint32_t block_size_;
+
+  // hasher type used to construct BlockHasher in match/insert.
+  BlockHasherType hasher_type_;
 
   // the total number of blocks in the prefix cache
   size_t num_blocks_ = 0;

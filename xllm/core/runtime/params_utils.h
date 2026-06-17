@@ -26,15 +26,8 @@ namespace xllm {
 
 class Stream;
 
-void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
-                            ForwardInput& forward_inputs,
-                            int64_t num_decoding_tokens);
-
-void forward_input_to_proto(const RawForwardInput& inputs,
-                            proto::ForwardInput* pb_forward_input);
-
-bool raw_forward_input_to_packed_proto(
-    const RawForwardInput& input,
+bool forward_input_to_packed_proto(
+    const ForwardInput& input,
     proto::PackedForwardInput* packed_forward_input);
 
 void packed_proto_to_forward_input(

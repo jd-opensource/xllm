@@ -17,10 +17,14 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <numeric>
+#include <vector>
 
 #include "attention_metadata.h"
 #include "core/common/global_flags.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/rec_config.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 
@@ -28,10 +32,22 @@ namespace xllm::layer {
 
 namespace {
 
+torch::TensorOptions int32_options_like(const torch::Tensor& preferred,
+                                        const torch::Tensor& fallback) {
+  if (preferred.defined()) {
+    return preferred.options().dtype(torch::kInt32);
+  }
+  if (fallback.defined()) {
+    return fallback.options().dtype(torch::kInt32);
+  }
+  return torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
+}
+
 AttentionMetadata build_attention_metadata(
     const ModelInputParams& params,
     bool enable_mla,
     const std::string& compute_dtype,
+    const std::optional<torch::Device>& device,
     const std::optional<torch::Tensor>& attn_mask) {
   // MLA mode still affects which shared tensors must be materialized for
   // attention execution, but the flag itself is no longer carried in metadata.
@@ -52,6 +68,8 @@ AttentionMetadata build_attention_metadata(
                               params.attention.host.kv_seq_lens.end(),
                               int64_t{0});
   }
+  attn_metadata.kv_seq_lens_vec = params.attention.host.kv_seq_lens;
+  attn_metadata.q_seq_lens_vec = params.attention.host.q_seq_lens;
   attn_metadata.slot_mapping = params.attention.device.new_cache_slots;
   attn_metadata.compute_dtype = compute_dtype;
 
@@ -66,7 +84,7 @@ AttentionMetadata build_attention_metadata(
   attn_metadata.unshared_plan_info = std::make_shared<PlanInfo>();
 #endif
 
-#if defined(USE_CUDA) || defined(USE_NPU)
+#if defined(USE_CUDA) || defined(USE_NPU) || defined(USE_MLU)
   // Use explicit attn_mask if provided; otherwise fall back to
   // graph_buffer.attn_mask (e.g. Qwen2_5_VL sets graph_buffer.attn_mask for
   // LongCat text encoding)
@@ -80,23 +98,81 @@ AttentionMetadata build_attention_metadata(
 #endif
 
 #if defined(USE_NPU)
+  attn_metadata.is_spec_verify = params.is_spec_verify;
+  attn_metadata.use_expanded_decode_for_spec_verify_attention =
+      params.graph.use_expanded_decode_for_spec_verify_attention;
+  if (attn_metadata.use_expanded_decode_for_spec_verify_attention) {
+    attn_metadata.expanded_kv_seq_lens = params.graph.expanded_kv_seq_lens;
+    attn_metadata.expanded_block_table = params.graph.expanded_block_tables;
+    attn_metadata.expanded_paged_attention_tiling_data =
+        params.graph.expanded_tiling_data;
+    if (!params.graph.expanded_kv_seq_lens_vec.empty()) {
+      attn_metadata.expanded_kv_seq_lens_host =
+          torch::tensor(params.graph.expanded_kv_seq_lens_vec, torch::kInt);
+    }
+  }
   // Determine if we should use ACL graph mode:
-  // - FLAGS_enable_graph must be enabled
-  // - Must be decode phase (not prefill)
+  // - --enable_graph=true
+  // - Must be decode phase or spec-verify chunked prefill
   // - tiling_data must be available
   bool is_decode = !params.meta.batch_forward_type.is_prefill() &&
                    !params.meta.batch_forward_type.is_mixed() &&
                    !params.meta.batch_forward_type.is_chunked_prefill();
-  bool use_acl_graph =
-      FLAGS_enable_graph && is_decode && params.graph.tiling_data.defined();
+  bool is_spec_verify_chunked_prefill =
+      params.is_spec_verify &&
+      params.meta.batch_forward_type.is_chunked_prefill();
+  bool use_acl_graph = ::xllm::ExecutionConfig::get_instance().enable_graph() &&
+                       params.enable_graph &&
+                       (is_decode || is_spec_verify_chunked_prefill) &&
+                       params.graph.tiling_data.defined();
   if (use_acl_graph) {
     // ACL graph mode: use CustomPagedAttention with tiling_data on device
     attn_metadata.paged_attention_tiling_data = params.graph.tiling_data;
   }
-  // Provide host seq_lens for NPU kernels (required by CustomPagedAttention).
+  if (!params.attention.host.q_seq_lens.empty()) {
+    attn_metadata.q_seq_lens_host =
+        torch::tensor(params.attention.host.q_seq_lens, torch::kInt);
+  }
   if (!params.attention.host.kv_seq_lens.empty()) {
     attn_metadata.kv_seq_lens_host =
         torch::tensor(params.attention.host.kv_seq_lens, torch::kInt);
+  }
+  if (!params.attention.host.q_cu_seq_lens.empty()) {
+    attn_metadata.q_cu_seq_lens_host_vec.reserve(
+        params.attention.host.q_cu_seq_lens.size());
+    for (int32_t len : params.attention.host.q_cu_seq_lens) {
+      attn_metadata.q_cu_seq_lens_host_vec.emplace_back(len);
+    }
+  }
+  if (!params.attention.host.kv_seq_lens.empty()) {
+    attn_metadata.kv_seq_lens_host_vec.reserve(
+        params.attention.host.kv_seq_lens.size());
+    std::vector<int64_t> kv_cu;
+    kv_cu.reserve(params.attention.host.kv_seq_lens.size());
+    int64_t total = 0;
+    for (int32_t len : params.attention.host.kv_seq_lens) {
+      total += len;
+      kv_cu.emplace_back(total);
+      attn_metadata.kv_seq_lens_host_vec.emplace_back(len);
+    }
+    attn_metadata.kv_cu_seq_lens_host_vec = std::move(kv_cu);
+  }
+  if (!is_decode) {
+    constexpr int64_t kFiaSplitFuseMaskSize = 2048;
+    torch::Device mask_device = torch::kCPU;
+    if (params.attention.device.q_seq_lens.defined()) {
+      mask_device = params.attention.device.q_seq_lens.device();
+    } else if (params.embedding.input_embedding.defined()) {
+      mask_device = params.embedding.input_embedding.device();
+    }
+    torch::TensorOptions mask_options =
+        torch::TensorOptions().dtype(torch::kFloat32).device(mask_device);
+    attn_metadata.fia_attn_mask =
+        torch::triu(torch::ones({kFiaSplitFuseMaskSize, kFiaSplitFuseMaskSize},
+                                mask_options),
+                    1)
+            .to(torch::kInt8)
+            .contiguous();
   }
 #endif
   attn_metadata.is_chunked_prefill =
@@ -104,7 +180,7 @@ AttentionMetadata build_attention_metadata(
       params.meta.batch_forward_type.is_chunked_prefill();
   attn_metadata.is_prefill = params.meta.batch_forward_type.is_prefill();
 
-  // enable_mla is for DeepSeekv32 on mlu device
+  // MLA-family MLU paths require per-sequence q/kv lengths during prefill.
   if (!attn_metadata.is_prefill || enable_mla) {
     attn_metadata.block_table = params.attention.device.block_tables;
 #if !defined(USE_NPU) && !defined(USE_CUDA)
@@ -122,19 +198,41 @@ AttentionMetadata build_attention_metadata(
   }
   if (params.attention.device.q_seq_lens.defined()) {
     attn_metadata.q_seq_lens = params.attention.device.q_seq_lens;
-    CHECK(params.attention.device.q_cu_seq_lens.defined())
-        << "q_cu_seq_lens must be provided by upstream";
-    auto zero =
-        torch::zeros({1}, params.attention.device.q_cu_seq_lens.options());
-    attn_metadata.q_cu_seq_lens =
-        torch::cat({zero, params.attention.device.q_cu_seq_lens}, 0);
+    torch::Tensor q_cu_seq_lens = params.attention.device.q_cu_seq_lens;
+    if (!q_cu_seq_lens.defined()) {
+      q_cu_seq_lens = torch::cumsum(attn_metadata.q_seq_lens, 0);
+    }
+    q_cu_seq_lens = q_cu_seq_lens.to(torch::kInt32);
+    const bool q_cu_has_leading_zero =
+        !params.attention.host.q_cu_seq_lens.empty() &&
+        params.attention.host.q_cu_seq_lens.front() == 0;
+    if (params.graph.tiling_data.defined() || q_cu_has_leading_zero) {
+      attn_metadata.q_cu_seq_lens = q_cu_seq_lens;
+    } else {
+      torch::Tensor zero = torch::zeros({1}, q_cu_seq_lens.options());
+      attn_metadata.q_cu_seq_lens = torch::cat({zero, q_cu_seq_lens}, 0);
+    }
   }
 #endif
 
   attn_metadata.is_dummy = (params.meta.q_max_seq_len == 0);
   if (attn_metadata.is_dummy) {
-    attn_metadata.slot_mapping =
-        torch::tensor({1}, params.attention.device.new_cache_slots.options());
+    torch::TensorOptions options =
+        int32_options_like(params.attention.device.new_cache_slots,
+                           params.attention.device.q_seq_lens);
+    if (!params.attention.device.new_cache_slots.defined() &&
+        !params.attention.device.q_seq_lens.defined()) {
+      CHECK(device.has_value())
+          << "dummy attention requires device when new_cache_slots is "
+             "undefined";
+      options = options.device(device.value());
+    }
+    attn_metadata.slot_mapping = torch::tensor({1}, options);
+    attn_metadata.q_cu_seq_lens = torch::tensor({0, 1}, options);
+    attn_metadata.q_seq_lens = torch::tensor({1}, options);
+    attn_metadata.kv_seq_lens = torch::tensor({1}, options);
+    attn_metadata.max_query_len = 1;
+    attn_metadata.max_seq_len = std::max<int64_t>(attn_metadata.max_seq_len, 1);
   }
 
   // Set is_causal: true for prefill (causal attention), false for decode
@@ -142,8 +240,9 @@ AttentionMetadata build_attention_metadata(
   attn_metadata.is_causal =
       attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
 
-  // Copy enable_cuda_graph flag from params
-  attn_metadata.enable_cuda_graph = params.enable_cuda_graph;
+  // Copy graph mode flag from params. AttentionMetadata keeps the historical
+  // CUDA-oriented name for CUDA/MUSA attention plan handling.
+  attn_metadata.enable_cuda_graph = params.enable_graph;
 
 #if defined(USE_CUDA) || defined(USE_MUSA)
   if (attn_metadata.is_causal && !attn_metadata.enable_cuda_graph) {
@@ -164,7 +263,7 @@ AttentionMetadata build_attention_metadata(
       attn_metadata.step_tensor = llmrec_params.current_round_tensor;
     }
 
-    if (!FLAGS_enable_xattention_one_stage) {
+    if (!::xllm::RecConfig::get_instance().enable_xattention_one_stage()) {
 #if defined(USE_CUDA) || defined(USE_MUSA)
       attn_metadata.xattention_two_stage_decode_cache.emplace(
           XAttentionTwoStageDecodeCache{});
@@ -212,17 +311,20 @@ AttentionMetadata build_attention_metadata(
 AttentionMetadata AttentionMetadataBuilder::build(
     const ModelInputParams& params,
     bool enable_mla,
-    const std::optional<torch::Tensor>& attn_mask) {
+    const std::optional<torch::Tensor>& attn_mask,
+    const std::optional<torch::Device>& device) {
   return AttentionMetadataBuilder::build(
-      params, enable_mla, "float", attn_mask);
+      params, enable_mla, "float", attn_mask, device);
 }
 
 AttentionMetadata AttentionMetadataBuilder::build(
     const ModelInputParams& params,
     bool enable_mla,
     const std::string& compute_dtype,
-    const std::optional<torch::Tensor>& attn_mask) {
-  return build_attention_metadata(params, enable_mla, compute_dtype, attn_mask);
+    const std::optional<torch::Tensor>& attn_mask,
+    const std::optional<torch::Device>& device) {
+  return build_attention_metadata(
+      params, enable_mla, compute_dtype, device, attn_mask);
 }
 
 }  // namespace xllm::layer

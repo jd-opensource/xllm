@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/config/scheduler_config.h"
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/framework/parallel_state/npu_dp_ep_padding.h"
@@ -109,7 +110,9 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     mrope_section_ = model_args.rope_scaling_mrope_section();
 
     // int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
+    int32_t mask_value =
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ? -9984
+                                                                         : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
@@ -188,7 +191,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     cos_pos = cos_pos.view(at::IntArrayRef{-1, 2, cos_pos.size(-1) / 2});
     sin_pos = sin_pos.view(at::IntArrayRef{-1, 2, sin_pos.size(-1) / 2});
     torch::Tensor attn_mask;
-    if (FLAGS_enable_chunked_prefill) {
+    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
       int max_kv_seq = input_params.meta.kv_max_seq_len;
       int num_sequences = input_params.meta.num_sequences;
       if (num_sequences > 0) {

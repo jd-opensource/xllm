@@ -29,6 +29,8 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/rec_config.h"
 #include "core/layers/common/attention_metadata.h"
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/cuda/flashinfer_planinfo.h"
@@ -110,7 +112,7 @@ CudaGraphPersistentParam::CudaGraphPersistentParam(
     const runtime::Options& options)
     : args_(args), device_(device), options_(options) {
   // Use max_tokens_per_batch for first dimension size
-  const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
+  const int64_t max_tokens_per_batch = options.max_tokens_per_batch();
   // num_sequences
   int64_t max_seqs_per_batch;
   if (is_rec_multi_round_mode()) {
@@ -265,7 +267,7 @@ void CudaGraphPersistentParam::set_aux_hidden_states(
   if (aux_hidden_states_.numel() == 0) {
     // Lazy initialization: create aux_hidden_states tensor if not already
     // created
-    const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
+    const int64_t max_tokens_per_batch = options_.max_tokens_per_batch();
     auto shape = value.sizes().vec();
     shape[0] = max_tokens_per_batch;
     torch::ScalarType dtype = util::parse_dtype(args_.dtype(), device_);
@@ -483,7 +485,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
 
     // Initialize persistent_embedding_ if needed and not already initialized
     if (persistent_embedding_.numel() == 0) {
-      const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
+      const int64_t max_tokens_per_batch = options_.max_tokens_per_batch();
       const int64_t embedding_dim = embedding.size(1);
       torch::ScalarType dtype = util::parse_dtype(args_.dtype(), device_);
       persistent_embedding_ =
@@ -504,7 +506,8 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   const bool is_decode_with_llmrec =
       params.meta.batch_forward_type.is_decode() && params.has_llmrec_params();
   const bool use_two_stage_decode =
-      !FLAGS_enable_xattention_one_stage && is_decode_with_llmrec;
+      !::xllm::RecConfig::get_instance().enable_xattention_one_stage() &&
+      is_decode_with_llmrec;
   const int32_t head_dim = args_.head_dim();
   const int64_t tp_size =
       options_.world_size() / std::max(options_.dp_size(), 1);
@@ -605,7 +608,8 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     const int64_t max_decode_step =
         !llmrec_params.unshared_k_caches.empty()
             ? llmrec_params.unshared_k_caches[0].size(2)
-            : std::max<int64_t>(FLAGS_max_decode_rounds - 1, 1);
+            : std::max<int64_t>(
+                  ::xllm::RecConfig::get_instance().max_decode_rounds() - 1, 1);
     CHECK_GT(max_decode_step, 0)
         << "max_decode_step must be > 0 for two-stage decode";
 
@@ -844,7 +848,7 @@ bool CudaGraph::capture(CausalLM* model,
   // the same device when using cudaStreamCaptureModeGlobal. Capture requires
   // exclusive access, so we use write lock.
   std::optional<std::unique_lock<std::shared_mutex>> capture_lock_guard;
-  if (FLAGS_enable_graph) {
+  if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     auto& capture_lock =
         ::xllm::cuda::DeviceCaptureLock::get_instance().get_write_lock(
             device_index_);
@@ -1011,7 +1015,7 @@ ModelOutput CudaGraph::replay(const torch::Tensor& tokens,
   // capture operations. Replay can share the lock with other replay/prepare
   // operations.
   std::optional<std::shared_lock<std::shared_mutex>> replay_lock_guard;
-  if (FLAGS_enable_graph) {
+  if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     auto& replay_lock =
         ::xllm::cuda::DeviceCaptureLock::get_instance().get_read_lock(
             device_index_);
@@ -1091,8 +1095,10 @@ CudaGraphExecutorImpl::CudaGraphExecutorImpl(CausalLM* model,
       args_(args),
       device_(device),
       options_(options),
-      enable_prefill_piecewise_graph_(FLAGS_enable_prefill_piecewise_graph) {
-  max_tokens_for_graph_mode_ = FLAGS_max_tokens_for_graph_mode;
+      enable_prefill_piecewise_graph_(::xllm::ExecutionConfig::get_instance()
+                                          .enable_prefill_piecewise_graph()) {
+  max_tokens_for_graph_mode_ =
+      ::xllm::ExecutionConfig::get_instance().max_tokens_for_graph_mode();
   if (max_tokens_for_graph_mode_ < options_.max_seqs_per_batch()) {
     max_tokens_for_graph_mode_ = options_.max_seqs_per_batch();
   }
@@ -1216,7 +1222,7 @@ CudaGraphExecutorImpl::GraphMemoryUsageStats
 CudaGraphExecutorImpl::get_graph_memory_usage_stats() {
   GraphMemoryUsageStats stats;
 
-  if (!FLAGS_enable_graph_vmm_pool) {
+  if (!::xllm::ExecutionConfig::get_instance().enable_graph_vmm_pool()) {
     const auto pool = get_mem_pool();
     const auto usage = get_graph_pool_memory_usage(device_.index(), pool);
     stats.executor_total_bytes = usage.reserved_bytes;
@@ -1288,7 +1294,8 @@ void CudaGraphExecutorImpl::log_graph_memory_after_capture() {
   }
   last_logged_executor_total_bytes_ = executor_total_bytes;
 
-  const bool vmm_enabled = FLAGS_enable_graph_vmm_pool;
+  const bool vmm_enabled =
+      ::xllm::ExecutionConfig::get_instance().enable_graph_vmm_pool();
   auto format_size = [](size_t bytes) {
     return c10::CachingDeviceAllocator::format_size(bytes);
   };
@@ -1317,7 +1324,7 @@ void CudaGraphExecutorImpl::reset_vmm_allocator_offset(
 at::cuda::MempoolId_t CudaGraphExecutorImpl::get_mem_pool(
     uint32_t physical_pool_id,
     uint32_t shape_id) {
-  if (!FLAGS_enable_graph_vmm_pool) {
+  if (!::xllm::ExecutionConfig::get_instance().enable_graph_vmm_pool()) {
     // Non-VMM mode intentionally uses one pool per executor instance.
     // Rationale: this executor is designed for single-threaded invocation, and
     // concurrent run() on the same executor instance is not allowed.
@@ -1421,7 +1428,7 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
         << "CudaGraphExecutorImpl::run() in prefill piecewise capture mode";
 
     TorchMemPool* pool_ptr = nullptr;
-    if (FLAGS_enable_graph_vmm_pool) {
+    if (::xllm::ExecutionConfig::get_instance().enable_graph_vmm_pool()) {
       reset_vmm_allocator_offset(kPhysicalPoolIdPrefill);
       const uint32_t shape_id = bucket_num_tokens;
       pool_ptr = get_or_create_vmm_mempool(kPhysicalPoolIdPrefill, shape_id);
@@ -1460,8 +1467,9 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
     // Fail fast intentionally: after entering graph mode, silently falling back
     // to eager can hide allocator/capture regressions and make latency behavior
     // non-deterministic in production. Operators can disable graph mode via
-    // FLAGS_enable_graph or FLAGS_enable_prefill_piecewise_graph when fallback
-    // behavior is preferred over strict graph-mode enforcement.
+    // ::xllm::ExecutionConfig::get_instance().enable_graph() or
+    // ::xllm::ExecutionConfig::get_instance().enable_prefill_piecewise_graph()
+    // when fallback behavior is preferred over strict graph-mode enforcement.
     LOG(FATAL)
         << "Failed to capture piecewise CUDA graph for bucket num_tokens: "
         << bucket_num_tokens << " (actual num_tokens: " << n_tokens << ")";
@@ -1506,7 +1514,7 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
         << "CudaGraphExecutorImpl::run() in decode capture mode";
 
     TorchMemPool* pool_ptr = nullptr;
-    if (FLAGS_enable_graph_vmm_pool) {
+    if (::xllm::ExecutionConfig::get_instance().enable_graph_vmm_pool()) {
       reset_vmm_allocator_offset(kPhysicalPoolIdDecode);
       const uint32_t shape_id = bucket_num_tokens;
       pool_ptr = get_or_create_vmm_mempool(kPhysicalPoolIdDecode, shape_id);
@@ -1544,8 +1552,8 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
 
     // Same fail-fast policy as prefill capture above: keep graph-mode behavior
     // explicit and avoid silently switching execution semantics after a capture
-    // failure. Use FLAGS_enable_graph to turn off graph mode if eager fallback
-    // is desired for resiliency.
+    // failure. Use ::xllm::ExecutionConfig::get_instance().enable_graph() to
+    // turn off graph mode if eager fallback is desired for resiliency.
     LOG(FATAL) << "Failed to capture CUDA graph for bucket num_tokens: "
                << bucket_num_tokens << " (actual num_tokens: " << n_tokens
                << ")";
@@ -1562,7 +1570,9 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
 uint32_t CudaGraphExecutorImpl::get_bucket_num_tokens(uint32_t num_tokens,
                                                       bool is_prefill) const {
   // no_padding only works for decode, prefill requires padding for graph reuse
-  if (FLAGS_enable_graph_mode_decode_no_padding && !is_prefill) {
+  if (::xllm::ExecutionConfig::get_instance()
+          .enable_graph_mode_decode_no_padding() &&
+      !is_prefill) {
     return num_tokens;
   }
   if (num_tokens <= 1) {

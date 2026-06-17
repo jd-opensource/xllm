@@ -339,6 +339,10 @@ inline torch::Tensor get_tensor_from_blob(const std::vector<int64_t>& dims,
 
   size_t tensor_nbytes = at::detail::computeStorageNbytesContiguous(
       dims, tensor.dtype().itemsize());
+  if (tensor_nbytes == 0) {
+    return torch::empty(dims, option);
+  }
+
   torch::Storage storage;
   auto fptr = c10::GetStorageImplCreate(device_type);
   auto allocator = c10::GetAllocator(device_type);

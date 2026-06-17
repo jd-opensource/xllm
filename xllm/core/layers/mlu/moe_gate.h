@@ -17,11 +17,14 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <optional>
+
 #include "framework/model/model_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
 #include "layers/common/linear.h"
+#include "layers/mlu/moe_softplus_topk.h"
 
 namespace xllm {
 namespace layer {
@@ -36,12 +39,14 @@ class MoEGateImpl : public torch::nn::Module {
   // hidden_size, norm_topk_prob, scoring_func, topk_method).
   MoEGateImpl(const ModelArgs& model_args,
               const QuantArgs& quant_args,
-              const torch::TensorOptions& options);
+              const torch::TensorOptions& options,
+              bool use_hash = false);
 
   // Forward: hidden_states -> (reduce_weight, expert_id).
   // Reshapes hidden_states to 2D, runs gate projection, then moe_active_topk.
   std::tuple<torch::Tensor, torch::Tensor> forward(
-      torch::Tensor& hidden_states);
+      torch::Tensor& hidden_states,
+      const std::optional<torch::Tensor>& input_ids = std::nullopt);
 
   // Load state dict. Gate and e_score_correction_bias
   void load_state_dict(const StateDict& state_dict);
@@ -57,6 +62,7 @@ class MoEGateImpl : public torch::nn::Module {
   std::string scoring_func_;
 
   ReplicatedLinear gate_{nullptr};
+  MOESoftPlusTopK moe_softplus_topk_{nullptr};
   DEFINE_WEIGHT(e_score_correction_bias);
 };
 

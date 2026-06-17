@@ -15,10 +15,12 @@ limitations under the License.
 
 #include "npu_glm4_moe_decoder_layer.h"
 
-#include "common/global_flags.h"
-DECLARE_string(rank_tablefile);
-DECLARE_string(communication_backend);
-DECLARE_int32(expert_parallel_degree);
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/config/scheduler_config.h"
 
 namespace xllm {
 namespace layer {
@@ -46,7 +48,9 @@ NpuGlm4MoeDecoderImpl::NpuGlm4MoeDecoderImpl(const ModelContext& context,
   end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;
 
   param_from_args(prefill_param_, model_args, parallel_args, true);
-  param_from_args(decode_param_, model_args, parallel_args, false);
+  param_from_args(decode_graph_param_, model_args, parallel_args, false);
+  decode_eager_param_ = decode_graph_param_;
+  decode_eager_param_.enableAclGraphPagedAttention = false;
   atb_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   placeholder_vec_ = {1};
   device_id_ = options.device().index();
@@ -56,7 +60,9 @@ NpuGlm4MoeDecoderImpl::NpuGlm4MoeDecoderImpl(const ModelContext& context,
       context,
       layer_id_,
       prefill_param_.firstKDenseReplace,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
 
   initialize_tensors(options);
 }
@@ -118,11 +124,14 @@ void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
   param.mlpLinearTransposeType = {1, -1, 1, -1};
 
   param.enableSplitFuse =
-      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
+      (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ||
+       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) &&
+      is_prefill;
 
   // TODO: not support MTP model yet
   param.enableAclGraphPagedAttention =
-      FLAGS_enable_graph && !is_prefill && args.n_layers() > 1;
+      ::xllm::ExecutionConfig::get_instance().enable_graph() && !is_prefill &&
+      args.n_layers() > 1;
 
   param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
                                      ? std::vector<int>{-1, -1, -1, -1}
@@ -130,8 +139,10 @@ void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
 
   param.normEps = args.rms_norm_eps();
   // param.rank = parallel_args.rank();
-  param.backend = FLAGS_communication_backend;
-  // param.rankTableFile = FLAGS_rank_tablefile;
+  param.backend =
+      ::xllm::ParallelConfig::get_instance().communication_backend();
+  // param.rankTableFile =
+  // ::xllm::EPLBConfig::get_instance().rank_tablefile();
 
   param.layerId = layer_id_;
   param.numHiddenLayers = args.n_layers();
@@ -208,12 +219,13 @@ void NpuGlm4MoeDecoderImpl::initialize_parallel_parameters(
     const ParallelArgs& parallel_args) {
   param.lmHeadLocalTp = dp_local_tp_size_;
   param.mapping = parallel_args.mapping();
-  param.tensorParallelInfo = {parallel_args.rank(),
-                              parallel_args.world_size(),
-                              FLAGS_communication_backend,
-                              FLAGS_rank_tablefile,
-                              nullptr,
-                              ""};
+  param.tensorParallelInfo = {
+      parallel_args.rank(),
+      parallel_args.world_size(),
+      ::xllm::ParallelConfig::get_instance().communication_backend(),
+      ::xllm::EPLBConfig::get_instance().rank_tablefile(),
+      nullptr,
+      ""};
 
   param.PrintParam();
   param.maxDecodeDpTokenSize = 0;  // TODO
@@ -300,7 +312,10 @@ int64_t NpuGlm4MoeDecoderImpl::init_layer() {
   BaseLayer::name_ = "glm4_moe_decoder_layer " + std::to_string(layer_id_);
   model_name_ = "Glm4_Moe";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
-  CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
+  CHECK_OPERATION_STATUS_RETURN(
+      init_node(decode_graph_node_, decode_graph_param_));
+  CHECK_OPERATION_STATUS_RETURN(
+      init_node(decode_eager_node_, decode_eager_param_));
 
   return atb::NO_ERROR;
 }
@@ -356,22 +371,29 @@ torch::Tensor NpuGlm4MoeDecoderImpl::forward(
                             attn_mask,
                             kv_cache,
                             input_params,
-                            true);
+                            true,
+                            false);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << " excute prefill layer fail, error code: " << st;
+                           << " execute prefill layer fail, error code: " << st;
   } else {
-    build_node_variant_pack(decode_node_,
+    const bool use_graph_decode_input =
+        ::xllm::ExecutionConfig::get_instance().enable_graph() &&
+        input_params.graph.tiling_data.defined();
+    auto& decode_node =
+        use_graph_decode_input ? decode_graph_node_ : decode_eager_node_;
+    build_node_variant_pack(decode_node,
                             x,
                             cos_pos,
                             sin_pos,
                             /*attn_mask*/ tensor_placeholder_,
                             kv_cache,
                             input_params,
-                            false);
-    st = execute_node(decode_node_, node_id + 1000, event, event_flag);
+                            false,
+                            use_graph_decode_input);
+    st = execute_node(decode_node, node_id + 1000, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << " excute decode layer fail, error code: " << st;
+                           << " execute decode layer fail, error code: " << st;
   }
 
   return tensor_placeholder_;
@@ -385,7 +407,8 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
     const ModelInputParams& input_params,
-    bool is_prefill) {
+    bool is_prefill,
+    bool use_graph_decode_input) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
   auto& dp_ep_padding = input_params.parallel.dp_ep_padding_data;
 
@@ -431,7 +454,8 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
   int32_t input_idx = WEIGHT_COUNT_PER_LAYER + 15;
 
   if (is_prefill &&
-      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+      (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ||
+       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache())) {
     node.variantPack.inTensors.at(input_idx) =
         atb_speed::Utils::AtTensor2Tensor(
             input_params.attention.device.q_seq_lens);
@@ -462,7 +486,7 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(input_idx++) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
-  if (FLAGS_enable_graph && !is_prefill &&
+  if (!is_prefill && use_graph_decode_input &&
       input_params.graph.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(input_params.graph.tiling_data);

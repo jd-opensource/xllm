@@ -18,11 +18,13 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
 #include "base_executor_impl.h"
 #include "core/framework/batch/batch.h"
+#include "core/framework/config/execution_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_output.h"
@@ -31,6 +33,25 @@ limitations under the License.
 #include "runtime/options.h"
 
 namespace xllm {
+namespace {
+
+class ScopedConfigSnapshot final {
+ public:
+  ScopedConfigSnapshot()
+      : max_tokens_for_graph_mode_(
+            ExecutionConfig::get_instance().max_tokens_for_graph_mode()) {}
+
+  ~ScopedConfigSnapshot() {
+    ExecutionConfig::get_instance().max_tokens_for_graph_mode(
+        max_tokens_for_graph_mode_);
+  }
+
+ private:
+  int32_t max_tokens_for_graph_mode_;
+};
+
+}  // namespace
+
 class MockCausalLM : public CausalLM {
  public:
   MockCausalLM(const torch::TensorOptions& options) : options_(options) {
@@ -341,6 +362,82 @@ TEST_F(MluGraphExecutorTest, TargetDecodeCapturesThenReplays) {
   EXPECT_EQ(model_->forward_cnt(), 1);
 }
 
+TEST_F(MluGraphExecutorTest, LargeDecodeBucketCapturesThenReplays) {
+  ScopedConfigSnapshot config_snapshot;
+  ExecutionConfig::get_instance().max_tokens_for_graph_mode(128);
+  options_.is_draft_engine(false);
+  options_.max_seqs_per_batch(128);
+  rebuild_impl();
+
+  const int32_t batch_size = 65;
+  const uint64_t seed = 19;
+  auto forward_input = prepare_inputs(batch_size, seed);
+  const int32_t start_cnt = model_->forward_cnt();
+
+  auto first_output = impl_
+                          ->run({forward_input.token_ids},
+                                {forward_input.positions},
+                                kv_caches_,
+                                {forward_input.input_params})
+                          .hidden_states;
+  auto second_output = impl_
+                           ->run({forward_input.token_ids},
+                                 {forward_input.positions},
+                                 kv_caches_,
+                                 {forward_input.input_params})
+                           .hidden_states;
+
+  torch_mlu::synchronize();
+  EXPECT_TRUE(torch::allclose(first_output, second_output, 1e-5, 1e-6));
+  EXPECT_EQ(model_->forward_cnt(), start_cnt + 1);
+  EXPECT_EQ(model_->last_tokens_size(), 80);
+}
+
+TEST_F(MluGraphExecutorTest, OverConfiguredTokenLimitFallsBackToEager) {
+  ScopedConfigSnapshot config_snapshot;
+  ExecutionConfig::get_instance().max_tokens_for_graph_mode(33);
+  options_.is_draft_engine(false);
+  options_.max_seqs_per_batch(33);
+  rebuild_impl();
+
+  const int32_t batch_size = 33;
+  const uint64_t seed = 79;
+  auto forward_input = prepare_inputs(batch_size, seed);
+  const int32_t start_cnt = model_->forward_cnt();
+
+  auto first_output = impl_
+                          ->run({forward_input.token_ids},
+                                {forward_input.positions},
+                                kv_caches_,
+                                {forward_input.input_params})
+                          .hidden_states;
+  auto second_output = impl_
+                           ->run({forward_input.token_ids},
+                                 {forward_input.positions},
+                                 kv_caches_,
+                                 {forward_input.input_params})
+                           .hidden_states;
+
+  torch_mlu::synchronize();
+  EXPECT_TRUE(torch::allclose(first_output, second_output, 1e-5, 1e-6));
+  EXPECT_EQ(model_->forward_cnt(), start_cnt + 2);
+  EXPECT_EQ(model_->last_tokens_size(), batch_size);
+}
+
+TEST_F(MluGraphExecutorTest, PersistentTensorBytesIncludeLazyAux) {
+  ::xllm::mlu::GraphPersistentParam param(
+      model_args_, tensor_options_.device(), options_);
+  const std::size_t output_bytes =
+      static_cast<std::size_t>(param.output_.numel()) *
+      param.output_.element_size();
+  const std::size_t base_bytes = param.get_persistent_tensor_bytes();
+
+  param.aux_hidden_states_ = torch::zeros_like(param.output_);
+
+  EXPECT_GT(base_bytes, output_bytes);
+  EXPECT_EQ(param.get_persistent_tensor_bytes(), base_bytes + output_bytes);
+}
+
 TEST_F(MluGraphExecutorTest, PrefillThenDecodeCapturesAndReplays) {
   options_.is_draft_engine(false);
   rebuild_impl();
@@ -441,6 +538,8 @@ TEST_F(MluGraphExecutorTest, UnevenDpDecodePadsToTpGraphSize) {
 TEST_F(MluGraphExecutorTest, MtpSeqLensCapacityUsesSpecFactor) {
   options_.is_draft_engine(false);
   options_.num_speculative_tokens(1);
+  options_.num_decoding_tokens(options_.num_speculative_tokens() + 1);
+  options_.enable_speculative_decode(true);
   options_.max_seqs_per_batch(2);
   rebuild_impl();
 

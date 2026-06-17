@@ -16,10 +16,9 @@ limitations under the License.
 
 #include "request_params.h"
 
-#include <google/protobuf/util/json_util.h>
-
 #include "core/common/global_flags.h"
 #include "core/common/instance_name.h"
+#include "core/framework/config/model_config.h"
 #include "core/util/uuid.h"
 #include "request.h"
 
@@ -60,6 +59,8 @@ void apply_beam_search_logprobs_default(
     params.top_logprobs = static_cast<int64_t>(params.beam_width);
   }
 }
+
+nlohmann::json proto_struct_to_json(const google::protobuf::Struct& pb_struct);
 
 // Handle tool_choice conversion from Anthropic format to internal format
 std::string handle_tool_choice(
@@ -110,10 +111,9 @@ std::vector<JsonTool> handle_tools(
 
     // Convert input_schema to JSON
     if (tool.has_input_schema()) {
-      std::string json_str;
-      google::protobuf::util::MessageToJsonString(tool.input_schema(),
-                                                  &json_str);
-      json_tool.function.parameters = nlohmann::json::parse(json_str);
+      json_tool.function.parameters = proto_struct_to_json(tool.input_schema());
+    } else {
+      json_tool.function.parameters = nlohmann::json::object();
     }
 
     tools.push_back(std::move(json_tool));
@@ -517,7 +517,7 @@ RequestParams::RequestParams(const proto::RerankRequest& request,
   x_request_time = x_rtime;
   max_tokens = 1;
   streaming = false;
-  if (FLAGS_enable_qwen3_reranker) {
+  if (::xllm::ModelConfig::get_instance().enable_qwen3_reranker()) {
     logprobs = true;
   } else {
     is_embeddings = true;
@@ -530,7 +530,19 @@ RequestParams::RequestParams(const proto::AnthropicMessagesRequest& request,
   request_id = generate_anthropic_chat_request_id();
   x_request_id = x_rid;
   x_request_time = x_rtime;
+  if (x_request_id.empty() && request.has_x_request_id()) {
+    x_request_id = request.x_request_id();
+  }
+  if (x_request_time.empty() && request.has_x_request_time()) {
+    x_request_time = request.x_request_time();
+  }
 
+  if (request.has_service_request_id()) {
+    service_request_id = request.service_request_id();
+  }
+  if (request.has_source_xservice_addr()) {
+    source_xservice_addr = request.source_xservice_addr();
+  }
   max_tokens = static_cast<uint32_t>(request.max_tokens());
   if (request.has_stream()) {
     streaming = request.stream();
@@ -547,6 +559,9 @@ RequestParams::RequestParams(const proto::AnthropicMessagesRequest& request,
   if (request.stop_sequences_size() > 0) {
     stop = std::vector<std::string>(request.stop_sequences().begin(),
                                     request.stop_sequences().end());
+  }
+  if (request.has_ignore_eos()) {
+    ignore_eos = request.ignore_eos();
   }
   tool_choice = std::move(handle_tool_choice(request));
   tools = std::move(handle_tools(request));

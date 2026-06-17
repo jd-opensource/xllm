@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <cmath>
 #include <string>
 
 #include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
@@ -26,9 +27,6 @@ constexpr int64_t kDynamicQuantMode = 1;
 constexpr int64_t kDstTypeInt8 = 2;
 constexpr int64_t kActivateDimDefault = -1;
 constexpr int64_t kSwigluModeDefault = 0;
-constexpr double kClampLimitDefault = 7.0;
-constexpr double kGluAlphaDefault = 1.702;
-constexpr double kGluBiasDefault = 1.0;
 
 std::tuple<at::Tensor, at::Tensor> construct_dequant_swiglu_quant_output_tensor(
     const at::Tensor& x) {
@@ -68,10 +66,30 @@ std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
     const c10::optional<at::Tensor>& quant_offset,
     const c10::optional<at::Tensor>& group_index,
     bool activate_left,
-    int64_t quant_mode) {
+    int64_t quant_mode,
+    int64_t swiglu_mode,
+    double clamp_limit,
+    double glu_alpha,
+    double glu_bias) {
   TORCH_CHECK(quant_mode == kStaticQuantMode || quant_mode == kDynamicQuantMode,
               "quant_mode only supports 0(static) or 1(dynamic), but got ",
               quant_mode,
+              ".");
+  TORCH_CHECK(swiglu_mode == 0 || swiglu_mode == 1,
+              "swiglu_mode only supports 0 or 1, but got ",
+              swiglu_mode,
+              ".");
+  TORCH_CHECK(std::isfinite(clamp_limit) && clamp_limit >= 0.0,
+              "clamp_limit must be finite and non-negative, but got ",
+              clamp_limit,
+              ".");
+  TORCH_CHECK(std::isfinite(glu_alpha),
+              "glu_alpha must be finite, but got ",
+              glu_alpha,
+              ".");
+  TORCH_CHECK(std::isfinite(glu_bias),
+              "glu_bias must be finite, but got ",
+              glu_bias,
               ".");
 
   auto [y, scale] = construct_dequant_swiglu_quant_output_tensor(x);
@@ -96,13 +114,17 @@ std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
                  kDstTypeInt8,
                  round_mode_ptr,
                  kActivateDimDefault,
-                 kSwigluModeDefault,
-                 kClampLimitDefault,
-                 kGluAlphaDefault,
-                 kGluBiasDefault,
+                 swiglu_mode,
+                 clamp_limit,
+                 glu_alpha,
+                 glu_bias,
                  y,
                  scale);
   } else {
+    TORCH_CHECK(swiglu_mode == kSwigluModeDefault,
+                "aclnnDequantSwigluQuantV2 is required for swiglu_mode ",
+                swiglu_mode,
+                ".");
     EXEC_NPU_CMD(aclnnDequantSwigluQuant,
                  x,
                  weight_scale,

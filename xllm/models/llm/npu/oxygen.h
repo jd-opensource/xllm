@@ -14,6 +14,8 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+
+#include "core/framework/config/scheduler_config.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/rotary_embedding_util.h"
 #include "llm_model_base.h"
@@ -76,7 +78,7 @@ class OxygenModelImpl : public QWen3ModelImpl {
     torch::Tensor attn_mask;
     // for chunked prefill, generate the attn mask.
     if (!input_params.meta.batch_forward_type.is_decode()) {
-      if (FLAGS_enable_chunked_prefill) {
+      if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
         int max_kv_seq = input_params.meta.kv_max_seq_len;
         int num_sequences = input_params.meta.num_sequences;
         if (num_sequences > 0) {
@@ -127,8 +129,7 @@ class OxygenModelImpl : public QWen3ModelImpl {
             event_flag);
       if (use_deepstack) {
         if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
-          h = deepstack_process(
-              h, input_params.multimodal.visual_pos_masks, deep_stacks[i]);
+          h = h + deep_stacks[i];
         }
       }
     }

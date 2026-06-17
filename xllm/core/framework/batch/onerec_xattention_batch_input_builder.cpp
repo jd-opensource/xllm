@@ -19,6 +19,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/global_flags.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/util/rec_model_utils.h"
 #include "core/util/utils.h"
 #include "util/tensor_helper.h"
@@ -132,7 +133,7 @@ ForwardInput OneRecXAttentionBatchInputBuilder::build_rec_forward_input(
   step_meta.batch_size = batch_size;
   step_meta.beam_width = beam_width;
   step_meta.current_round = 0;
-  step_meta.total_round = std::max(1, get_rec_multi_round_decode_rounds() + 1);
+  step_meta.total_round = std::max(1, get_rec_multi_round_decode_rounds());
   step_meta.decode_positions_vec = std::move(decode_positions_vec);
 
   if (args_ != nullptr) {
@@ -140,8 +141,9 @@ ForwardInput OneRecXAttentionBatchInputBuilder::build_rec_forward_input(
         args_->n_kv_heads().value_or(args_->decoder_n_heads()));
     const int64_t head_dim = args_->decoder_head_dim();
     step_meta.full_kv_shape = {
-        FLAGS_max_tokens_per_batch + FLAGS_max_seqs_per_batch * beam_width *
-                                         std::max(0, step_meta.total_round - 1),
+        ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch() +
+            ::xllm::SchedulerConfig::get_instance().max_seqs_per_batch() *
+                beam_width * std::max(0, step_meta.total_round - 1),
         n_kv_heads,
         head_dim,
     };

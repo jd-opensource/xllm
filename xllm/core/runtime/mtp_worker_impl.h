@@ -56,6 +56,8 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
                   int32_t random_seed,
                   MasterStatus master_status) override;
 
+  std::tuple<int64_t, int64_t> estimate_kv_cache_capacity() override;
+
   bool allocate_kv_cache(const KVCacheShape& kv_cache_shape) override;
 
 #if defined(USE_NPU) || defined(USE_MLU)
@@ -74,7 +76,8 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
 
   void fill_validate_input_from_draft_outputs(
       const std::vector<ForwardOutput>& draft_outputs,
-      ForwardInput& validate_input);
+      ForwardInput& validate_input,
+      Stream& compute_stream);
   std::optional<ForwardOutput> run_validate(
       const ForwardInput& input,
       const std::vector<ForwardOutput>& draft_outputs,
@@ -100,6 +103,7 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
   // prepare inputs for draft model at Prefill phase.
   void prepare_prefill_inputs(const ForwardInput& inputs,
                               ForwardInput& prefill_inputs);
+  bool use_qwen3_5_spec_verify_path() const;
 
   // Prepare target validate input from cached target context.
   void prepare_validate_inputs(const ForwardInput& inputs,
@@ -121,7 +125,6 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
 
   void write_target_context_to_cache(const ForwardInput& input,
                                      const SampleOutput& validate_output);
-  void record_validate_metrics(const SampleOutput& validate_output) const;
 
  protected:
   // Draft model worker

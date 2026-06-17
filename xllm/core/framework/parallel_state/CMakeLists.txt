@@ -17,7 +17,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:npu_process_group.h>
     $<$<BOOL:${USE_MLU}>:mlu_process_group.h>
     $<$<BOOL:${USE_MUSA}>:musa_process_group.h>
-    $<$<BOOL:${USE_CUDA}>:cuda_process_group.h>
+    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_DCU}>>:cuda_process_group.h>
     $<$<BOOL:${USE_ILU}>:ilu_process_group.h>
     collective_communicator_base.h
     collective_communicator.h

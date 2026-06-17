@@ -17,15 +17,44 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <nlohmann/json.hpp>
+
+#include "core/framework/config/model_config.h"
+
 namespace xllm {
 
-bool HttpDownloader::fetch_data(const std::string& url, std::string& data) {
+std::unordered_map<std::string, std::string> parse_headers_json(
+    const std::string& raw) {
+  std::unordered_map<std::string, std::string> result;
+  if (raw.empty()) return result;
+
+  try {
+    auto j = nlohmann::json::parse(raw);
+    for (auto& [k, v] : j.items()) {
+      result[k] = v.get<std::string>();
+    }
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to parse mm_download_headers JSON: " << e.what();
+  }
+  return result;
+}
+
+std::unordered_map<std::string, std::string> parse_global_headers() {
+  static const std::unordered_map<std::string, std::string> cached =
+      parse_headers_json(ModelConfig::get_instance().mm_download_headers());
+  return cached;
+}
+
+bool HttpDownloader::fetch_data(
+    const std::string& url,
+    std::string& data,
+    const std::unordered_map<std::string, std::string>& headers) {
   std::string host;
   if (!parse_url(url, host)) {
     return false;
   }
 
-  return download(host, url, data);
+  return download(host, url, data, headers);
 }
 
 bool HttpDownloader::parse_url(const std::string& url, std::string& host) {
@@ -77,11 +106,21 @@ std::shared_ptr<brpc::Channel> BRpcDownloader::get_channel(
   return channel;
 }
 
-bool BRpcDownloader::download(const std::string& host,
-                              const std::string& url,
-                              std::string& data) {
+bool BRpcDownloader::download(
+    const std::string& host,
+    const std::string& url,
+    std::string& data,
+    const std::unordered_map<std::string, std::string>& headers) {
   brpc::Controller cntl;
   cntl.http_request().uri() = url;
+  // 1) global defaults (lowest priority)
+  for (const auto& [k, v] : parse_global_headers()) {
+    cntl.http_request().SetHeader(k, v);
+  }
+  // 2) per-request headers (override global)
+  for (const auto& [k, v] : headers) {
+    cntl.http_request().SetHeader(k, v);
+  }
   cntl.set_timeout_ms(2000);
   auto channel = get_channel(host);
   if (!channel) {

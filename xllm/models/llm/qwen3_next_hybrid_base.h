@@ -22,7 +22,6 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/common/global_flags.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -69,10 +68,12 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
             model_args_.hidden_size(), model_args_.rms_norm_eps(), options));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
-                                      /*mask_value=*/mask_value);
+                                      /*mask_value=*/-9984);
+    dense_attn_mask_ = layer::AttentionMask(options.device(),
+                                            options.dtype().toScalarType(),
+                                            /*mask_value=*/1);
     dp_size_ = parallel_args.dp_size();
   }
 
@@ -96,7 +97,12 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
             input_params,
             model_args_.enable_mla(),
             build_attention_mask(input_params));
-    torch::Tensor h = embed_tokens_(tokens);
+    torch::Tensor h;
+    if (input_params.embedding.input_embedding.defined()) {
+      h = input_params.embedding.input_embedding;
+    } else {
+      h = embed_tokens_(tokens);
+    }
 
     torch::Tensor mrope_cos_sin;
     for (const auto& layer : layers_) {
@@ -114,6 +120,13 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
                          kv_caches[i],
                          input_params,
                          mrope_cos_sin);
+#if defined(USE_NPU)
+      if (input_params.parallel.layer_synchronizer != nullptr &&
+          !input_params.parallel.layer_synchronizer->record_event(
+              static_cast<int64_t>(i), device_.index())) {
+        return ModelOutput();
+      }
+#endif
     }
     auto [hidden_states, residual_out] = norm_->forward(h, residual);
     h = hidden_states;
@@ -155,14 +168,34 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
 
  protected:
   torch::Tensor build_attention_mask(const ModelInputParams& input_params) {
+#if defined(USE_NPU)
+    // On NPU the hybrid path never consumes attn_metadata.attn_mask: full
+    // attention runs through the fused-infer / paged-attention kernels (which
+    // carry their own fixed fia_attn_mask or need no mask at all) and linear
+    // attention is mask-free by construction. Materializing a dense
+    // [seq_len, seq_len] mask here is pure waste and, for long sequences,
+    // triggers an NPU OOM. Hand the kernels an empty mask unless a graph buffer
+    // already supplies one.
+    if (input_params.graph.attn_mask.defined()) {
+      return input_params.graph.attn_mask;
+    }
+    return torch::Tensor();
+#else
+    if (input_params.graph.attn_mask.defined()) {
+      return input_params.graph.attn_mask;
+    }
     max_seq_len_ = std::max(input_params.meta.kv_max_seq_len, max_seq_len_);
-    if (!FLAGS_enable_chunked_prefill) {
-      return attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
+    const bool use_append_mask =
+        input_params.is_spec_verify ||
+        input_params.meta.batch_forward_type.is_mixed() ||
+        input_params.meta.batch_forward_type.is_chunked_prefill();
+    if (!use_append_mask) {
+      return dense_attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
     }
 
     const int32_t num_sequences = input_params.meta.num_sequences;
     if (num_sequences <= 0) {
-      return attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
+      return dense_attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
     }
 
     std::vector<torch::Tensor> req_mask_vec;
@@ -176,6 +209,7 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
                                      device_));
     }
     return torch::cat(req_mask_vec, 0);
+#endif
   }
 
   ModelArgs model_args_;
@@ -187,6 +221,7 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
   torch::ScalarType dtype_ = torch::kFloat;
   layer::Qwen3NextRMSNorm norm_{nullptr};
   layer::AttentionMask attn_mask_;
+  layer::AttentionMask dense_attn_mask_;
   layer::WordEmbedding embed_tokens_{nullptr};
 };
 
@@ -232,53 +267,28 @@ class Qwen3HybridForCausalLMImplBase : public torch::nn::Module {
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
-    auto has_model_weights = [](const StateDict& dict) {
-      return dict.get_tensor("embed_tokens.weight").defined() ||
-             dict.get_dict_with_prefix("layers.").size() > 0 ||
-             dict.get_tensor("norm.weight").defined();
-    };
+    load_model(std::move(loader), "model.", "lm_head.");
+  }
+
+  void load_model(std::unique_ptr<ModelLoader> loader,
+                  const std::string& model_prefix) {
+    load_model(std::move(loader), model_prefix, "lm_head.");
+  }
+
+  void load_model(std::unique_ptr<ModelLoader> loader,
+                  const std::string& model_prefix,
+                  const std::string& lm_head_prefix) {
     auto has_lm_head_weights = [](const StateDict& dict) {
       return dict.get_tensor("weight").defined() ||
              dict.get_tensor("qweight").defined();
     };
 
     for (const auto& state_dict : loader->get_state_dicts()) {
-      auto model_state_dict = state_dict->get_dict_with_prefix("model.");
-      if (!has_model_weights(model_state_dict)) {
-        auto language_model_state_dict =
-            state_dict->get_dict_with_prefix("language_model.model.");
-        if (has_model_weights(language_model_state_dict)) {
-          model_state_dict = language_model_state_dict;
-        } else {
-          auto wrapped_language_model_state_dict =
-              state_dict->get_dict_with_prefix("model.language_model.");
-          if (has_model_weights(wrapped_language_model_state_dict)) {
-            model_state_dict = wrapped_language_model_state_dict;
-          }
-        }
-      }
+      auto model_state_dict = state_dict->get_dict_with_prefix(model_prefix);
       model_->load_state_dict(model_state_dict);
 
-      auto lm_head_state_dict = state_dict->get_dict_with_prefix("lm_head.");
-      if (!has_lm_head_weights(lm_head_state_dict)) {
-        auto language_model_lm_head_state_dict =
-            state_dict->get_dict_with_prefix("language_model.lm_head.");
-        if (has_lm_head_weights(language_model_lm_head_state_dict)) {
-          lm_head_state_dict = language_model_lm_head_state_dict;
-        } else {
-          auto wrapped_language_model_lm_head_state_dict =
-              state_dict->get_dict_with_prefix("model.language_model.lm_head.");
-          if (has_lm_head_weights(wrapped_language_model_lm_head_state_dict)) {
-            lm_head_state_dict = wrapped_language_model_lm_head_state_dict;
-          } else {
-            auto wrapped_lm_head_state_dict =
-                state_dict->get_dict_with_prefix("model.lm_head.");
-            if (has_lm_head_weights(wrapped_lm_head_state_dict)) {
-              lm_head_state_dict = wrapped_lm_head_state_dict;
-            }
-          }
-        }
-      }
+      auto lm_head_state_dict =
+          state_dict->get_dict_with_prefix(lm_head_prefix);
       if (!has_lm_head_weights(lm_head_state_dict) && tie_word_embeddings_) {
         auto tied_lm_head_state_dict =
             model_state_dict.get_dict_with_prefix("embed_tokens.");
@@ -288,8 +298,7 @@ class Qwen3HybridForCausalLMImplBase : public torch::nn::Module {
       }
       lm_head_->load_state_dict(lm_head_state_dict);
     }
-
-    model_->verify_loaded_weights("model.");
+    model_->verify_loaded_weights(model_prefix);
   }
 
   virtual void prepare_expert_weight(int32_t layer_id,

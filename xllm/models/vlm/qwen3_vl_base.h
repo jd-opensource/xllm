@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "core/framework/model/model_output.h"
-#include "core/framework/request/mm_data_item.h"
+#include "core/framework/multimodal/mm_data_item.h"
 #include "core/layers/common/lm_head.h"
 #include "models/model_registry.h"
 
@@ -42,6 +42,8 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
     visual_ = register_module("visual", VisionTransformer(context));
     language_model_ = register_module("language_model", LanguageModel(context));
   }
+
+  virtual ~Qwen3VLForConditionalGenerationBase() = default;
 
   void prepare_encoder_input(const ModelInputParams& input_params,
                              std::optional<Qwen3_VLImageInputs>& image_inputs,
@@ -78,10 +80,9 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
     MMDict multimodal_embeds;
     auto merge_size = model_args_.mm_image_merge_size();
     if (image_input) {
-      auto [image_embeds, deep_stacks] =
+      auto image_embeds =
           visual_(image_input->pixel_values.to(options_),
-                  image_input->image_grid_thw.to(options_.device()),
-                  input_params);
+                  image_input->image_grid_thw.to(options_.device()));
 
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
@@ -93,19 +94,12 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
           image_tokens.data_ptr<int64_t>(),
           image_tokens.data_ptr<int64_t>() + image_tokens.numel());
       multimodal_embeds["image|embedding"] =
-          image_embeds.split(image_tokens_vec, 0 /*dim*/);
-
-      for (size_t i = 0; i < deep_stacks.size(); ++i) {
-        multimodal_embeds[std::string("image|embedding|deepstack_") +
-                          std::to_string(i)] =
-            deep_stacks[i].split(image_tokens_vec, 0 /*dim*/);
-      }
+          image_embeds.split(image_tokens_vec, /*dim=*/0);
     }
     if (video_input) {
-      auto [video_embeds, deep_stacks] =
+      auto video_embeds =
           visual_(video_input->pixel_values_videos.to(options_),
-                  video_input->video_grid_thw.to(options_.device()),
-                  input_params);
+                  video_input->video_grid_thw.to(options_.device()));
 
       auto video_tokens =
           (video_input->video_grid_thw.prod(-1) / merge_size / merge_size)
@@ -117,37 +111,24 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
           video_tokens.data_ptr<int64_t>(),
           video_tokens.data_ptr<int64_t>() + video_tokens.numel());
       multimodal_embeds["video|embedding"] =
-          video_embeds.split(video_tokens_vec, 0 /*dim*/);
-
-      for (size_t i = 0; i < deep_stacks.size(); ++i) {
-        multimodal_embeds[std::string("video|embedding|deepstack_") +
-                          std::to_string(i)] =
-            deep_stacks[i].split(video_tokens_vec, 0 /*dim*/);
-      }
+          video_embeds.split(video_tokens_vec, /*dim=*/0);
     }
     return multimodal_embeds;
   }
 
-  torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
-    auto special_token_ids = torch::tensor(
-        {model_args_.image_token_id(), model_args_.video_token_id()},
-        input_ids.options().dtype(torch::kInt64));
-    auto is_multimodal = torch::isin(input_ids, special_token_ids);
-    return is_multimodal;
-  }
-
-  std::vector<torch::Tensor> get_deep_stacks(
-      const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.multimodal.mm_data;
-    if (!mm_data.has("embedding|deepstack_0")) {
-      return {};
+  std::pair<torch::Tensor, std::vector<torch::Tensor>>
+  split_multimodal_embedding(const torch::Tensor& embedding) const {
+    const size_t num_deepstacks =
+        model_args_.mm_deepstack_visual_indexes().size();
+    CHECK(embedding.defined()) << "Multimodal embedding is not defined.";
+    const int64_t num_chunks = static_cast<int64_t>(num_deepstacks + 1);
+    auto chunks = embedding.chunk(/*chunks=*/num_chunks, /*dim=*/1);
+    std::vector<torch::Tensor> deepstacks;
+    deepstacks.reserve(num_deepstacks);
+    for (size_t idx = 1; idx < chunks.size(); ++idx) {
+      deepstacks.push_back(chunks[idx]);
     }
-
-    std::vector<torch::Tensor> deepstacks = {
-        mm_data.get<torch::Tensor>("embedding|deepstack_0").value(),
-        mm_data.get<torch::Tensor>("embedding|deepstack_1").value(),
-        mm_data.get<torch::Tensor>("embedding|deepstack_2").value()};
-    return deepstacks;
+    return {chunks[0], std::move(deepstacks)};
   }
 
   torch::Tensor merge_multimodal_embeddings(
@@ -161,18 +142,35 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
                                      const ModelInputParams& input_params) {
     const auto& mm_data = input_params.multimodal.mm_data;
-    torch::Tensor multimodal_embeds;
-    if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
-      multimodal_embeds = emb.value();
-    }
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
-    if (!multimodal_embeds.defined()) {
+    if (!mm_data.valid()) {
       return inputs_embeds;
     }
-    auto is_multimodal = generate_multimodal_mask(input_ids);
-    input_params.multimodal.visual_pos_masks = is_multimodal;
-    inputs_embeds = merge_multimodal_embeddings(
-        inputs_embeds, multimodal_embeds, is_multimodal);
+    const size_t num_deepstacks =
+        model_args_.mm_deepstack_visual_indexes().size();
+    std::vector<torch::Tensor> deepstack_input_embeds;
+    deepstack_input_embeds.resize(num_deepstacks);
+    for (auto& deepstack : deepstack_input_embeds) {
+      deepstack = torch::zeros_like(inputs_embeds);
+    }
+    auto merge_modality = [&](const std::string& embed_key,
+                              const std::string& mask_key) {
+      auto emb = mm_data.get<torch::Tensor>(embed_key);
+      if (!emb.has_value()) return;
+      auto mask = mm_data.get<torch::Tensor>(mask_key);
+      if (!mask.has_value()) return;
+      auto [embedding, deepstacks] = split_multimodal_embedding(emb.value());
+      inputs_embeds =
+          merge_multimodal_embeddings(inputs_embeds, embedding, mask.value());
+      for (size_t idx = 0; idx < num_deepstacks; ++idx) {
+        deepstack_input_embeds[idx] = merge_multimodal_embeddings(
+            deepstack_input_embeds[idx], deepstacks[idx], mask.value());
+      }
+    };
+
+    merge_modality("image|embedding", "image|mask");
+    merge_modality("video|embedding", "video|mask");
+    input_params.multimodal.deep_stacks = std::move(deepstack_input_embeds);
     return inputs_embeds;
   }
 
@@ -180,8 +178,6 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
                       const torch::Tensor& positions,
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) {
-    input_params.multimodal.deep_stacks =
-        std::move(get_deep_stacks(input_params));
     return language_model_(tokens, positions, kv_caches, input_params);
   }
 
@@ -201,7 +197,12 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
           state_dict->get_dict_with_prefix("model.visual."));
     }
 
-    if (!model_args_.image_embedding_mode()) {
+#if defined(USE_NPU)
+    visual_->verify_loaded_weights("model.visual.");
+    visual_->merge_loaded_weights();
+#endif
+
+    if (!model_args_.encoder_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
   }

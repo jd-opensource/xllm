@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "common/macros.h"
@@ -47,9 +48,13 @@ class ProfileManager {
     PROPERTY(int32_t,
              max_tokens_per_batch) = std::numeric_limits<int32_t>::max();
 
+    PROPERTY(int32_t, max_seqs_per_batch) = 1024;
+
     PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
 
     PROPERTY(int32_t, max_global_tpot_ms) = std::numeric_limits<int32_t>::max();
+
+    PROPERTY(InstanceRole, instance_role) = InstanceRole::DEFAULT;
   };
 
   struct CopyBlockProfile {
@@ -129,7 +134,9 @@ class ProfileManager {
 
   std::shared_ptr<Request> generate_single_request(int32_t token_length,
                                                    int32_t prefix_length);
-  std::shared_ptr<Request> generate_single_decode_request(int32_t total_length);
+  std::shared_ptr<Request> generate_single_decode_request(
+      int32_t total_length,
+      std::optional<int32_t> dp_rank = std::nullopt);
 
   std::string generate_filename(const std::string& file_suffix);
 
@@ -139,8 +146,14 @@ class ProfileManager {
 
   void profile_token_budget();
 
-  // Warmup ACL graph executor with prefill and decode requests
+  // Warmup ACL graph executor according to the instance role.
   void warmup_for_graph();
+
+  void warmup_prefill_for_graph();
+
+  void warmup_decode_for_graph();
+
+  void warmup_unified_for_graph();
 
   bool check_if_satisfy_slo(int32_t num_tokens, int32_t tpot_slo_ms);
 
@@ -157,6 +170,8 @@ class ProfileManager {
                                     std::vector<int32_t>& token_length_vec);
 
   double run_decode_request(const std::vector<int32_t>& total_length_vec);
+
+  double run_graph_decode_request(const std::vector<int32_t>& total_length_vec);
 
   static const std::vector<ProfileManager::CopyBlockProfile>&
   get_copy_block_profile();

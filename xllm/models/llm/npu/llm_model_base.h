@@ -27,6 +27,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/interruption_bus.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -56,6 +57,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
     // register submodules
     decoder_layer_ = register_module("decoder_layer", DecoderType(context));
     block_copy_ = register_module("block_copy", layer::NpuBlockCopy(context));
+    decoder_layer_->set_layer_id(layer_id_);
   }
 
   virtual torch::Tensor forward(torch::Tensor& x,
@@ -119,6 +121,10 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
 
   virtual void refresh_rolling_weights() {
     decoder_layer_->refresh_rolling_weights();
+  }
+
+  virtual void set_residual(torch::Tensor residual) {
+    decoder_layer_->set_residual(residual);
   }
 
  private:
@@ -192,14 +198,14 @@ class LlmModelImplBase : public torch::nn::Module {
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor attn_mask;
     max_seq_len_ =
-        FLAGS_enable_chunked_prefill
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()
             ? std::max(input_params.meta.kv_max_seq_len, max_seq_len_)
             : 128;
     if (model_type_ == "qwen2") {
       attn_mask = attn_mask_.get_attn_mask(
           max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
     } else {
-      if (FLAGS_enable_chunked_prefill) {
+      if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
         int num_sequences = input_params.meta.num_sequences;
         if (num_sequences > 0) {
           std::vector<torch::Tensor> req_mask_vec;
@@ -359,6 +365,12 @@ class LlmModelImplBase : public torch::nn::Module {
     npu_embed_tokens_ = npu_word_embedding;
   }
 
+  virtual void set_residual(torch::Tensor residual) {
+    for (auto& layer : layers_) {
+      layer->set_residual(residual);
+    }
+  }
+
  protected:
   torch::Tensor cos_sin_;
   torch::Tensor cos_pos_;
@@ -394,10 +406,15 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
  public:
   LlmForCausalLMImplBase(const ModelContext& context) {
     tie_word_embeddings = context.get_model_args().tie_word_embeddings();
+    embedding_mode_ = context.get_model_args().embedding_mode();
     // register submodules
     model_ = register_module("model", LlmModelType(context));
 
-    npu_lm_head_ = register_module("npu_lm_head", layer::NpuLmHead(context));
+    if (!embedding_mode_) {
+      npu_lm_head_ = register_module("npu_lm_head", layer::NpuLmHead(context));
+    } else {
+      LOG(INFO) << "Skip registering npu_lm_head in embedding mode.";
+    }
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -419,7 +436,22 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   // returns: [num_tokens, vocab_size]
   virtual torch::Tensor logits(const torch::Tensor& hidden_states,
                                const torch::Tensor& seleted_idxes) {
+    CHECK(!npu_lm_head_.is_empty())
+        << "npu_lm_head is not initialized in embedding mode.";
     return npu_lm_head_(hidden_states, seleted_idxes, 0);
+  }
+
+  // hidden_states: [num_tokens, hidden_size]
+  // seleted_idxes: [num_tokens]
+  // out_hidden: [num_seqs, hidden_size]
+  // returns: [num_tokens, vocab_size]
+  virtual torch::Tensor logits(const torch::Tensor& hidden_states,
+                               const torch::Tensor& seleted_idxes,
+                               torch::Tensor& out_hidden) {
+    CHECK(!npu_lm_head_.is_empty())
+        << "npu_lm_head is not initialized in embedding mode.";
+    return npu_lm_head_->forward_with_hidden(
+        hidden_states, seleted_idxes, out_hidden, 0);
   }
 
   // hidden_states: [num_tokens, hidden_size]
@@ -447,27 +479,32 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
                                    prefix,
                                    "model.",
                                    ""}));
-      if (tie_word_embeddings) {
-        npu_lm_head_->load_state_dict(
-            state_dict->get_dict_with_prefix(std::vector<std::string>{
-                prefix + "embed_tokens.", "embed_tokens."}));
-      } else {
-        npu_lm_head_->load_state_dict(
-            state_dict->get_dict_with_prefix("lm_head."));
+      if (!embedding_mode_) {
+        if (tie_word_embeddings) {
+          npu_lm_head_->load_state_dict(
+              state_dict->get_dict_with_prefix(std::vector<std::string>{
+                  prefix + "embed_tokens.", "embed_tokens."}));
+        } else {
+          npu_lm_head_->load_state_dict(
+              state_dict->get_dict_with_prefix("lm_head."));
+        }
       }
     }
 
     // verify
     model_->verify_loaded_weights(prefix);
-    if (tie_word_embeddings) {
-      npu_lm_head_->verify_loaded_weights("embed_tokens.");
-    } else {
-      npu_lm_head_->verify_loaded_weights("lm_head.");
+    if (!embedding_mode_) {
+      if (tie_word_embeddings) {
+        npu_lm_head_->verify_loaded_weights("embed_tokens.");
+      } else {
+        npu_lm_head_->verify_loaded_weights("lm_head.");
+      }
     }
 
     model_->merge_loaded_weights();
-    // test
-    npu_lm_head_->merge_loaded_weights();
+    if (!embedding_mode_) {
+      npu_lm_head_->merge_loaded_weights();
+    }
   }
 
   virtual void lazy_load_model(
@@ -479,21 +516,30 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     }
     for (const auto& state_dict : loader->get_state_dicts()) {
       model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
-      if (tie_word_embeddings) {
-        npu_lm_head_->load_state_dict(
-            state_dict->get_dict_with_prefix(prefix + "embed_tokens."));
-      } else {
-        npu_lm_head_->load_state_dict(
-            state_dict->get_dict_with_prefix("lm_head."));
+      if (!embedding_mode_) {
+        if (tie_word_embeddings) {
+          npu_lm_head_->load_state_dict(
+              state_dict->get_dict_with_prefix(prefix + "embed_tokens."));
+        } else {
+          npu_lm_head_->load_state_dict(
+              state_dict->get_dict_with_prefix("lm_head."));
+        }
       }
     }
     // verify
     model_->verify_loaded_weights(prefix);
-    npu_lm_head_->verify_loaded_weights("lm_head.");
+    if (!embedding_mode_) {
+      if (tie_word_embeddings) {
+        npu_lm_head_->verify_loaded_weights(prefix + "embed_tokens.");
+      } else {
+        npu_lm_head_->verify_loaded_weights("lm_head.");
+      }
+    }
 
     model_->merge_and_move_pinned_host();
-    // test
-    npu_lm_head_->merge_and_move_pinned_host();
+    if (!embedding_mode_) {
+      npu_lm_head_->merge_and_move_pinned_host();
+    }
 
     keep_host_weights = true;
   }
@@ -504,13 +550,17 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
       return;
     }
     model_->free_weights();
-    npu_lm_head_->free_weights();
+    if (!npu_lm_head_.is_empty()) {
+      npu_lm_head_->free_weights();
+    }
     keep_host_weights = false;
   }
 
   virtual void reload_model_weights() {
     model_->reload_weights();
-    npu_lm_head_->reload_weights();
+    if (!npu_lm_head_.is_empty()) {
+      npu_lm_head_->reload_weights();
+    }
     auto stream = c10_npu::getCurrentNPUStream();
     stream.synchronize();
   }
@@ -518,14 +568,18 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   virtual void init_rolling_model_state() {
     model_->reload_non_decoder_weights();
     model_->refresh_rolling_weights();
-    npu_lm_head_->reload_weights();
+    if (!npu_lm_head_.is_empty()) {
+      npu_lm_head_->reload_weights();
+    }
     auto stream = c10_npu::getCurrentNPUStream();
     stream.synchronize();
   }
 
   virtual void reload_model_weights_from_device() {
     model_->reload_weights_from_device();
-    npu_lm_head_->reload_weights_from_device();
+    if (!npu_lm_head_.is_empty()) {
+      npu_lm_head_->reload_weights_from_device();
+    }
   }
 
   virtual void prepare_expert_weight(int32_t layer_id,
@@ -534,7 +588,11 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
-  virtual layer::NpuLmHead get_npu_lm_head() { return npu_lm_head_; }
+  virtual layer::NpuLmHead get_npu_lm_head() {
+    CHECK(!npu_lm_head_.is_empty())
+        << "npu_lm_head is not initialized in embedding mode.";
+    return npu_lm_head_;
+  }
 
   virtual void set_npu_lm_head(layer::NpuLmHead& head) { npu_lm_head_ = head; }
 
@@ -611,6 +669,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   LlmModelType model_{nullptr};
   int device_id = 0;
   bool tie_word_embeddings{false};
+  bool embedding_mode_{false};
   bool keep_host_weights{false};
   std::shared_ptr<layer::RollingWeightBuffer> rolling_weight_buffer_{nullptr};
   std::unique_ptr<RollingLoadManager> rolling_load_manager_{nullptr};

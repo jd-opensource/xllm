@@ -19,12 +19,15 @@ limitations under the License.
 #include <absl/strings/match.h>
 #include <absl/strings/str_replace.h>
 #include <glog/logging.h>
+#include <pybind11/embed.h>
 #include <torch/torch.h>
 
 #include <boost/algorithm/string.hpp>
 #include <filesystem>
+#include <fstream>
 #include <vector>
 
+#include "core/framework/tokenizer/tokenizer_args.h"
 #include "core/framework/tokenizer/tokenizer_factory.h"
 #include "core/util/json_reader.h"
 #include "models/model_registry.h"
@@ -52,7 +55,13 @@ DiTFolderLoader::DiTFolderLoader(const std::string& folder_path,
 }
 
 std::unique_ptr<Tokenizer> DiTFolderLoader::tokenizer() const {
-  return TokenizerFactory::create_tokenizer(model_weights_path_,
+  // When vocab_file is already an absolute path (e.g. loaded from HF cache),
+  // pass empty dir_path so the tokenizer uses it directly without prepending
+  // model_weights_path_.
+  const std::string& vocab = tokenizer_args_.vocab_file();
+  const bool vocab_is_absolute = !vocab.empty() && vocab[0] == '/';
+  const std::string dir_path = vocab_is_absolute ? "" : model_weights_path_;
+  return TokenizerFactory::create_tokenizer(dir_path,
                                             tokenizer_args_,
                                             /*proxy*/ false);
 }
@@ -71,13 +80,15 @@ std::vector<std::unique_ptr<StateDict>>& DiTFolderLoader::get_state_dicts() {
 }
 
 bool DiTFolderLoader::load_args(const std::string& model_weights_path) {
-  if (!load_tokenizer_args(model_weights_path)) {
-    LOG(ERROR) << "Failed to load tokenizer args from " << model_weights_path;
+  // model_args must be loaded first: it populates text_encoder_model_ which
+  // load_tokenizer_args uses as a fallback when no tokenizer files are present.
+  if (!load_model_args(model_weights_path)) {
+    LOG(ERROR) << "Failed to load model args from " << model_weights_path;
     return false;
   }
 
-  if (!load_model_args(model_weights_path)) {
-    LOG(ERROR) << "Failed to load model args from " << model_weights_path;
+  if (!load_tokenizer_args(model_weights_path)) {
+    LOG(ERROR) << "Failed to load tokenizer args from " << model_weights_path;
     return false;
   }
 
@@ -128,6 +139,14 @@ bool DiTFolderLoader::load_model_args(const std::string& model_weights_path) {
     if (!load_json_config("config.json")) {
       LOG(ERROR) << "Failed to load required config.json for safetensors model";
       return false;
+    }
+    // Read text_encoder_model for tokenizer fallback resolution.
+    const std::string config_json_path = model_weights_path + "/config.json";
+    JsonReader cfg_reader;
+    if (cfg_reader.parse(config_json_path)) {
+      if (auto v = cfg_reader.value<std::string>("text_encoder_model")) {
+        text_encoder_model_ = v.value();
+      }
     }
     load_image_preprocessor_args(model_weights_path);
   } else {
@@ -202,52 +221,203 @@ bool DiTFolderLoader::load_image_preprocessor_args(
   return true;
 }
 
+namespace {
+
+// Resolve a tokenizer directory from a HuggingFace repo id or local path,
+// following the same lookup order as HuggingFace Hub / mainstream frameworks.
+// Returns the resolved directory path, or empty string if not found.
+std::string resolve_text_encoder_tokenizer_path(
+    const std::string& text_encoder_model) {
+  // 1. Local absolute path.
+  if (std::filesystem::exists(text_encoder_model) &&
+      std::filesystem::is_directory(text_encoder_model)) {
+    return text_encoder_model;
+  }
+
+  // 2. HuggingFace cache: convert "org/name" -> "models--org--name".
+  //    Cache root candidates (matches huggingface_hub default behaviour):
+  //      $HF_HOME/hub  >  $HUGGINGFACE_HUB_CACHE  >  ~/.cache/huggingface/hub
+  const std::string hf_cache_dir = [&]() -> std::string {
+    if (const char* v = std::getenv("HF_HOME")) {
+      return std::string(v) + "/hub";
+    }
+    if (const char* v = std::getenv("HUGGINGFACE_HUB_CACHE")) {
+      return std::string(v);
+    }
+    if (const char* v = std::getenv("HOME")) {
+      return std::string(v) + "/.cache/huggingface/hub";
+    }
+    return "";
+  }();
+
+  if (!hf_cache_dir.empty() && std::filesystem::exists(hf_cache_dir)) {
+    // "google/umt5-base" -> "models--google--umt5-base"
+    std::string cache_key = "models--";
+    cache_key += absl::StrReplaceAll(text_encoder_model, {{"/", "--"}});
+
+    const std::filesystem::path model_cache_dir =
+        std::filesystem::path(hf_cache_dir) / cache_key;
+    const std::filesystem::path snapshots_dir = model_cache_dir / "snapshots";
+    if (std::filesystem::exists(snapshots_dir)) {
+      // Prefer the snapshot pointed to by refs/main (or refs/master),
+      // matching huggingface_hub's standard resolution order.
+      for (const auto& ref : {"main", "master"}) {
+        const std::filesystem::path ref_file = model_cache_dir / "refs" / ref;
+        if (std::filesystem::exists(ref_file)) {
+          std::ifstream ifs(ref_file.string());
+          std::string commit_hash;
+          if (std::getline(ifs, commit_hash) && !commit_hash.empty()) {
+            // Trim trailing whitespace/newline
+            while (!commit_hash.empty() &&
+                   (commit_hash.back() == '\n' || commit_hash.back() == '\r' ||
+                    commit_hash.back() == ' ')) {
+              commit_hash.pop_back();
+            }
+            const std::filesystem::path snapshot = snapshots_dir / commit_hash;
+            if (std::filesystem::exists(snapshot) &&
+                std::filesystem::is_directory(snapshot)) {
+              return snapshot.string();
+            }
+          }
+        }
+      }
+      // Fallback: pick the only snapshot directory if there is exactly one.
+      std::filesystem::path only;
+      int32_t dir_count = 0;
+      for (const auto& entry :
+           std::filesystem::directory_iterator(snapshots_dir)) {
+        if (entry.is_directory()) {
+          only = entry.path();
+          ++dir_count;
+        }
+      }
+      if (dir_count == 1) {
+        return only.string();
+      }
+    }
+  }
+
+  // 3. Not in local cache — download tokenizer files only via huggingface_hub.
+  //    We use snapshot_download with allow_patterns to fetch only tokenizer
+  //    files, avoiding downloading multi-GB model weights.
+  LOG(INFO) << "Tokenizer for '" << text_encoder_model
+            << "' not found in HuggingFace cache, downloading via "
+               "huggingface_hub.snapshot_download ...";
+  try {
+    namespace py = pybind11;
+    // The Python interpreter may not be initialized when this function is
+    // called from a worker thread (e.g. DiTWorkerImpl::init_model).
+    // Initialize it here if needed; it is safe to call Py_InitializeEx(0)
+    // multiple times — subsequent calls are no-ops once already initialized.
+    if (!Py_IsInitialized()) {
+      // init_signal_handlers=0: don't override the process signal handlers
+      // (SIGSEGV etc.) that glog/folly have already registered.
+      Py_InitializeEx(0);
+    }
+    py::gil_scoped_acquire gil;
+    py::module_ hf_hub = py::module_::import("huggingface_hub");
+    py::list allow_patterns;
+    for (const auto& p : {"spiece.model",
+                          "tokenizer.model",
+                          "tokenizer.json",
+                          "tokenizer_config.json",
+                          "special_tokens_map.json"}) {
+      allow_patterns.append(p);
+    }
+    py::object result = hf_hub.attr("snapshot_download")(
+        text_encoder_model, py::arg("allow_patterns") = allow_patterns);
+    return result.cast<std::string>();
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "huggingface_hub.snapshot_download failed for '"
+                 << text_encoder_model << "': " << e.what();
+  }
+  return "";
+}
+}  // namespace
+
 bool DiTFolderLoader::load_tokenizer_args(
     const std::string& model_weights_path) {
   // tokenizer args from tokenizer_config.json
-  JsonReader tokenizer_reader;
-  const std::string tokenizer_args_file_path =
-      model_weights_path_ + "/tokenizer_config.json";
+  std::string path = model_weights_path;
+  std::string tokenizer_args_path = path + "/tokenizer_config.json";
 
-  // check if tokenizer.json exists, if exists, set the tokenizer type to fast
-  const std::string tokenizer_json_path =
-      model_weights_path + "/tokenizer.json";
-  if (std::filesystem::exists(tokenizer_json_path)) {
-    tokenizer_args_.tokenizer_type() = "fast";
-    tokenizer_args_.vocab_file() = tokenizer_json_path;
+  if (!std::filesystem::exists(tokenizer_args_path) &&
+      !text_encoder_model_.empty()) {
+    LOG(WARNING)
+        << "Tokenizer fallback to text_encoder_model '" << text_encoder_model_
+        << "' specified in config.json. "
+        << "Please download the tokenizer to the model directory or ensure "
+        << "the HuggingFace cache is populated (e.g. run the official "
+        << "inference script once to cache '" << text_encoder_model_ << "').";
+
+    path = resolve_text_encoder_tokenizer_path(text_encoder_model_);
+    if (path.empty()) {
+      LOG(ERROR) << "Failed to resolve text encoder model tokenizer path for "
+                 << text_encoder_model_;
+      return false;
+    }
   }
 
-  if (!std::filesystem::exists(tokenizer_args_file_path)) {
+  JsonReader tokenizer_reader;
+  tokenizer_args_path = path + "/tokenizer_config.json";
+
+  if (!tokenizer_reader.parse(tokenizer_args_path)) {
     return true;
   }
-  if (tokenizer_reader.parse(tokenizer_args_file_path)) {
-    if (auto v = tokenizer_reader.value<bool>("add_bos_token")) {
-      tokenizer_args_.add_bos_token() = v.value();
+
+  bool prefer_sentencepiece = false;
+  if (auto v = tokenizer_reader.value<std::string>("tokenizer_class")) {
+    const std::string& cls = v.value();
+    if (cls == "T5Tokenizer" || cls == "T5TokenizerFast" ||
+        cls.find("T5") != std::string::npos) {
+      prefer_sentencepiece = true;
     }
-    if (auto v = tokenizer_reader.value<bool>("add_eos_token")) {
-      tokenizer_args_.add_eos_token() = v.value();
-    }
-    if (auto v = tokenizer_reader.value<std::string>("tokenizer_class")) {
-      tokenizer_args_.tokenizer_class() = v.value();
-    }
-    // read bos_token
-    if (auto v = tokenizer_reader.value<std::string>("bos_token.content")) {
-      tokenizer_args_.bos_token() = v.value();
-    } else if (auto v = tokenizer_reader.value<std::string>("bos_token")) {
-      tokenizer_args_.bos_token() = v.value();
-    }
-    // read eos_token
-    if (auto v = tokenizer_reader.value<std::string>("eos_token.content")) {
-      tokenizer_args_.eos_token() = v.value();
-    } else if (auto v = tokenizer_reader.value<std::string>("eos_token")) {
-      tokenizer_args_.eos_token() = v.value();
-    }
-    // read pad_token
-    if (auto v = tokenizer_reader.value<std::string>("pad_token.content")) {
-      tokenizer_args_.pad_token() = v.value();
-    } else if (auto v = tokenizer_reader.value<std::string>("pad_token")) {
-      tokenizer_args_.pad_token() = v.value();
-    }
+  }
+
+  // Check tokenizer.json; but prefer SentencePiece when tokenizer_class is
+  // T5Tokenizer (e.g. UMT5), because the fast tokenizer produces different
+  // token IDs from the SentencePiece tokenizer used during training.
+  const std::string tokenizer_json_path = path + "/tokenizer.json";
+  if (std::filesystem::exists(tokenizer_json_path) && !prefer_sentencepiece) {
+    tokenizer_args_.tokenizer_type() = "fast";
+    tokenizer_args_.vocab_file() = tokenizer_json_path;
+  } else if (std::filesystem::exists(path + "/spiece.model")) {
+    tokenizer_args_.tokenizer_type() = "sentencepiece";
+    tokenizer_args_.vocab_file() = path + "/spiece.model";
+  } else if (std::filesystem::exists(path + "/tokenizer.model")) {
+    tokenizer_args_.tokenizer_type() = "sentencepiece";
+    tokenizer_args_.vocab_file() = path + "/tokenizer.model";
+  } else {
+    LOG(ERROR) << "No tokenizer files found in directory: " << path;
+    return false;
+  }
+
+  if (auto v = tokenizer_reader.value<bool>("add_bos_token")) {
+    tokenizer_args_.add_bos_token() = v.value();
+  }
+  if (auto v = tokenizer_reader.value<bool>("add_eos_token")) {
+    tokenizer_args_.add_eos_token() = v.value();
+  }
+  if (auto v = tokenizer_reader.value<std::string>("tokenizer_class")) {
+    tokenizer_args_.tokenizer_class() = v.value();
+  }
+  // read bos_token
+  if (auto v = tokenizer_reader.value<std::string>("bos_token.content")) {
+    tokenizer_args_.bos_token() = v.value();
+  } else if (auto v = tokenizer_reader.value<std::string>("bos_token")) {
+    tokenizer_args_.bos_token() = v.value();
+  }
+  // read eos_token
+  if (auto v = tokenizer_reader.value<std::string>("eos_token.content")) {
+    tokenizer_args_.eos_token() = v.value();
+  } else if (auto v = tokenizer_reader.value<std::string>("eos_token")) {
+    tokenizer_args_.eos_token() = v.value();
+  }
+  // read pad_token
+  if (auto v = tokenizer_reader.value<std::string>("pad_token.content")) {
+    tokenizer_args_.pad_token() = v.value();
+  } else if (auto v = tokenizer_reader.value<std::string>("pad_token")) {
+    tokenizer_args_.pad_token() = v.value();
   }
 
   return true;
@@ -263,7 +433,27 @@ DiTModelLoader::DiTModelLoader(const std::string& model_root_path)
   std::filesystem::path index_file = root_path / "model_index.json";
   const std::string model_index_file = index_file.string();
   if (!std::filesystem::exists(model_index_file)) {
-    LOG(FATAL) << "Model index file does not exist: " << model_index_file;
+    // Flat layout: no model_index.json. The entire model root is a single
+    // component (e.g. AudioDiT ships one model.safetensors at the root).
+    // Read model_type from config.json and register the root as "model".
+    std::filesystem::path config_json_path = root_path / "config.json";
+    if (!std::filesystem::exists(config_json_path)) {
+      LOG(FATAL) << "DiTModelLoader: neither model_index.json nor config.json "
+                    "found in: "
+                 << model_root_path_;
+    }
+    JsonReader cfg_reader;
+    if (!cfg_reader.parse(config_json_path.string())) {
+      LOG(FATAL) << "DiTModelLoader: failed to parse config.json in: "
+                 << model_root_path_;
+    }
+    auto model_type_opt = cfg_reader.value<std::string>("model_type");
+    const std::string model_type =
+        model_type_opt.has_value() ? model_type_opt.value() : "";
+    set_model_type(model_type);
+    name_to_loader_["model"] = std::make_unique<DiTFolderLoader>(
+        model_root_path_, "model", model_type);
+    return;
   }
 
   JsonReader model_index_reader;
@@ -286,6 +476,11 @@ DiTModelLoader::DiTModelLoader(const std::string& model_root_path)
   // parse model_index.json & initialize model_loader
   for (const auto& [json_key, json_value] : root_json.items()) {
     if (!json_value.is_array() || json_value.size() != 2) {
+      continue;
+    }
+
+    if (json_value[1].is_null()) {
+      LOG(INFO) << "Skipping null component: " << json_key;
       continue;
     }
 

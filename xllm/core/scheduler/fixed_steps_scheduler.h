@@ -128,6 +128,11 @@ class FixedStepsScheduler final : public ContinuousScheduler {
   // Lazy-initialized pipeline
   std::unique_ptr<SchedulerPipeline> scheduler_pipeline_;
 
+  // Holds a request consumed by the blocking wait in schedule_request() while
+  // the queue was empty. prepare_batch() drains it first, through the same path
+  // as request_queue_, so the blocking wait does not lose requests.
+  std::shared_ptr<Request> prefetched_request_;
+
   // Scheduler thread pool for parallel execution of step()
   std::unique_ptr<ThreadPool> step_threadpool_;
 

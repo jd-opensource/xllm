@@ -32,11 +32,15 @@ limitations under the License.
 #if defined(USE_MLU)
 #include "platform/mlu/mlu_layer_synchronizer.h"
 #endif
+#if defined(USE_DCU)
+#include "platform/dcu/dcu_layer_synchronizer.h"
+#endif
+
+#include "core/framework/multimodal/mm_batch_data.h"
 #include "framework/batch/batch_forward_type.h"
 #include "framework/parallel_state/npu_cp_ep_padding.h"
 #include "framework/parallel_state/npu_cp_prepare.h"
 #include "framework/parallel_state/npu_dp_ep_padding.h"
-#include "framework/request/mm_batch_data.h"
 #include "runtime/dit_forward_params.h"
 #include "util/hash_util.h"
 #include "util/tensor_helper.h"
@@ -341,6 +345,7 @@ struct AttentionHostInput {
   std::vector<int32_t> q_seq_lens;
   std::vector<int32_t> q_cu_seq_lens;
   std::vector<int32_t> kv_seq_lens;
+  std::vector<int32_t> kv_cu_seq_lens;
   std::vector<int32_t> new_cache_slots;
   std::vector<int32_t> kv_cache_tokens_nums;
   std::vector<int32_t> ring_cur_seqlen;
@@ -369,6 +374,11 @@ struct AttentionDeviceInput {
   torch::Tensor ring_cur_seqlen;
   torch::Tensor ring_cache_seqlen;
 
+  // Per-rank prefix slot index for KV-split prefix AllGather (see
+  // WorkerImpl::compute_in_prefix_slots). Must propagate in to(device) because
+  // nested worker paths skip recomputation when cp_partitioned is true.
+  torch::Tensor in_prefix_slots;
+
   AttentionDeviceInput to(const torch::Device& device) const {
     AttentionDeviceInput out;
     out.q_seq_lens = safe_to(q_seq_lens, device, true);
@@ -390,6 +400,7 @@ struct AttentionDeviceInput {
     out.history_k_rope = safe_to(history_k_rope, device);
     out.ring_cur_seqlen = safe_to(ring_cur_seqlen, device);
     out.ring_cache_seqlen = safe_to(ring_cache_seqlen, device);
+    out.in_prefix_slots = safe_to(in_prefix_slots, device, true);
     return out;
   }
 };
@@ -688,6 +699,7 @@ struct BlockTransferInfo {
 struct BatchInputMeta {
   BatchForwardType batch_forward_type;
   int32_t num_sequences = 0;
+  int32_t actual_num_sequences = 0;
   int32_t kv_max_seq_len = 0;
   int32_t q_max_seq_len = 0;
   uint64_t batch_id = 0;
@@ -713,6 +725,13 @@ struct ModelEmbeddingInput {
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
 
+  // Precomputed shifted token ids for MTP prefill, aligned with tokens.
+  torch::Tensor mtp_shifted_token_ids;
+
+  // Pending PD handoff bootstrap rows for the first MTP decode step.
+  std::vector<int32_t> mtp_bootstrap_row_idxes;
+  torch::Tensor mtp_bootstrap_embeddings;
+
   ModelEmbeddingInput to(const torch::Device& device) const {
     ModelEmbeddingInput out;
     out.input_embedding = safe_to(input_embedding, device);
@@ -721,6 +740,10 @@ struct ModelEmbeddingInput {
     out.linear_state_indices = safe_to(linear_state_indices, device, true);
     out.request_ids = request_ids;
     out.extra_token_ids = extra_token_ids;
+    out.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
+    out.mtp_bootstrap_row_idxes = mtp_bootstrap_row_idxes;
+    out.mtp_bootstrap_embeddings =
+        safe_to(mtp_bootstrap_embeddings, device, true);
     return out;
   }
 };
@@ -750,14 +773,11 @@ struct MultiModalInput {
 
   // deep_stack for Qwen3-VL
   mutable std::vector<torch::Tensor> deep_stacks;
-  // visual pos mask for Qwen3-VL
-  mutable torch::Tensor visual_pos_masks;
 
   MultiModalInput to(const torch::Device& device) const {
     MultiModalInput out;
     out.mm_data = MMBatchData::to(mm_data, device);
     out.deep_stacks = deep_stacks;
-    out.visual_pos_masks = visual_pos_masks;
     return out;
   }
 };
@@ -773,6 +793,8 @@ struct ParallelInput {
 
 #if defined(USE_MLU)
   std::shared_ptr<MLULayerSynchronizerImpl> layer_synchronizer = nullptr;
+#elif defined(USE_DCU)
+  std::shared_ptr<DCULayerSynchronizerImpl> layer_synchronizer = nullptr;
 #elif defined(USE_NPU)
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
   uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
@@ -801,9 +823,16 @@ struct ParallelInput {
                     device,
                     true))
         .gather_prenorm_idx(
-            safe_to(cp_ep_padding_data.gather_prenorm_idx(), device, true));
+            safe_to(cp_ep_padding_data.gather_prenorm_idx(), device, true))
+        .padding_idx(safe_to(cp_ep_padding_data.padding_idx(), device, true))
+        .un_padding_idx(
+            safe_to(cp_ep_padding_data.un_padding_idx(), device, true))
+        .dynamic_ep_idx(
+            safe_to(cp_ep_padding_data.dynamic_ep_idx(), device, true))
+        .moe_idx(safe_to(cp_ep_padding_data.moe_idx(), device, true))
+        .expert_array(safe_to(cp_ep_padding_data.expert_array(), device, true));
     out.cp_prefill_inputs = cp_prefill_inputs.to(device);
-#if defined(USE_NPU) || defined(USE_MLU)
+#if defined(USE_NPU) || defined(USE_MLU) || defined(USE_DCU)
     out.layer_synchronizer = layer_synchronizer;
 #endif
 #if defined(USE_NPU)
@@ -833,11 +862,22 @@ struct ExpertInput {
 struct GraphInput {
   torch::Tensor attn_mask;
   torch::Tensor tiling_data;
+  bool use_expanded_decode_for_spec_verify_attention = false;
+  torch::Tensor expanded_kv_seq_lens;
+  torch::Tensor expanded_block_tables;
+  torch::Tensor expanded_tiling_data;
+  std::vector<int32_t> expanded_kv_seq_lens_vec;
 
   GraphInput to(const torch::Device& device) const {
     GraphInput out;
     out.attn_mask = safe_to(attn_mask, device, true);
     out.tiling_data = safe_to(tiling_data, device, true);
+    out.use_expanded_decode_for_spec_verify_attention =
+        use_expanded_decode_for_spec_verify_attention;
+    out.expanded_kv_seq_lens = safe_to(expanded_kv_seq_lens, device, true);
+    out.expanded_block_tables = safe_to(expanded_block_tables, device, true);
+    out.expanded_tiling_data = safe_to(expanded_tiling_data, device, true);
+    out.expanded_kv_seq_lens_vec = expanded_kv_seq_lens_vec;
     return out;
   }
 };
@@ -854,6 +894,20 @@ struct ModelInputParams {
     params.expert = expert.to(device);
     params.graph = graph.to(device);
     params.dit_forward_input = dit_forward_input.to(device);
+    params.is_spec_verify = is_spec_verify;
+    params.num_accepted_tokens = safe_to(num_accepted_tokens, device, true);
+    params.dsa_topk_indices = safe_to(dsa_topk_indices, device, true);
+    for (const auto& table : multi_block_tables) {
+      params.multi_block_tables.push_back(
+          safe_to(table, table.options().device(torch::kCPU), true));
+    }
+    params.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
+    if (!params.embedding.linear_state_indices.defined() &&
+        !params.embedding.linear_state_ids.empty()) {
+      params.embedding.linear_state_indices =
+          torch::tensor(params.embedding.linear_state_ids, torch::kInt)
+              .to(device);
+    }
 
     // rec_params device conversion for both OneRec and LLM-Rec variants
     if (const auto* onerec_xattn = onerec_xattention_params()) {
@@ -893,6 +947,10 @@ struct ModelInputParams {
     LOG(INFO) << "ModelInputParams: dp_global_token_nums is "
               << parallel.dp_global_token_nums
               << ", dp_is_decode: " << parallel.dp_is_decode;
+    LOG(INFO) << "ModelInputParams: is_spec_verify is " << is_spec_verify;
+    print_tensor(num_accepted_tokens,
+                 "ModelInputParams: num_accepted_tokens",
+                 /*max_elements=*/4);
 
     if (const auto* onerec_xattn = onerec_xattention_params()) {
       LOG(INFO) << "ModelInputParams: has onerec_xattention_params";
@@ -935,7 +993,7 @@ struct ModelInputParams {
   }
 
   bool record_layer(uint32_t layer_idx, const torch::Device& device) const {
-#if defined(USE_MLU)
+#if defined(USE_MLU) || defined(USE_DCU)
     if (parallel.layer_synchronizer != nullptr) {
       return parallel.layer_synchronizer->record_current(layer_idx,
                                                          device.index());
@@ -955,6 +1013,16 @@ struct ModelInputParams {
   MultiModalInput multimodal;
   ExpertInput expert;
   GraphInput graph;
+
+  // Multi block manager block tables for DeepSeek V4.
+  // Each tensor is [batch_size, max_block_len] for one manager.
+  std::vector<torch::Tensor> multi_block_tables;
+
+  // Shifted target token ids for MTP training/evaluation paths.
+  torch::Tensor mtp_shifted_token_ids;
+  bool is_spec_verify = false;
+  torch::Tensor num_accepted_tokens;
+  torch::Tensor dsa_topk_indices;
 
   RecModelInputParams rec_params;
 
@@ -1019,8 +1087,8 @@ struct ModelInputParams {
   // Using shared_ptr with forward declaration to avoid circular dependency
   std::shared_ptr<layer::AttentionMetadata> attn_metadata;
 
-  // Flag for CUDA graph capture mode
-  bool enable_cuda_graph = false;
+  // Flag for graph capture/replay mode.
+  bool enable_graph = false;
 };
 
 }  // namespace xllm

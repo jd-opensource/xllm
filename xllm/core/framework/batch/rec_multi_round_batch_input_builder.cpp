@@ -27,8 +27,9 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/beam_search_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/util/rec_model_utils.h"
-#include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/sequence.h"
@@ -76,7 +77,7 @@ RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
     const uint64_t batch_id,
     const ModelArgs* args,
     BatchForwardType batch_forward_type,
-    ThreadPool* thread_pool)
+    MPMCThreadPool* thread_pool)
     : allowed_max_tokens_(allowed_max_tokens),
       input_embeddings_vec_(input_embeddings_vec),
       mm_data_vec_(mm_data_vec),
@@ -143,7 +144,8 @@ void RecMultiRoundBatchInputBuilder::process_single_sequence(
 #if defined(USE_NPU)
   base_state.seq_lens.push_back(seq_len);
   base_state.q_seq_lens.push_back(q_seq_len);
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
+    defined(USE_DCU)
   base_state.seq_lens.push_back(base_state.seq_lens.back() + seq_len);
   base_state.q_seq_lens.push_back(base_state.q_seq_lens.back() + q_seq_len);
 #endif
@@ -205,13 +207,6 @@ void RecMultiRoundBatchInputBuilder::extract_tokens_and_positions(
     // skip prompt tokens except the last one
     if (j + 1 < n_tokens) continue;
     ++adjusted_token_to_count_map[token_ids[j]];
-  }
-
-  // Handle MRope positions
-  if (use_mrope_) {
-    const auto& args = *args_;
-    MPositionHelper helper(*sequence, args);
-    base_state.mrope_positions_vec.push_back(helper.get_positions());
   }
 
   // Process each token
@@ -284,7 +279,8 @@ void RecMultiRoundBatchInputBuilder::extract_tokens_and_positions(
   uint32_t prompt_len = sequence->num_prompt_tokens();
   state_ptr->decode_positions_vec.push_back(static_cast<int32_t>(prompt_len));
 
-  int32_t bw = std::max(1, FLAGS_beam_width);
+  int32_t bw =
+      std::max(1, ::xllm::BeamSearchConfig::get_instance().beam_width());
   const int32_t sel_start =
       static_cast<int32_t>(state_ptr->decode_selected_token_idxes.size());
   state_ptr->decode_selected_token_idxes.reserve(sel_start + bw);
@@ -324,7 +320,7 @@ void RecMultiRoundBatchInputBuilder::setup_kv_cache_info(
   }
   state.block_tables_vec.emplace_back(std::move(block_ids));
 #elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
-    defined(USE_MUSA)
+    defined(USE_MUSA) || defined(USE_DCU)
   // TODO: refactor this branch when NPU multi-round xattention lands.
   RecMultiRoundBuilderState& state = rec_multi_round_state_;
   BuilderState& base_state = state.base_state;
@@ -428,7 +424,8 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
 
   // Rec multi-round specific metadata.
   rec_multi_round_state_.total_steps = get_rec_multi_round_decode_rounds();
-  const int32_t beam_width = FLAGS_beam_width;
+  const int32_t beam_width =
+      ::xllm::BeamSearchConfig::get_instance().beam_width();
   const int32_t total_round = rec_multi_round_state_.total_steps;
   const int32_t current_round = 0;
   std::vector<int64_t> full_kv_shape;
@@ -461,11 +458,13 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
     int64_t head_dim = args_ ? args_->head_dim() : 0;
 
     int32_t decode_rounds = get_rec_multi_round_decode_rounds();
-    full_kv_shape = {FLAGS_max_tokens_per_batch +
-                         FLAGS_max_seqs_per_batch * FLAGS_beam_width *
-                             std::max(0, decode_rounds - 1),
-                     n_kv_heads,
-                     head_dim};
+    full_kv_shape = {
+        ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch() +
+            ::xllm::SchedulerConfig::get_instance().max_seqs_per_batch() *
+                ::xllm::BeamSearchConfig::get_instance().beam_width() *
+                std::max(0, decode_rounds - 1),
+        n_kv_heads,
+        head_dim};
   }
 
   // Decode positions

@@ -8,7 +8,9 @@
 #include <optional>
 
 #include "chunked_prefill_scheduler.h"
-#include "core/common/global_flags.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "distributed_runtime/engine.h"
 #include "prefill_only_scheduler.h"
 #include "scheduler_factory.h"
@@ -68,17 +70,18 @@ class FakeEngine : public Engine {
   std::unique_ptr<BlockManagerPool> fake_block_manager_;
 };
 
-class ScopedBoolFlagValue {
+template <typename T>
+class ScopedConfigValue final {
  public:
-  ScopedBoolFlagValue(bool& flag, bool value) : flag_(flag), old_(flag) {
-    flag_ = value;
+  ScopedConfigValue(T& value, T new_value) : value_(value), old_(value) {
+    value_ = new_value;
   }
 
-  ~ScopedBoolFlagValue() { flag_ = old_; }
+  ~ScopedConfigValue() { value_ = old_; }
 
  private:
-  bool& flag_;
-  bool old_;
+  T& value_;
+  T old_;
 };
 
 ContinuousScheduler::Options create_scheduler_options(
@@ -215,6 +218,39 @@ std::shared_ptr<Request> generate_request_with_prompt_tokens(
   return std::make_shared<Request>("1", "1", "1", std::move(req_state), "1");
 }
 
+std::shared_ptr<Request> generate_request_with_best_of(
+    const std::vector<int32_t>& prompt_token_ids,
+    int32_t max_tokens,
+    int32_t max_context_len,
+    size_t n,
+    size_t best_of) {
+  RequestSamplingParam sampling_param;
+  SchedulerParam scheduler_param;
+
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(max_tokens);
+  stopping_checker.set_max_context_len(max_context_len);
+  stopping_checker.set_ignore_eos(true);
+
+  RequestState req_state("x",
+                         prompt_token_ids,
+                         sampling_param,
+                         scheduler_param,
+                         stopping_checker,
+                         prompt_token_ids.size() + 30000,
+                         n,
+                         best_of,
+                         false,
+                         false,
+                         false,
+                         false,
+                         false,
+                         nullptr,
+                         nullptr);
+
+  return std::make_shared<Request>("1", "1", "1", std::move(req_state), "1");
+}
+
 // dont not consider speculative decoding.
 void update_requests(std::vector<std::shared_ptr<Request>> requests) {
   for (auto req : requests) {
@@ -248,7 +284,8 @@ void set_chunk_kv(const std::shared_ptr<Request>& request, size_t kv_tokens) {
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithoutSPUsesChunkedScheduler) {
-  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, false);
+  ScopedConfigValue<bool> enable_sp(
+      ParallelConfig::get_instance().enable_prefill_sp(), false);
   ContinuousScheduler::Options opt =
       create_scheduler_options(10000, 256, 0, 1024, 1);
   opt.enable_chunked_prefill() = true;
@@ -262,7 +299,8 @@ TEST(ContinuousSchedulerFactoryTest,
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithSPUsesPrefillOnlyScheduler) {
-  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
+  ScopedConfigValue<bool> enable_sp(
+      ParallelConfig::get_instance().enable_prefill_sp(), true);
   ContinuousScheduler::Options opt =
       create_scheduler_options(10000, 256, 0, 1024, 1);
   opt.enable_chunked_prefill() = true;
@@ -276,7 +314,8 @@ TEST(ContinuousSchedulerFactoryTest,
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithSPAndSpeculativeUsesPrefillOnlyScheduler) {
-  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
+  ScopedConfigValue<bool> enable_sp(
+      ParallelConfig::get_instance().enable_prefill_sp(), true);
   ContinuousScheduler::Options opt =
       create_scheduler_options(10000, 256, 4, 1024, 1);
   opt.enable_chunked_prefill() = true;
@@ -290,7 +329,8 @@ TEST(ContinuousSchedulerFactoryTest,
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithSPDoesNotBuildMixedBatch) {
-  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
+  ScopedConfigValue<bool> enable_sp(
+      ParallelConfig::get_instance().enable_prefill_sp(), true);
   ContinuousScheduler::Options opt = create_scheduler_options(8, 8, 0, 4, 1);
   opt.enable_chunked_prefill() = true;
 
@@ -334,7 +374,8 @@ TEST(ContinuousSchedulerFactoryTest,
 }
 
 TEST(SchedulerFactoryTest, DisaggPDChunkedPrefillKind) {
-  ScopedBoolFlagValue use_mix_scheduler(FLAGS_use_mix_scheduler, false);
+  ScopedConfigValue<bool> use_mix_scheduler(
+      SchedulerConfig::get_instance().use_mix_scheduler(), false);
   ContinuousScheduler::Options opt =
       create_scheduler_options(10000, 256, 2, 1024, 1);
   opt.enable_disagg_pd() = true;
@@ -346,7 +387,8 @@ TEST(SchedulerFactoryTest, DisaggPDChunkedPrefillKind) {
 }
 
 TEST(SchedulerFactoryTest, DisaggPDOOCKeepsPDOOCKind) {
-  ScopedBoolFlagValue use_mix_scheduler(FLAGS_use_mix_scheduler, false);
+  ScopedConfigValue<bool> use_mix_scheduler(
+      SchedulerConfig::get_instance().use_mix_scheduler(), false);
   ContinuousScheduler::Options opt =
       create_scheduler_options(10000, 256, 0, 1024, 1);
   opt.enable_disagg_pd() = true;
@@ -423,7 +465,10 @@ TEST(ContinuousSchedulerTest, OnPrefillPreemptOffDecode) {
   // set chunked max_tokens budgets 10000 per step
   ContinuousScheduler::Options opt = create_scheduler_options(
       10000, 256, 0, max_tokens_per_chunk_for_prefill, 1);
-  FLAGS_prefill_scheduling_memory_usage_threshold = 2;  // release threshold
+  ScopedConfigValue<double> memory_threshold(
+      SchedulerConfig::get_instance()
+          .prefill_scheduling_memory_usage_threshold(),
+      2.0);
 
   {
     // 1. two offline decode requests then one online prefill request
@@ -747,6 +792,382 @@ TEST(BlockManagerPoolTest, AllocateFailureRollsBackSharedPrefixBlocks) {
   EXPECT_EQ(later_sequence->kv_state().num_kv_blocks(), 1);
 
   (void)engine.release();
+}
+
+TEST(ContinuousSchedulerTest,
+     PDDecodeBestOfNExpandsAndSharesPromptViaPrefixCache) {
+  // Disagg PD decode instance flow:
+  //   1. request arrives from the prefill instance with kv_cache_tokens_num
+  //      already advanced (try_allocate + append_token(first_token)).
+  //   2. ContinuousScheduler::prepare_batch must short-circuit the waiting
+  //      queue and push directly into running_requests_.
+  //   3. handle_running_requests must trigger expand_sequences(true) and
+  //      cache(seq[0]) so the expanded seq[1..best_of-1] can hit the
+  //      shared prompt blocks via prefix cache.
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(1024, 16, 0, 1024, 1);
+  auto engine =
+      std::make_unique<FakeEngine>(32, 4, /*enable_prefix_cache=*/true);
+  auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+  BlockManagerPool* block_manager_pool = engine->block_manager_pool();
+
+  constexpr size_t kBestOf = 4;
+  constexpr size_t kN = 2;
+  auto request = generate_request_with_best_of({1, 2, 3, 4, 5, 6, 7, 8},
+                                               /*max_tokens=*/4,
+                                               /*max_context_len=*/30000,
+                                               kN,
+                                               kBestOf);
+
+  Sequence* seq0 = request->sequences()[0].get();
+  ASSERT_TRUE(block_manager_pool->try_allocate(seq0));
+  ASSERT_EQ(seq0->kv_state().kv_cache_tokens_num(), seq0->num_prompt_tokens());
+  Token first(42);
+  seq0->append_token(first);
+
+  scheduler->add_request(request);
+
+  auto batch = scheduler->prepare_batch_test();
+  EXPECT_EQ(batch.size(), 1);
+  EXPECT_EQ(request->sequences().size(), kBestOf);
+  EXPECT_EQ(batch[0].size(), kBestOf);
+
+  for (size_t i = 1; i < kBestOf; ++i) {
+    EXPECT_GT(request->sequences()[i]->kv_state().shared_kv_blocks_num(), 0u)
+        << "expanded seq " << i
+        << " should reuse seq[0] prompt blocks via prefix cache";
+  }
+
+  scheduler.reset();
+  (void)engine.release();
+}
+
+TEST(ContinuousSchedulerTest, PDDecodeBestOfOneSkipsExpansionAndShares) {
+  // Sanity check: best_of==n==1 should not trigger any expansion, and the
+  // request should still flow through the PD-decode short-circuit.
+  auto request = generate_request_with_best_of({1, 2, 3, 4, 5, 6, 7, 8},
+                                               /*max_tokens=*/4,
+                                               /*max_context_len=*/30000,
+                                               /*n=*/1,
+                                               /*best_of=*/1);
+  Sequence* seq0 = request->sequences()[0].get();
+
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(1024, 16, 0, 1024, 1);
+  // Prefix cache is not under test here; disabling it avoids teardown putting
+  // blocks into the prefix-cache table instead of the free list.
+  auto engine =
+      std::make_unique<FakeEngine>(32, 4, /*enable_prefix_cache=*/false);
+  auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+  BlockManagerPool* block_manager_pool = engine->block_manager_pool();
+
+  ASSERT_TRUE(block_manager_pool->try_allocate(seq0));
+  ASSERT_EQ(seq0->kv_state().kv_cache_tokens_num(), seq0->num_prompt_tokens());
+  Token first(42);
+  seq0->append_token(first);
+
+  scheduler->add_request(request);
+
+  auto batch = scheduler->prepare_batch_test();
+  EXPECT_EQ(batch.size(), 1);
+  EXPECT_EQ(request->sequences().size(), 1u);
+  EXPECT_EQ(batch[0].size(), 1u);
+
+  // prepare_batch may allocate extra decode blocks; release them before engine
+  // teardown (BlockManagerImpl checks all blocks are on the free list).
+  block_manager_pool->deallocate_without_cache(seq0);
+  (void)engine.release();
+}
+// ============== Async RL training: Pause/Resume tests ==============
+
+// TEST: pause()/resume() state transitions are correct and idempotent.
+TEST(ContinuousSchedulerTest, PauseResumeStateTransition) {
+  int block_num = 9;
+  int block_size = 32;
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(10000, 256, 0, 1024, 1);
+  auto engine = std::make_unique<FakeEngine>(block_num, block_size);
+  auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+
+  EXPECT_FALSE(scheduler->is_paused());
+  scheduler->pause();
+  EXPECT_TRUE(scheduler->is_paused());
+  scheduler->pause();  // idempotent
+  EXPECT_TRUE(scheduler->is_paused());
+  scheduler->resume();
+  EXPECT_FALSE(scheduler->is_paused());
+  scheduler->resume();  // idempotent
+  EXPECT_FALSE(scheduler->is_paused());
+
+  (void)engine.release();
+}
+
+// TEST: pause preempts all running requests, frees KV cache, moves them back
+// to the waiting queue (vLLM-compatible semantics for RL).
+TEST(ContinuousSchedulerTest, PausePreemptsRunningAndFreesKVCache) {
+  int block_num = 33;
+  int block_size = 32;
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(10000, 256, 0, 1024, 1);
+  auto engine = std::make_unique<FakeEngine>(block_num, block_size);
+  auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+  BlockManagerPool* block_manager_pool = engine->block_manager_pool();
+  ASSERT_TRUE(scheduler != nullptr);
+
+  auto requests = generate_request({127, 127},
+                                   {10, 10},
+                                   std::vector<bool>{false, false},
+                                   std::vector<int32_t>{2, 2},
+                                   std::nullopt,
+                                   std::nullopt,
+                                   30000);
+  std::vector<std::shared_ptr<Request>> running_requests = requests;
+  for (auto req : requests) {
+    scheduler->add_request(req);
+  }
+  auto batch = scheduler->prepare_batch_test();
+  EXPECT_EQ(batch.size(), 1);
+  EXPECT_EQ(batch[0].size(), 2);
+  update_requests(running_requests);
+
+  EXPECT_EQ(scheduler->get_running_requests().size(), 2);
+  int free_blocks_before = util::max(block_manager_pool->num_free_blocks());
+
+  scheduler->pause();
+  scheduler->preempt_all_running_requests_test();
+
+  int free_blocks_after = util::max(block_manager_pool->num_free_blocks());
+  EXPECT_GT(free_blocks_after, free_blocks_before);
+  EXPECT_EQ(scheduler->get_running_requests().size(), 0);
+  EXPECT_EQ(scheduler->get_waiting_requests_num(), 2);
+
+  (void)engine.release();
+}
+
+// TEST: after resume, preempted requests in the waiting queue get re-scheduled.
+TEST(ContinuousSchedulerTest, ResumeReschedulesPreemptedRequests) {
+  int block_num = 33;
+  int block_size = 32;
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(10000, 256, 0, 1024, 1);
+  auto engine = std::make_unique<FakeEngine>(block_num, block_size);
+  auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+  ASSERT_TRUE(scheduler != nullptr);
+
+  auto requests = generate_request({127, 127},
+                                   {10, 10},
+                                   std::vector<bool>{false, false},
+                                   std::vector<int32_t>{2, 2},
+                                   std::nullopt,
+                                   std::nullopt,
+                                   30000);
+  std::vector<std::shared_ptr<Request>> running_requests = requests;
+  for (auto req : requests) {
+    scheduler->add_request(req);
+  }
+  (void)scheduler->prepare_batch_test();
+  update_requests(running_requests);
+  EXPECT_EQ(scheduler->get_running_requests().size(), 2);
+
+  scheduler->pause();
+  scheduler->preempt_all_running_requests_test();
+  EXPECT_EQ(scheduler->get_running_requests().size(), 0);
+  EXPECT_EQ(scheduler->get_waiting_requests_num(), 2);
+
+  scheduler->resume();
+  EXPECT_FALSE(scheduler->is_paused());
+
+  auto batch = scheduler->prepare_batch_test();
+  EXPECT_EQ(batch.size(), 1);
+  EXPECT_EQ(batch[0].size(), 2);
+  EXPECT_EQ(scheduler->get_running_requests().size(), 2);
+  EXPECT_EQ(scheduler->get_waiting_requests_num(), 0);
+
+  (void)engine.release();
+}
+
+// TEST: ABORT mode cancels running requests, frees KV cache, and does NOT
+// push them back to the waiting queue (clients must retry).
+TEST(ContinuousSchedulerTest, PauseAbortCancelsRunningRequests) {
+  int block_num = 33;
+  int block_size = 32;
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(10000, 256, 0, 1024, 1);
+  auto engine = std::make_unique<FakeEngine>(block_num, block_size);
+  auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+  BlockManagerPool* block_manager_pool = engine->block_manager_pool();
+  ASSERT_TRUE(scheduler != nullptr);
+
+  auto requests = generate_request({127, 127},
+                                   {10, 10},
+                                   std::vector<bool>{false, false},
+                                   std::vector<int32_t>{2, 2},
+                                   std::nullopt,
+                                   std::nullopt,
+                                   30000);
+  std::vector<std::shared_ptr<Request>> running_requests = requests;
+  for (auto req : requests) {
+    // process_failed_request invokes the requests output callback; give it a
+    // no-op so ABORT can notify completion without a real client.
+    req->state().output_func = [](const RequestOutput&) { return true; };
+    scheduler->add_request(req);
+  }
+  auto batch = scheduler->prepare_batch_test();
+  EXPECT_EQ(batch.size(), 1);
+  EXPECT_EQ(batch[0].size(), 2);
+  update_requests(running_requests);
+
+  EXPECT_EQ(scheduler->get_running_requests().size(), 2);
+  int free_blocks_before = util::max(block_manager_pool->num_free_blocks());
+
+  scheduler->abort_all_running_requests_test();
+
+  int free_blocks_after = util::max(block_manager_pool->num_free_blocks());
+  EXPECT_GT(free_blocks_after, free_blocks_before);        // KV cache freed
+  EXPECT_EQ(scheduler->get_running_requests().size(), 0);  // running cleared
+  EXPECT_EQ(scheduler->get_waiting_requests_num(), 0);     // NOT requeued
+
+  (void)engine.release();
+}
+
+// With in-batch prefix cache enabled, a request admitted earlier in the same
+// scheduling step publishes its full prompt blocks, so a later request with the
+// same prefix reuses them (shared_kv_blocks_num > 0). When disabled, the later
+// request shares nothing within the same batch.
+TEST(ContinuousSchedulerTest,
+     InBatchCachePrefillBlocksIncreaseSharedBlocksForLaterRequests) {
+  const auto run_with_in_batch_prefix_cache =
+      [](bool enable_in_batch_prefix_cache) -> size_t {
+    KVCacheConfig& kv_config = KVCacheConfig::get_instance();
+    const bool saved_prefix_cache = kv_config.enable_prefix_cache();
+    const bool saved_in_batch = kv_config.enable_in_batch_prefix_cache();
+    kv_config.enable_prefix_cache(true);
+    kv_config.enable_in_batch_prefix_cache(enable_in_batch_prefix_cache);
+
+    ContinuousScheduler::Options opt =
+        create_scheduler_options(1024, 16, 0, 1024, 1);
+    auto engine =
+        std::make_unique<FakeEngine>(32, 4, /*enable_prefix_cache=*/true);
+    auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+
+    auto first_request =
+        generate_request_with_prompt_tokens({1, 2, 3, 4, 5, 6, 7, 8}, 1, 30000);
+    auto second_request =
+        generate_request_with_prompt_tokens({1, 2, 3, 4, 5, 6, 7, 8}, 1, 30000);
+    scheduler->add_request(first_request);
+    scheduler->add_request(second_request);
+
+    auto batch = scheduler->prepare_batch_test();
+    EXPECT_EQ(batch.size(), 1);
+    EXPECT_EQ(batch[0].size(), 2);
+    EXPECT_EQ(first_request->sequences()[0]->kv_state().shared_kv_blocks_num(),
+              0u);
+    const size_t second_shared =
+        second_request->sequences()[0]->kv_state().shared_kv_blocks_num();
+
+    scheduler.reset();
+    // Leak the engine: cached blocks live in the prefix-cache table at
+    // teardown.
+    (void)engine.release();
+
+    kv_config.enable_prefix_cache(saved_prefix_cache);
+    kv_config.enable_in_batch_prefix_cache(saved_in_batch);
+    return second_shared;
+  };
+
+  const size_t shared_when_enabled = run_with_in_batch_prefix_cache(true);
+  const size_t shared_when_disabled = run_with_in_batch_prefix_cache(false);
+
+  EXPECT_GT(shared_when_enabled, shared_when_disabled);
+  EXPECT_GT(shared_when_enabled, 0u);
+  EXPECT_EQ(shared_when_disabled, 0u);
+}
+
+// End-to-end check through the real scheduler path (add_request ->
+// prepare_batch): two requests that share only the first 2 of 3 prompt blocks
+// are admitted in the same step. With in-batch prefix cache on, the first
+// request publishes its full blocks, so the second request reuses EXACTLY the 2
+// shared blocks (the 3rd differs and must be a miss). The prefix-cache table
+// also grows by the published blocks. With it off, nothing is shared in-batch.
+TEST(ContinuousSchedulerTest, InBatchCacheReusesPartialPrefixWithinSameBatch) {
+  // block_size = 4. 12 tokens => 3 full blocks per prompt.
+  const std::vector<int32_t> prompt_a = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  // Shares blocks [0,1] (tokens 0..7) with prompt_a, differs in block 2.
+  const std::vector<int32_t> prompt_b = {
+      1, 2, 3, 4, 5, 6, 7, 8, 99, 100, 101, 102};
+
+  struct Result {
+    size_t first_shared = 0;
+    size_t second_shared = 0;
+    size_t batch_count = 0;
+    size_t batch0_size = 0;
+    size_t prefix_cache_blocks = 0;
+  };
+
+  const auto run = [&](bool enable_in_batch_prefix_cache) -> Result {
+    KVCacheConfig& kv_config = KVCacheConfig::get_instance();
+    const bool saved_prefix_cache = kv_config.enable_prefix_cache();
+    const bool saved_in_batch = kv_config.enable_in_batch_prefix_cache();
+    kv_config.enable_prefix_cache(true);
+    kv_config.enable_in_batch_prefix_cache(enable_in_batch_prefix_cache);
+
+    ContinuousScheduler::Options opt =
+        create_scheduler_options(1024, 16, 0, 1024, 1);
+    auto engine =
+        std::make_unique<FakeEngine>(64, 4, /*enable_prefix_cache=*/true);
+    auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+
+    auto first_request =
+        generate_request_with_prompt_tokens(prompt_a, 1, 30000);
+    auto second_request =
+        generate_request_with_prompt_tokens(prompt_b, 1, 30000);
+    scheduler->add_request(first_request);
+    scheduler->add_request(second_request);
+
+    auto batch = scheduler->prepare_batch_test();
+
+    Result r;
+    r.batch_count = batch.size();
+    r.batch0_size = batch.empty() ? 0 : batch[0].size();
+    r.first_shared =
+        first_request->sequences()[0]->kv_state().shared_kv_blocks_num();
+    r.second_shared =
+        second_request->sequences()[0]->kv_state().shared_kv_blocks_num();
+    r.prefix_cache_blocks =
+        engine->block_manager_pool()->num_blocks_in_prefix_cache()[0];
+
+    scheduler.reset();
+    // Leak the engine: published blocks live in the prefix-cache table at
+    // teardown, which would otherwise trip the free-list check in dtor.
+    (void)engine.release();
+
+    kv_config.enable_prefix_cache(saved_prefix_cache);
+    kv_config.enable_in_batch_prefix_cache(saved_in_batch);
+    return r;
+  };
+
+  const Result enabled = run(true);
+  const Result disabled = run(false);
+
+  // Both requests must land in the same batch for in-batch reuse to apply.
+  EXPECT_EQ(enabled.batch_count, 1u);
+  EXPECT_EQ(enabled.batch0_size, 2u);
+
+  // The first request can never share within the same step (nothing published
+  // yet when it is admitted).
+  EXPECT_EQ(enabled.first_shared, 0u);
+
+  // The second request reuses exactly the 2 identical leading blocks.
+  EXPECT_EQ(enabled.second_shared, 2u);
+
+  // Prefix cache holds first request's 3 blocks plus the second request's one
+  // distinct trailing block => 4 unique blocks.
+  EXPECT_EQ(enabled.prefix_cache_blocks, 4u);
+
+  // With the feature disabled, no in-batch sharing happens.
+  EXPECT_EQ(disabled.first_shared, 0u);
+  EXPECT_EQ(disabled.second_shared, 0u);
+  EXPECT_GT(enabled.second_shared, disabled.second_shared);
 }
 
 }  // namespace xllm

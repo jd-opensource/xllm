@@ -6,7 +6,7 @@ from pathlib import Path
 
 from scripts.logger import logger
 
-from ...common.toolchain import git_head, require_env
+from ...common.toolchain import require_env
 from .kernels.utils import DEFAULT_ASCEND_BISHENG_ARCH
 
 TILELANG_BISHENG_COMMON_FLAGS = [
@@ -23,6 +23,7 @@ TILELANG_BISHENG_COMMON_FLAGS = [
 ASCEND_DEVICE_TO_BISHENG_ARCH = {
     "a2": DEFAULT_ASCEND_BISHENG_ARCH,
     "a3": DEFAULT_ASCEND_BISHENG_ARCH,
+    "a5": DEFAULT_ASCEND_BISHENG_ARCH,
 }
 
 
@@ -114,7 +115,6 @@ def build_fingerprint(bisheng_executable: str, bisheng_arch: str) -> dict[str, s
     return {
         "target": "ascend",
         "tl_root": tl_root,
-        "tilelang_git_head": git_head(tl_root),
         "npu_home_path": npu_home_path,
         "bisheng_executable": bisheng_executable,
         "bisheng_arch": bisheng_arch,

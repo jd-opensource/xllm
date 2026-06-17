@@ -54,7 +54,7 @@ void block_copy(torch::Tensor key_cache_ptrs,
                 torch::Tensor cum_sum,
                 int64_t numel_per_block,
                 torch::ScalarType cache_dtype);
-
+#if !defined(USE_DCU)
 void batch_prefill(const std::string& uri,
                    ffi::Array<int64_t> plan_info,
                    torch::Tensor float_workspace_buffer,
@@ -142,7 +142,7 @@ void batch_decode(const std::string& uri,
                   std::optional<torch::Tensor>& output_lse,
                   bool use_tensor_core,
                   std::optional<torch::Tensor> qo_indptr = std::nullopt);
-
+#endif  // !defined(USE_DCU)
 void rms_norm(torch::Tensor output,
               torch::Tensor input,
               torch::Tensor weight,
@@ -288,4 +288,19 @@ torch::Tensor cutlass_fused_moe(
     bool use_packed_weights = false,
     int32_t tune_max_num_tokens = 8192,
     ActivationType activation_type = ActivationType::SWIGLU);
+
+// ---- moe_compute_index (moe_compute_index.cu) ----
+// Fused routing index: bincount + argsort replacement.
+// Returns {src_dst, dst_src, expert_sizes}.
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> moe_compute_index(
+    const torch::Tensor& expert_id,
+    int64_t num_experts);
+
+// ---- moe_combine_result (moe_combine.cu) ----
+// Fused combine: reorder + weighted sum in one pass.
+torch::Tensor moe_combine_result(const torch::Tensor& gemm2,
+                                 const torch::Tensor& reduce_weight,
+                                 int64_t N,
+                                 int32_t topk);
+
 }  // namespace xllm::kernel::cuda

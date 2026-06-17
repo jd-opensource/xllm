@@ -15,8 +15,10 @@ limitations under the License.
 
 #include "core/framework/request/request_params.h"
 
+#include <google/protobuf/util/json_util.h>
 #include <gtest/gtest.h>
 
+#include "anthropic.pb.h"
 #include "chat.pb.h"
 #include "completion.pb.h"
 
@@ -98,6 +100,115 @@ TEST(RequestParamsTest, ChatBeamSearchKeepsExplicitZeroTopLogprobs) {
 
   EXPECT_TRUE(params.logprobs);
   EXPECT_EQ(params.top_logprobs, 0);
+}
+
+TEST(RequestParamsTest, AnthropicPreservesIgnoreEos) {
+  proto::AnthropicMessagesRequest request;
+  request.set_model("claude-3");
+  request.set_max_tokens(16);
+  request.set_ignore_eos(true);
+
+  RequestParams params(request, "", "");
+
+  EXPECT_TRUE(params.ignore_eos);
+}
+
+TEST(RequestParamsTest, AnthropicToolChoiceDefaults) {
+  proto::AnthropicMessagesRequest request;
+  request.set_model("claude-3");
+  request.set_max_tokens(16);
+
+  RequestParams no_tool_params(request, "", "");
+  EXPECT_EQ(no_tool_params.tool_choice, "");
+
+  auto* tool = request.add_tools();
+  tool->set_name("list_files");
+
+  RequestParams auto_params(request, "", "");
+  EXPECT_EQ(auto_params.tool_choice, "auto");
+
+  request.mutable_tool_choice()->set_type("any");
+  RequestParams required_params(request, "", "");
+  EXPECT_EQ(required_params.tool_choice, "required");
+
+  request.mutable_tool_choice()->set_type("tool");
+  request.mutable_tool_choice()->clear_name();
+  RequestParams fallback_params(request, "", "");
+  EXPECT_EQ(fallback_params.tool_choice, "auto");
+
+  request.mutable_tool_choice()->set_type("unknown");
+  RequestParams unknown_params(request, "", "");
+  EXPECT_EQ(unknown_params.tool_choice, "auto");
+}
+
+TEST(RequestParamsTest, AnthropicToolWithoutSchemaUsesEmptyJson) {
+  proto::AnthropicMessagesRequest request;
+  request.set_model("claude-3");
+  request.set_max_tokens(16);
+
+  auto* tool = request.add_tools();
+  tool->set_name("list_files");
+
+  RequestParams params(request, "", "");
+
+  ASSERT_EQ(params.tools.size(), 1);
+  EXPECT_TRUE(params.tools[0].function.parameters.is_object());
+  EXPECT_TRUE(params.tools[0].function.parameters.empty());
+}
+
+TEST(RequestParamsTest, AnthropicToolSchemaUsesPlainJson) {
+  proto::AnthropicMessagesRequest request;
+  request.set_model("claude-3");
+  request.set_max_tokens(16);
+
+  auto* tool = request.add_tools();
+  tool->set_name("list_files");
+  tool->set_description("List files under a folder");
+  const std::string schema = R"({
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Folder path"
+      },
+      "recursive": {
+        "type": "boolean",
+        "default": false
+      }
+    },
+    "required": ["path"]
+  })";
+  auto status = google::protobuf::util::JsonStringToMessage(
+      schema, tool->mutable_input_schema());
+  ASSERT_TRUE(status.ok()) << status.ToString();
+
+  auto* tool_choice = request.mutable_tool_choice();
+  tool_choice->set_type("tool");
+  tool_choice->set_name("list_files");
+
+  RequestParams params(request, "", "");
+
+  ASSERT_EQ(params.tools.size(), 1);
+  const auto& parsed_tool = params.tools[0];
+  EXPECT_EQ(parsed_tool.type, "function");
+  EXPECT_EQ(parsed_tool.function.name, "list_files");
+  EXPECT_EQ(parsed_tool.function.description, "List files under a folder");
+
+  const nlohmann::json& params_schema = parsed_tool.function.parameters;
+  ASSERT_TRUE(params_schema.is_object());
+  EXPECT_FALSE(params_schema.contains("fields"));
+  EXPECT_EQ(params_schema.at("type"), "object");
+  EXPECT_EQ(params_schema.at("properties").at("path").at("type"), "string");
+  EXPECT_EQ(params_schema.at("properties").at("recursive").at("type"),
+            "boolean");
+  EXPECT_EQ(params_schema.at("properties").at("recursive").at("default"),
+            false);
+  ASSERT_TRUE(params_schema.at("required").is_array());
+  EXPECT_EQ(params_schema.at("required").at(0), "path");
+
+  nlohmann::json expected_tool_choice = {
+      {"type", "function"}, {"function", {{"name", "list_files"}}}};
+  EXPECT_EQ(nlohmann::json::parse(params.tool_choice), expected_tool_choice);
 }
 
 }  // namespace

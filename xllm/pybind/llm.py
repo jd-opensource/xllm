@@ -1,13 +1,12 @@
-import json
 import os
 import signal
 import sys
+import threading
 import time
 import uuid
-from . import util
-from typing import Any, Dict, List, Optional, Sequence, Union
+from . import utils
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
-import xllm_export
 from xllm_export import (LLMMaster, VLMMaster, Options, RequestOutput,
                          RequestParams)
 from .errors import ValidationError
@@ -20,45 +19,26 @@ from .params import (
     to_request_params_list,
 )
 
-def _read_json(path: str) -> Dict[str, object]:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
 
-
-def _infer_model_backend(model_path: str) -> str:
-    model_index_path = os.path.join(model_path, "model_index.json")
-    if os.path.exists(model_index_path):
-        data = _read_json(model_index_path)
-        if "_diffusers_version" in data:
-            return "dit"
-
-    config_path = os.path.join(model_path, "config.json")
-    if not os.path.exists(config_path):
-        raise ValueError(
-            "config.json or model_index.json is required for backend detection"
-        )
-    data = _read_json(config_path)
-    model_type = data.get("model_type") or data.get("model_name")
-    if not model_type:
-        raise ValueError("config.json must contain model_type or model_name")
-
-    get_backend = getattr(xllm_export, "get_model_backend", None)
-    if not callable(get_backend):
-        raise ValueError(
-            "xllm_export.get_model_backend is not available. "
-            "Please rebuild xllm_export or explicitly specify backend."
-        )
+def _get_tqdm(
+    use_tqdm: Union[bool, Callable[..., Any]],
+) -> Optional[Callable[..., Any]]:
+    if not use_tqdm:
+        return None
+    if callable(use_tqdm):
+        return use_tqdm
     try:
-        backend = get_backend(model_type)
-    except Exception as exc:
-        raise ValueError(f"Failed to resolve backend for model_type: {model_type}") from exc
-    if not backend:
-        raise ValueError(f"Unsupported model_type: {model_type}")
-    return backend
+        from tqdm import tqdm
+    except ImportError as exc:
+        raise ImportError(
+            "tqdm is required when use_tqdm=True. "
+            "Set use_tqdm=False to disable the progress bar."
+        ) from exc
+    return tqdm
 
 
 class BeamSearchOutput:
-    def __init__(self, output: RequestOutput):
+    def __init__(self, output: RequestOutput) -> None:
         self.prompt = output.prompt
         self.sequences = output.outputs
         self.status = output.status
@@ -67,7 +47,7 @@ class BeamSearchOutput:
 
 
 class EmbeddingOutputs:
-    def __init__(self, output: RequestOutput):
+    def __init__(self, output: RequestOutput) -> None:
         embedding = []
         if output.outputs and len(output.outputs) > 0:
             embedding = output.outputs[0].embeddings
@@ -76,7 +56,7 @@ class EmbeddingOutputs:
 
 
 class EmbeddingOutput:
-    def __init__(self, output: RequestOutput):
+    def __init__(self, output: RequestOutput) -> None:
         self.prompt = output.prompt
         self.outputs = EmbeddingOutputs(output)
         self.status = output.status
@@ -101,7 +81,7 @@ class LLM:
         devices: str = 'npu:0',
         draft_model: Optional[str] = '',
         draft_devices: Optional[str] = 'npu:0',
-        limit_image_per_prompt: int = 4,
+        limit_image_per_prompt: int = 8,
         block_size: int = 128,
         max_cache_size: int = 0,
         max_memory_utilization: float = 0.8,
@@ -119,7 +99,6 @@ class LLM:
         enable_prefill_sp: bool = False,
         master_node_addr: str = '',
         instance_role: str = 'DEFAULT',
-        device_ip: str = '',
         transfer_listen_port: int = 26000,
         nnodes: int = 1,
         node_rank: int = 0,
@@ -132,11 +111,17 @@ class LLM:
         kv_cache_transfer_mode: str = 'PUSH',
         disable_ttft_profiling: bool = False,
         enable_forward_interruption: bool = False,
+        enable_graph: bool = False,
+        enable_graph_mode_decode_no_padding: bool = False,
+        enable_prefill_piecewise_graph: bool = False,
+        max_tokens_for_graph_mode: int = 2048,
         enable_shm: bool = False,
         is_local: bool = True,
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
         kv_cache_dtype: str = 'auto',
+        use_cpp_chat_template: bool = True,
+        disable_log_stats: bool = True,
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -154,11 +139,12 @@ class LLM:
         if not os.path.exists(model):
             raise ValueError(f"model {model} not exists")
 
-        backend = _infer_model_backend(model)
+        model_type, backend = utils._infer_model_type_and_backend(model)
         if backend == "dit":
             raise ValueError("LLM does not support DiT backend models")
-        if backend == "vlm" and task != "generate":
-            raise ValueError("VLM backend only supports generate task in LLM")
+        if model_type is None:
+            raise ValueError("model_type is required for offline inference")
+        utils._configure_cpp_chat_template(use_cpp_chat_template, model_type)
 
         options = Options()
         options.model_path = model
@@ -186,9 +172,8 @@ class LLM:
         if master_node_addr:
             options.master_node_addr = master_node_addr
         else:
-            free_port = util.get_free_port()
+            free_port = utils.get_free_port()
             options.master_node_addr = "127.0.0.1:" + str(free_port)
-        options.device_ip = device_ip
         options.transfer_listen_port = transfer_listen_port
         options.nnodes = nnodes
         options.node_rank = node_rank
@@ -201,6 +186,10 @@ class LLM:
         options.kv_cache_transfer_mode = kv_cache_transfer_mode
         options.disable_ttft_profiling = disable_ttft_profiling
         options.enable_forward_interruption = enable_forward_interruption
+        options.enable_graph = enable_graph
+        options.enable_graph_mode_decode_no_padding = enable_graph_mode_decode_no_padding
+        options.enable_prefill_piecewise_graph = enable_prefill_piecewise_graph
+        options.max_tokens_for_graph_mode = max_tokens_for_graph_mode
         options.enable_offline_inference = True
         options.spawn_worker_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
         options.enable_shm = enable_shm
@@ -208,6 +197,7 @@ class LLM:
         options.input_shm_size = input_shm_size
         options.output_shm_size = output_shm_size
         options.kv_cache_dtype = kv_cache_dtype
+        options.disable_log_stats = disable_log_stats
         self._backend = backend
         if backend == "vlm":
             self.master = VLMMaster(options)
@@ -218,7 +208,7 @@ class LLM:
         try:
             #os.kill(os.getpid(), signal.SIGTERM)
             #os.kill(os.getpid(), signal.SIGKILL)
-            util.terminate_process(os.getpid())
+            utils.terminate_process(os.getpid())
         except Exception as e:
             pass
 
@@ -235,6 +225,7 @@ class LLM:
             List[SamplingParams],
         ]] = None,
         wait_for_schedule: bool = True,
+        use_tqdm: Union[bool, Callable[..., Any]] = True,
         **kwargs: Any,
     ) -> List[RequestOutput]:
         request_params = kwargs.pop("request_params", None)
@@ -266,47 +257,60 @@ class LLM:
             )
 
         outputs = [None] * len(prompts)
+        progress_bar = None
+        progress_bar_lock = threading.Lock()
+        tqdm_cls = _get_tqdm(use_tqdm)
+        if tqdm_cls is not None:
+            progress_bar = tqdm_cls(total=len(prompts), desc="Processed prompts")
+
         def callback(index: int, output: RequestOutput) -> bool:
             outputs[index] = output
+            if progress_bar is not None:
+                with progress_bar_lock:
+                    progress_bar.update(1)
             return True
 
-        # schedule all requests
-        if self._backend == "vlm":
-            if mm_datas is not None:
-                self.master.handle_batch_request(
-                    prompts, mm_datas, request_params_list, callback
-                )
+        try:
+            # schedule all requests
+            if self._backend == "vlm":
+                if mm_datas is not None:
+                    self.master.handle_batch_request(
+                        prompts, mm_datas, request_params_list, callback
+                    )
+                else:
+                    if image_urls is None:
+                        image_urls = [[] for _ in prompts]
+                    self.master.handle_batch_request_with_image_urls(
+                        prompts, image_urls, request_params_list, callback
+                    )
             else:
-                if image_urls is None:
-                    image_urls = [[] for _ in prompts]
-                self.master.handle_batch_request_with_image_urls(
-                    prompts, image_urls, request_params_list, callback
+                has_images = image_urls is not None and any(image_urls)
+                if mm_datas is not None or has_images:
+                    raise ValueError("multi_modal_data is only supported for VLM models")
+                self.master.handle_batch_request(
+                    prompts, request_params_list, callback
                 )
-        else:
-            has_images = image_urls is not None and any(image_urls)
-            if mm_datas is not None or has_images:
-                raise ValueError("multi_modal_data is only supported for VLM models")
-            self.master.handle_batch_request(
-                prompts, request_params_list, callback
-            )
 
-        # TODO: add wait later
-        if wait_for_schedule:
-            pass
+            # TODO: add wait later
+            if wait_for_schedule:
+                pass
 
-        # generate
-        self.master.generate()
+            # generate
+            self.master.generate()
 
-        count = len(prompts)
-        idx = 0
-        while idx < count:
-            # wait async output
-            if outputs[idx] is None:
-                continue
-            if outputs[idx].status is not None and not outputs[idx].status.ok:
-                raise ValidationError(outputs[idx].status.code, outputs[idx].status.message)
-            outputs[idx].prompt = prompts[idx]
-            idx += 1
+            count = len(prompts)
+            idx = 0
+            while idx < count:
+                # wait async output
+                if outputs[idx] is None:
+                    continue
+                if outputs[idx].status is not None and not outputs[idx].status.ok:
+                    raise ValidationError(outputs[idx].status.code, outputs[idx].status.message)
+                outputs[idx].prompt = prompts[idx]
+                idx += 1
+        finally:
+            if progress_bar is not None:
+                progress_bar.close()
 
         return outputs
 
@@ -315,6 +319,7 @@ class LLM:
         prompts: Union[str, Dict[str, str], List[Union[str, Dict[str, str]]]],
         params: Optional[Union[RequestParams, BeamSearchParams]] = None,
         wait_for_schedule: bool = True,
+        use_tqdm: Union[bool, Callable[..., Any]] = True,
     ) -> List[BeamSearchOutput]:
         if isinstance(prompts, (str, dict)):
             prompts = [prompts]
@@ -352,7 +357,8 @@ class LLM:
 
         outputs = self.generate(parsed_prompts,
                                 request_params=params,
-                                wait_for_schedule=wait_for_schedule)
+                                wait_for_schedule=wait_for_schedule,
+                                use_tqdm=use_tqdm)
         return [BeamSearchOutput(output) for output in outputs]
 
     def embed(
@@ -364,6 +370,7 @@ class LLM:
             List[Union[RequestParams, PoolingParams]],
         ]] = None,
         wait_for_schedule: bool = True,
+        use_tqdm: Union[bool, Callable[..., Any]] = True,
     ) -> List[EmbeddingOutput]:
         request_params_list = to_request_params_list(
             pooling_params, default_cls=PoolingParams)
@@ -378,7 +385,8 @@ class LLM:
 
         outputs = self.generate(prompts,
                                 request_params=use_params,
-                                wait_for_schedule=wait_for_schedule)
+                                wait_for_schedule=wait_for_schedule,
+                                use_tqdm=use_tqdm)
         return [EmbeddingOutput(output) for output in outputs]
 
     @staticmethod

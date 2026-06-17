@@ -17,8 +17,12 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <chrono>
 #include <numeric>
 #include <unordered_set>
+
+#include "common/global_flags.h"
+#include "core/framework/config/disagg_pd_config.h"
 
 #if defined(USE_NPU)
 #ifdef TORCH_HIGHER_THAN_PTA6
@@ -31,9 +35,14 @@ limitations under the License.
 #endif
 
 #include "common/global_flags.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/kv_cache_transfer/push_route.h"
 #include "framework/xtensor/global_xtensor.h"
 #include "framework/xtensor/xtensor_allocator.h"
+#if defined(USE_DCU)
+#include "platform/dcu/dcu_tensor_alloc.h"
+#endif
 #include "platform/mlu/mlu_tensor_alloc.h"
 #include "util/net.h"
 
@@ -42,11 +51,8 @@ namespace xllm {
 namespace {
 
 std::string get_merge_key(const uint64_t dst_cluster_id,
-                          const std::string& dst_addr,
-                          const int64_t k_cache_id,
-                          const int64_t v_cache_id) {
-  return std::to_string(dst_cluster_id) + "_" + dst_addr + "_" +
-         std::to_string(k_cache_id) + "_" + std::to_string(v_cache_id);
+                          const std::string& dst_addr) {
+  return std::to_string(dst_cluster_id) + "_" + dst_addr;
 }
 
 void merge_xtensor_offsets(
@@ -82,18 +88,13 @@ void merge_kv_info(
     const int32_t dst_rank) {
   uint64_t dst_cluster_id = info.remote_instance_info.cluster_ids[dst_rank];
   const std::string& dst_addr = info.remote_instance_info.addrs[dst_rank];
-  int64_t k_cache_id = info.remote_instance_info.k_cache_ids[dst_rank];
-  int64_t v_cache_id = info.remote_instance_info.v_cache_ids[dst_rank];
-  std::string key =
-      get_merge_key(dst_cluster_id, dst_addr, k_cache_id, v_cache_id);
+  std::string key = get_merge_key(dst_cluster_id, dst_addr);
 
   auto it = merged_kv_infos.find(key);
   if (it == merged_kv_infos.end()) {
     KVCacheTransfer::KVCacheInfo kv_info;
     kv_info.dst_cluster_id = dst_cluster_id;
     kv_info.dst_addr = dst_addr;
-    kv_info.dst_k_cache_id = k_cache_id;
-    kv_info.dst_v_cache_id = v_cache_id;
     kv_info.src_blocks.reserve(info.local_blocks_ids.size());
     kv_info.src_blocks.insert(kv_info.src_blocks.end(),
                               info.local_blocks_ids.begin(),
@@ -131,7 +132,7 @@ void merge_kv_info(
 
 MooncakeKVCacheTransferBase::MooncakeKVCacheTransferBase(
     const int32_t device_id,
-    const int16_t listen_port,
+    const uint16_t listen_port,
     const torch::Device& device,
     std::unique_ptr<MooncakeTransferEngine> engine)
     : device_id_(device_id),
@@ -148,13 +149,9 @@ void MooncakeKVCacheTransferBase::initialize(int32_t device_id) {
 }
 
 void MooncakeKVCacheTransferBase::get_cache_info(uint64_t& cluster_id,
-                                                 std::string& addr,
-                                                 int64_t& key_cache_id,
-                                                 int64_t& value_cache_id) {
+                                                 std::string& addr) {
   cluster_id = cluster_id_;
   addr = addr_;
-  key_cache_id = 0;
-  value_cache_id = 0;
 
   LOG(INFO) << "get_cache_info success, cluster_id=" << cluster_id_
             << ", addr=" << addr_;
@@ -162,7 +159,6 @@ void MooncakeKVCacheTransferBase::get_cache_info(uint64_t& cluster_id,
 
 bool MooncakeKVCacheTransferBase::link_cluster(const uint64_t cluster_id,
                                                const std::string& remote_addr,
-                                               const std::string& device_ip,
                                                const uint16_t port) {
   LOG(INFO) << "link_cluster, cluster_id=" << cluster_id
             << ", remote_addr=" << remote_addr;
@@ -172,7 +168,6 @@ bool MooncakeKVCacheTransferBase::link_cluster(const uint64_t cluster_id,
 
 bool MooncakeKVCacheTransferBase::unlink_cluster(const uint64_t& cluster_id,
                                                  const std::string& remote_addr,
-                                                 const std::string& device_ip,
                                                  const uint16_t port,
                                                  bool force_flag) {
   LOG(INFO) << "unlink_cluster, cluster_id=" << cluster_id
@@ -187,7 +182,7 @@ bool MooncakeKVCacheTransferBase::unlink_cluster(const uint64_t& cluster_id,
 
 MooncakeKVCacheTransferDefault::MooncakeKVCacheTransferDefault(
     const int32_t device_id,
-    const int16_t listen_port,
+    const uint16_t listen_port,
     const torch::Device& device,
     const std::string& model_type)
     : MooncakeKVCacheTransferBase(
@@ -298,6 +293,19 @@ void MooncakeKVCacheTransferDefault::allocate_kv_cache_impl(
       kv_caches.emplace_back(KVCacheTensors{key_cache, value_cache});
     }
   }
+#elif defined(USE_DCU)
+  CHECK(kv_cache_shape.has_value_cache_shape())
+      << "DCU Mooncake KV transfer requires a value cache shape.";
+  CHECK(!kv_cache_shape.has_index_cache_shape())
+      << "DCU Mooncake KV transfer does not support index cache yet.";
+
+  for (int64_t i = 0; i < num_layers; ++i) {
+    torch::Tensor key_cache =
+        dcu::alloc_zero_tensor(key_cache_shape, dtype, device_);
+    torch::Tensor value_cache =
+        dcu::alloc_zero_tensor(value_cache_shape, dtype, device_);
+    kv_caches.emplace_back(KVCacheTensors{key_cache, value_cache});
+  }
 #else
   // Original mode: allocate device memory using aclrtMalloc
   // calculate the size of kv cache for each layer
@@ -339,10 +347,7 @@ void MooncakeKVCacheTransferDefault::allocate_kv_cache_impl(
   }
 
   // convert memory addrs to torch tensors
-  aclFormat npu_format_type =
-      model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache
-          ? ACL_FORMAT_FRACTAL_NZ
-          : ACL_FORMAT_ND;
+  aclFormat npu_format_type = get_npu_kv_cache_format(model_type_);
   auto k_torch_tensors = convert_to_torch_tensor(
       key_cache_shape, dtype, k_tensor_addrs, npu_format_type);
   auto v_torch_tensors = convert_to_torch_tensor(
@@ -437,13 +442,13 @@ void MooncakeKVCacheTransferDefault::register_kv_cache_impl(
 bool MooncakeKVCacheTransferDefault::pull_kv_blocks(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   (void)src_cluster_id;
-  (void)src_k_cache_id;
-  (void)src_v_cache_id;
+  (void)src_linear_state_ids;
+  (void)dst_linear_state_ids;
   std::vector<int64_t> layer_ids;
   // Pull path is used by target/main KV cache blocks, not spec draft blocks.
   const bool is_spec_draft = false;
@@ -505,16 +510,34 @@ void MooncakeKVCacheTransferDefault::merge_kv_blocks(
 bool MooncakeKVCacheTransferDefault::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
-    bool is_spec_draft) {
+    bool is_spec_draft,
+    int32_t kv_split_rank,
+    int32_t kv_split_size) {
   const BufLayout& layout = is_spec_draft ? spec_layout_ : main_layout_;
   CHECK(layout.registered) << "KV cache is not registered.";
   const int64_t num_layers = layout.num_layers;
+
+  std::vector<std::string> keys;
+  keys.reserve(merged_kv_infos.size());
+  for (const auto& pair : merged_kv_infos) {
+    keys.push_back(pair.first);
+  }
+  if (kv_split_size > 1) {
+    keys = rotate_dst_rank(keys, kv_split_rank);
+  }
+
   for (int64_t layer_index = 0; layer_index < num_layers; ++layer_index) {
     layer_synchronizer->synchronize_layer(layer_index);
-    for (const auto& pair : merged_kv_infos) {
-      std::vector<int64_t> layer_ids = {layer_index};
-      std::vector<int64_t> buf_ids = get_buf_ids(layer_ids, is_spec_draft);
-      const KVCacheInfo& kv_info = pair.second;
+    std::vector<int64_t> layer_ids = {layer_index};
+    std::vector<int64_t> buf_ids = get_buf_ids(layer_ids, is_spec_draft);
+
+    for (const std::string& key : keys) {
+      const KVCacheInfo& kv_info = merged_kv_infos.at(key);
+      if (kv_info.src_blocks.empty()) {
+        continue;
+      }
+
+      const auto step_start = std::chrono::steady_clock::now();
       auto ret = mooncake_te_->push_memory_blocks(
           kv_info.dst_addr, kv_info.src_blocks, kv_info.dst_blocks, buf_ids);
       if (!ret) {
@@ -533,7 +556,7 @@ bool MooncakeKVCacheTransferDefault::push_kv_blocks(
 
 MooncakeKVCacheTransferXTensor::MooncakeKVCacheTransferXTensor(
     const int32_t device_id,
-    const int16_t listen_port,
+    const uint16_t listen_port,
     const torch::Device& device)
     : MooncakeKVCacheTransferBase(
           device_id,
@@ -631,22 +654,25 @@ void MooncakeKVCacheTransferXTensor::register_kv_cache_impl() {
 bool MooncakeKVCacheTransferXTensor::pull_kv_blocks(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   (void)src_cluster_id;
-  (void)src_k_cache_id;
-  (void)src_v_cache_id;
+  (void)src_linear_state_ids;
+  (void)dst_linear_state_ids;
   return pull_kv_blocks_impl(src_addr, src_blocks, dst_blocks);
 }
 
 bool MooncakeKVCacheTransferXTensor::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
-    bool is_spec_draft) {
+    bool is_spec_draft,
+    int32_t kv_split_rank,
+    int32_t kv_split_size) {
   (void)is_spec_draft;
-  return push_kv_blocks_impl(merged_kv_infos, layer_synchronizer);
+  return push_kv_blocks_impl(
+      merged_kv_infos, layer_synchronizer, kv_split_rank, kv_split_size);
 }
 
 bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_impl(
@@ -714,21 +740,33 @@ bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_impl(
 
 bool MooncakeKVCacheTransferXTensor::push_kv_blocks_impl(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
-    std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer) {
+    std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
+    int32_t kv_split_rank,
+    int32_t kv_split_size) {
   if (model_id_.empty()) {
     LOG(ERROR) << "model_id not set for XTensor mode push";
     return false;
   }
 
+  std::vector<std::string> keys;
+  keys.reserve(merged_kv_infos.size());
+  for (const auto& pair : merged_kv_infos) {
+    keys.push_back(pair.first);
+  }
+  if (kv_split_size > 1) {
+    keys = rotate_dst_rank(keys, kv_split_rank);
+  }
+
   auto& allocator = XTensorAllocator::get_instance();
 
   for (int64_t layer_index = 0; layer_index < num_layers_; ++layer_index) {
-    // Wait for the KV cache computation of this layer to complete.
     layer_synchronizer->synchronize_layer(layer_index);
 
-    // Push the KV Cache computed at this layer for all requests
-    for (const auto& pair : merged_kv_infos) {
-      const KVCacheInfo& kv_info = pair.second;
+    for (const std::string& key : keys) {
+      const KVCacheInfo& kv_info = merged_kv_infos.at(key);
+      if (kv_info.src_blocks.empty()) {
+        continue;
+      }
 
       // Check if we have XTensor offsets from D-node
       bool has_dst_offsets = !kv_info.dst_xtensor_layer_offsets.empty() &&
@@ -738,7 +776,7 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_impl(
       std::vector<uint64_t> src_offsets;
       std::vector<uint64_t> dst_offsets;
       src_offsets.reserve(kv_info.src_blocks.size() * 2);
-      dst_offsets.reserve(kv_info.dst_blocks.size() * 2);
+      dst_offsets.reserve(kv_info.src_blocks.size() * 2);
 
       for (size_t i = 0; i < kv_info.src_blocks.size(); ++i) {
         // Source block -> GlobalXTensor offsets (calculate locally on P-node)
@@ -779,6 +817,8 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_impl(
       }
       auto* xtensor_te =
           static_cast<MooncakeTransferEngine*>(mooncake_te_.get());
+
+      const auto step_start = std::chrono::steady_clock::now();
       auto ret = xtensor_te->move_memory_by_global_offsets(
           kv_info.dst_addr,
           src_offsets,

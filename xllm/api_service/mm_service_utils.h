@@ -15,6 +15,10 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
+#include <utility>
+#include <vector>
+
 #include "core/common/message.h"
 #include "core/common/types.h"
 #include "multimodal.pb.h"
@@ -43,16 +47,25 @@ bool build_messages(const google::protobuf::RepeatedPtrField<
       } else if (item.type() == "image_url") {
         ImageURL image_url;
         image_url.url = std::move(*item.mutable_image_url()->release_url());
+        for (const auto& [k, v] : item.image_url().headers()) {
+          image_url.headers[k] = v;
+        }
         contents.emplace_back(item.type(), image_url);
 
       } else if (item.type() == "video_url") {
         VideoURL video_url;
         video_url.url = std::move(*item.mutable_video_url()->release_url());
+        for (const auto& [k, v] : item.video_url().headers()) {
+          video_url.headers[k] = v;
+        }
         contents.emplace_back(item.type(), video_url);
 
       } else if (item.type() == "audio_url") {
         AudioURL audio_url;
         audio_url.url = std::move(*item.mutable_audio_url()->release_url());
+        for (const auto& [k, v] : item.audio_url().headers()) {
+          audio_url.headers[k] = v;
+        }
         contents.emplace_back(item.type(), audio_url);
       } else if (item.type() == "image_embedding") {
         contents.emplace_back("image_embedding", item.image_embedding());
@@ -68,6 +81,27 @@ bool build_messages(const google::protobuf::RepeatedPtrField<
     }
 
     out_messages.emplace_back(req_message.role(), std::move(contents));
+    auto& msg = out_messages.back();
+
+    if (req_message.has_tool_call_id()) {
+      msg.tool_call_id = req_message.tool_call_id();
+    }
+
+    if (req_message.tool_calls_size() > 0) {
+      Message::ToolCallVec tool_calls;
+      tool_calls.reserve(req_message.tool_calls_size());
+      for (const auto& tool_call : req_message.tool_calls()) {
+        tool_calls.emplace_back();
+        auto& tc = tool_calls.back();
+        if (tool_call.has_id()) {
+          tc.id = tool_call.id();
+        }
+        tc.type = tool_call.type();
+        tc.function.name = tool_call.function().name();
+        tc.function.arguments = tool_call.function().arguments();
+      }
+      msg.tool_calls = std::move(tool_calls);
+    }
   }
 
   for (auto& msg : out_messages) {

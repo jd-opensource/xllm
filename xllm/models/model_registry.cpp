@@ -22,6 +22,7 @@ limitations under the License.
 #include <unordered_set>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/kernel_config.h"
 #include "models.h"
 
 namespace {
@@ -67,13 +68,16 @@ constexpr char kTorchBackend[] = "TORCH";
 
 bool is_torch_only_model_type(const std::string& model_type) {
   static const std::unordered_set<std::string> kTorchOnlyModelTypes = {
+      "deepseek_v4",
+      "deepseek_v4_mtp",
       "qwen3_5",
       "qwen3_5_text",
       "qwen3_5_moe",
       "qwen3_5_moe_text",
       "qwen3_5_mtp",
       "qwen3_5_moe_mtp",
-      "qwen3_next"};
+      "qwen3_next",
+      "minimax_m2"};
   return kTorchOnlyModelTypes.count(model_type) != 0;
 }
 #endif
@@ -148,11 +152,12 @@ bool resolve_model_registration_name(const std::string& model_type,
                                      std::string* resolved_name,
                                      std::string* error_message) {
 #if defined(USE_NPU)
-  return resolve_model_registration(model_type,
-                                    FLAGS_npu_kernel_backend,
-                                    nullptr,
-                                    resolved_name,
-                                    error_message);
+  return resolve_model_registration(
+      model_type,
+      ::xllm::KernelConfig::get_instance().npu_kernel_backend(),
+      nullptr,
+      resolved_name,
+      error_message);
 #else
   return resolve_model_registration(
       model_type, "", nullptr, resolved_name, error_message);
@@ -204,20 +209,6 @@ void ModelRegistry::register_causalvlm_factory(const std::string& name,
   }
 }
 
-void ModelRegistry::register_mm_embedding_vlm_factory(
-    const std::string& name,
-    MMEmbeddingVLMFactory factory) {
-  ModelRegistry* instance = get_instance();
-
-  if (instance->model_registry_[name].mm_embedding_vlm_factory != nullptr) {
-    SAFE_LOG_WARNING("mm embedding vlm factory for " << name
-                                                     << " already registered.");
-  } else {
-    instance->model_registry_[name].mm_embedding_vlm_factory = factory;
-    instance->model_backend_[name] = "vlm";
-  }
-}
-
 void ModelRegistry::register_dit_model_factory(const std::string& name,
                                                DiTModelFactory factory) {
   ModelRegistry* instance = get_instance();
@@ -231,29 +222,17 @@ void ModelRegistry::register_dit_model_factory(const std::string& name,
   }
 }
 
-void ModelRegistry::register_input_processor_factory(
+void ModelRegistry::register_multimodal_processor_factory(
     const std::string& name,
-    InputProcessorFactory factory) {
+    MultimodalProcessorFactory factory) {
   ModelRegistry* instance = get_instance();
 
-  if (instance->model_registry_[name].input_processor_factory != nullptr) {
-    SAFE_LOG_WARNING("input processor factory for " << name
-                                                    << " already registered.");
+  if (instance->model_registry_[name].multimodal_processor_factory != nullptr) {
+    SAFE_LOG_WARNING("multimodal processor factory for "
+                     << name << " already registered.");
   } else {
-    instance->model_registry_[name].input_processor_factory = factory;
-  }
-}
-
-void ModelRegistry::register_image_processor_factory(
-    const std::string& name,
-    ImageProcessorFactory factory) {
-  ModelRegistry* instance = get_instance();
-
-  if (instance->model_registry_[name].image_processor_factory != nullptr) {
-    SAFE_LOG_WARNING("image processor factory for " << name
-                                                    << " already registered.");
-  } else {
-    instance->model_registry_[name].image_processor_factory = factory;
+    instance->model_registry_[name].multimodal_processor_factory =
+        std::move(factory);
   }
 }
 
@@ -311,30 +290,15 @@ CausalVLMFactory ModelRegistry::get_causalvlm_factory(const std::string& name) {
   return instance->model_registry_[name].causal_vlm_factory;
 }
 
-MMEmbeddingVLMFactory ModelRegistry::get_mm_embedding_vlm_factory(
-    const std::string& name) {
-  ModelRegistry* instance = get_instance();
-
-  return instance->model_registry_[name].mm_embedding_vlm_factory;
-}
-
 DiTModelFactory ModelRegistry::get_dit_model_factory(const std::string& name) {
   ModelRegistry* instance = get_instance();
   return instance->model_registry_[name].dit_model_factory;
 }
 
-InputProcessorFactory ModelRegistry::get_input_processor_factory(
+MultimodalProcessorFactory ModelRegistry::get_multimodal_processor_factory(
     const std::string& name) {
   ModelRegistry* instance = get_instance();
-
-  return instance->model_registry_[name].input_processor_factory;
-}
-
-ImageProcessorFactory ModelRegistry::get_image_processor_factory(
-    const std::string& name) {
-  ModelRegistry* instance = get_instance();
-
-  return instance->model_registry_[name].image_processor_factory;
+  return instance->model_registry_[name].multimodal_processor_factory;
 }
 
 ModelArgsLoader ModelRegistry::get_model_args_loader(const std::string& name) {
@@ -420,28 +384,6 @@ std::unique_ptr<CausalVLM> create_vlm_model(const ModelContext& context) {
   }
 
   auto factory = ModelRegistry::get_causalvlm_factory(resolved_name);
-  if (factory) {
-    return factory(context);
-  }
-
-  LOG(ERROR) << "Unsupported model type: "
-             << context.get_model_args().model_type();
-
-  return nullptr;
-}
-
-std::unique_ptr<MMEmbeddingVLM> create_vlm_mm_embedding_model(
-    const ModelContext& context) {
-  std::string resolved_name;
-  std::string error_message;
-  if (!resolve_model_registration_name(context.get_model_args().model_type(),
-                                       &resolved_name,
-                                       &error_message)) {
-    LOG(ERROR) << error_message;
-    return nullptr;
-  }
-
-  auto factory = ModelRegistry::get_mm_embedding_vlm_factory(resolved_name);
   if (factory) {
     return factory(context);
   }
