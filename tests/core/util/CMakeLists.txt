@@ -10,6 +10,7 @@ cc_test(
     suffix_decoding_cache_test.cpp
     threadpool_test.cpp
   DEPS
+    :config
     util
     :platform
     absl::synchronization
