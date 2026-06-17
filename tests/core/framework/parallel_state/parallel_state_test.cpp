@@ -506,7 +506,7 @@ class BroadcastMultiDeviceTest : public ::testing::Test {
 
   void RunMultiProcessTest(int32_t root_rank) {
     std::vector<pid_t> child_pids;
-    std::vector<int> child_statuses(world_size_);
+    std::vector<int32_t> child_statuses(world_size_);
 
     for (int32_t rank = 0; rank < world_size_; ++rank) {
       pid_t pid = fork();
