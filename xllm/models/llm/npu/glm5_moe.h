@@ -37,6 +37,7 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
     device_ = options.device();
     dtype_ = options.dtype().toScalarType();
     num_speculative_tokens_ = model_args.num_speculative_tokens();
+    index_topk_ = model_args.index_topk();
 
     npu_embed_tokens_ =
         register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
@@ -91,36 +92,80 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
 
     torch::Tensor attn_mask;
     if (num_speculative_tokens_ == 0 ||
-        input_params.batch_forward_type.is_prefill()) {
+        input_params.meta.batch_forward_type.is_prefill()) {
       attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
     } else {
       attn_mask = attn_mask_.gen_free_mask(
           num_speculative_tokens_ + 1, dtype_, device_);
     }
 
+    torch::Tensor prev_topk_indices;
     RollingLayerGuard rolling_guard(rolling_mgr_);
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.layer_synchronizer != nullptr) {
-        event = input_params.layer_synchronizer->get_event(i);
-        event_flag = input_params.layer_synchronizer->get_event_flag(i);
+      if (input_params.parallel.layer_synchronizer != nullptr) {
+        event = input_params.parallel.layer_synchronizer->get_event(i);
+        event_flag =
+            input_params.parallel.layer_synchronizer->get_event_flag(i);
       }
       if (!input_params.synchronize_layer(i)) {
         return ModelOutput();
       }
 
       auto& layer = layers_[i];
-      const int32_t layer_index = i;
+      const int32_t layer_index = static_cast<int32_t>(i);
+      const bool topk_sharing_enabled = layer->is_topk_sharing_enabled();
+      const bool skip_topk = layer->skip_topk();
+      const bool output_topk = layer->output_topk();
+      torch::Tensor current_topk_indices;
+      torch::Tensor shared_topk_indices;
+      torch::Tensor* output_topk_indices = nullptr;
+      if (topk_sharing_enabled) {
+        if (skip_topk) {
+          CHECK(prev_topk_indices.defined())
+              << "DSA top-k sharing requires previous top-k indices at layer "
+              << layer_index;
+          shared_topk_indices = prev_topk_indices;
+        }
+        if (output_topk) {
+          torch::Tensor index_cache = kv_caches[i].get_index_cache();
+          CHECK(index_cache.defined())
+              << "DSA top-k sharing requires index cache at layer "
+              << layer_index;
+          current_topk_indices = torch::empty(
+              std::vector<int64_t>{h.size(0),
+                                   index_cache.size(2),
+                                   static_cast<int64_t>(index_topk_)},
+              torch::TensorOptions().device(device_).dtype(torch::kInt32));
+          output_topk_indices = &current_topk_indices;
+        }
+      }
       rolling_guard.before_layer(layer_index);
-      layer(h,
-            cos_pos,
-            sin_pos,
-            attn_mask,
-            kv_caches[i],
-            input_params,
-            event,
-            event_flag);
+      if (topk_sharing_enabled) {
+        layer->forward_with_topk(h,
+                                 cos_pos,
+                                 sin_pos,
+                                 attn_mask,
+                                 kv_caches[i],
+                                 input_params,
+                                 shared_topk_indices,
+                                 output_topk_indices,
+                                 event,
+                                 event_flag);
+      } else {
+        layer(h,
+              cos_pos,
+              sin_pos,
+              attn_mask,
+              kv_caches[i],
+              input_params,
+              event,
+              event_flag);
+      }
+      if (output_topk) {
+        prev_topk_indices = current_topk_indices;
+      }
       rolling_guard.after_layer(layer_index);
     }
     return ModelOutput(norm_(h, 0));
@@ -235,6 +280,7 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
   nlohmann::json mapping_data_;
   int32_t num_experts_per_tok_;
   int32_t num_speculative_tokens_ = 0;
+  int32_t index_topk_ = 0;
   at::Device device_;
   torch::Dtype dtype_;
   layer::NpuWordEmbedding npu_embed_tokens_{nullptr};
@@ -312,6 +358,9 @@ REGISTER_MODEL_ARGS(glm_moe_dsa, [&] {
   LOAD_ARG_OR(index_head_dim, "index_head_dim", 128);
   LOAD_ARG_OR(index_n_heads, "index_n_heads", 0);
   LOAD_ARG_OR(index_topk, "index_topk", 2048);
+  LOAD_ARG_OR(index_topk_freq, "index_topk_freq", 1);
+  LOAD_ARG_OR(index_topk_pattern, "index_topk_pattern", "");
+  LOAD_ARG_OR(index_skip_topk_offset, "index_skip_topk_offset", 0);
 
   LOAD_ARG_OR(use_qk_norm, "use_qk_norm", true);
   LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);

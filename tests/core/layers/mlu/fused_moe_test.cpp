@@ -628,5 +628,130 @@ TEST_F(FusedMoETest, NoReductionModeMatchesExternalReduce) {
   verify_tensor_close(actual, expected, 1e-3, 1e-4);
 }
 
+TEST_F(FusedMoETest, DeepSeekV4MoETest) {
+  const int64_t batch_size = 2;
+  const int64_t seq_len = 4;
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 128;
+  const int64_t num_experts = 4;
+  const int64_t num_expert_group = 2;
+  const int64_t topk_group = 2;
+  const int64_t top_k = 2;
+  const double route_scale = 1.0;
+  const float swiglu_limit = 10.0f;
+
+  ModelArgs args = model_args_;
+  args.n_routed_experts() = static_cast<int32_t>(num_experts);
+  args.num_experts_per_tok() = static_cast<int32_t>(top_k);
+  args.n_group() = static_cast<int32_t>(num_expert_group);
+  args.topk_group() = static_cast<int32_t>(topk_group);
+  args.routed_scaling_factor() = static_cast<float>(route_scale);
+  args.hidden_size() = hidden_size;
+  args.moe_intermediate_size() = static_cast<int32_t>(intermediate_size);
+  args.n_shared_experts() = 1;
+  args.hidden_act() = "silu";
+  args.model_type() = "deepseek_v4";
+  args.scoring_func() = "sqrtsoftplus";
+  args.swiglu_limit() = swiglu_limit;
+
+  const FusedMoEArgs moe_args{
+      .is_gated = true, .enable_result_reduction = true, .use_hash = false};
+
+  auto fused_moe = FusedMoE(
+      FusedMoEImpl(args, moe_args, quant_args_, parallel_args_, options_));
+
+  auto weight_dict =
+      create_test_weights(num_experts, hidden_size, intermediate_size);
+  StateDict state_dict(weight_dict);
+  fused_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 1.0f));
+
+  auto output = fused_moe->forward_experts(
+      hidden_states, /*enable_all2all_communication=*/false);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  ASSERT_EQ(output.dim(), 2);
+  ASSERT_EQ(output.size(0), batch_size * seq_len);
+  ASSERT_EQ(output.size(1), hidden_size);
+
+  auto output_sum = torch::sum(output).item<float>();
+  ASSERT_TRUE(std::isfinite(output_sum))
+      << "Output should be finite with swiglu_limit";
+
+  LOG(INFO) << "DeepSeek V4 MoE forward test passed, output sum: "
+            << output_sum;
+}
+
+TEST_F(FusedMoETest, DeepSeekV4HashMoETest) {
+  const int64_t batch_size = 2;
+  const int64_t seq_len = 4;
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 128;
+  const int64_t num_experts = 4;
+  const int64_t num_expert_group = 2;
+  const int64_t topk_group = 2;
+  const int64_t top_k = 2;
+  const int64_t vocab_size = 1024;
+  const double route_scale = 1.0;
+  const float swiglu_limit = 10.0f;
+
+  ModelArgs args = model_args_;
+  args.n_routed_experts() = static_cast<int32_t>(num_experts);
+  args.num_experts_per_tok() = static_cast<int32_t>(top_k);
+  args.n_group() = static_cast<int32_t>(num_expert_group);
+  args.topk_group() = static_cast<int32_t>(topk_group);
+  args.routed_scaling_factor() = static_cast<float>(route_scale);
+  args.hidden_size() = hidden_size;
+  args.moe_intermediate_size() = static_cast<int32_t>(intermediate_size);
+  args.n_shared_experts() = 1;
+  args.hidden_act() = "silu";
+  args.model_type() = "deepseek_v4";
+  args.scoring_func() = "sqrtsoftplus";
+  args.swiglu_limit() = swiglu_limit;
+  args.vocab_size() = vocab_size;
+
+  const FusedMoEArgs moe_args{
+      .is_gated = true, .enable_result_reduction = true, .use_hash = true};
+
+  auto fused_moe = FusedMoE(
+      FusedMoEImpl(args, moe_args, quant_args_, parallel_args_, options_));
+
+  auto weight_dict =
+      create_test_weights(num_experts, hidden_size, intermediate_size);
+  weight_dict["gate.tid2eid"] =
+      torch::full({vocab_size, top_k}, 0.1f, options_);
+  StateDict state_dict(weight_dict);
+  fused_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 1.0f));
+  auto input_ids = torch::randint(
+      0, vocab_size, {batch_size * seq_len}, options_.dtype(torch::kInt32));
+  auto output =
+      fused_moe->forward_experts(hidden_states,
+                                 /*enable_all2all_communication=*/false,
+                                 /*route_info=*/std::nullopt,
+                                 input_ids);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  ASSERT_EQ(output.dim(), 2);
+  ASSERT_EQ(output.size(0), batch_size * seq_len);
+  ASSERT_EQ(output.size(1), hidden_size);
+
+  auto output_sum = torch::sum(output).item<float>();
+  ASSERT_TRUE(std::isfinite(output_sum))
+      << "Output should be finite with swiglu_limit";
+
+  LOG(INFO) << "DeepSeek V4 hash MoE forward test passed, output sum: "
+            << output_sum;
+}
 }  // namespace layer
 }  // namespace xllm

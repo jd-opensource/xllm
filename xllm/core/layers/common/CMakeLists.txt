@@ -8,12 +8,13 @@ cc_library(
     qwen2_attention.h
     qwen2_vision_attention.h
     qwen3_next_rms_norm.h
+    deepseek_v4_rotary_embedding.h
     partial_rotary_embedding.h
     rms_norm_gated.h
     rms_norm.h
     rotary_embedding.h
     rotary_embedding_util.h
-    $<$<NOT:$<OR:$<BOOL:${USE_ILU}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_NPU}>,$<BOOL:${USE_CUDA}>>>:fused_moe.h>
+    $<$<NOT:$<OR:$<BOOL:${USE_ILU}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_NPU}>,$<BOOL:${USE_CUDA}>,$<BOOL:${USE_DCU}>>>:fused_moe.h>
     dense_mlp.h
     linear.h
     word_embedding_impl.h
@@ -21,6 +22,9 @@ cc_library(
     activation.h
     attention_metadata.h
     attention_metadata_builder.h
+    dsa_metadata.h
+    dsa_metadata_builder.h
+    dsa_topk_share_plan.h
     dp_utils.h
     add_matmul.h
     moe_fused_topk.h
@@ -29,18 +33,20 @@ cc_library(
     qwen2_attention.cpp
     qwen2_vision_attention.cpp
     qwen3_next_rms_norm.cpp
+    deepseek_v4_rotary_embedding.cpp
     partial_rotary_embedding.cpp
     rms_norm_gated.cpp
     rms_norm.cpp
     rotary_embedding.cpp
     rotary_embedding_util.cpp
-    $<$<NOT:$<OR:$<BOOL:${USE_ILU}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_NPU}>,$<BOOL:${USE_CUDA}>>>:fused_moe.cpp>
+    $<$<NOT:$<OR:$<BOOL:${USE_ILU}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_NPU}>,$<BOOL:${USE_CUDA}>,$<BOOL:${USE_DCU}>>>:fused_moe.cpp>
     dense_mlp.cpp
     linear.cpp
     word_embedding_impl.cpp
     deep_ep.cpp
     activation.cpp
     attention_metadata_builder.cpp
+    dsa_metadata_builder.cpp
     dp_utils.cpp
     add_matmul.cpp
     moe_fused_topk.cpp
@@ -48,8 +54,8 @@ cc_library(
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"
     :kv_cache
-    :prefix_cache
     :block
+    :prefix_cache
     :parallel_state
     :state_dict
     :model
@@ -63,4 +69,5 @@ cc_library(
     $<$<BOOL:${USE_ILU}>:ilu_layers>
     $<$<BOOL:${USE_NPU}>:npu_torch_layers>
     $<$<BOOL:${USE_MUSA}>:musa_layers>
+    $<$<BOOL:${USE_DCU}>:dcu_layers>
 )

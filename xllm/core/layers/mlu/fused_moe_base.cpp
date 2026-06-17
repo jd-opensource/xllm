@@ -137,14 +137,17 @@ void FusedMoEImpl::final_comm_allreduce(torch::Tensor& final_hidden_states,
 
 torch::Tensor FusedMoEImpl::forward_experts_base(
     const torch::Tensor& hidden_states,
-    const std::optional<RouteInfo>& route_info) {
+    const std::optional<RouteInfo>& route_info,
+    const std::optional<torch::Tensor>& input_ids) {
   torch::IntArrayRef hidden_states_shape = hidden_states.sizes();
   torch::ScalarType hidden_states_dtype = hidden_states.dtype().toScalarType();
   torch::Tensor hidden_states_2d =
       hidden_states.reshape({-1, hidden_states.size(-1)});
 
-  RouteInfo route = get_route(
-      hidden_states_2d, /*enable_all2all_communication=*/false, route_info);
+  RouteInfo route = get_route(hidden_states_2d,
+                              /*enable_all2all_communication=*/false,
+                              route_info,
+                              input_ids);
 
   int64_t group_gemm_max_dim = hidden_states_2d.size(0);
   int64_t expert_size = w13_.size(0);

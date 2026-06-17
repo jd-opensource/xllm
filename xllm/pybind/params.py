@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Type, Union
+from typing import Any, List, Optional, Set, Type, Union
 
 from xllm_export import RequestParams
 
@@ -6,6 +6,7 @@ from xllm_export import RequestParams
 class _RequestParamsProxy:
     def __init__(self, **kwargs: Any) -> None:
         object.__setattr__(self, "_request_params", RequestParams())
+        object.__setattr__(self, "_explicit_fields", set())
         for key, value in kwargs.items():
             self._set_field(key, value)
 
@@ -17,6 +18,7 @@ class _RequestParamsProxy:
             self._request_params.top_logprobs = value
             return
         setattr(self._request_params, key, value)
+        self._explicit_fields.add(key)
 
     def __getattr__(self, key: str) -> Any:
         return getattr(self._request_params, key)
@@ -29,6 +31,9 @@ class _RequestParamsProxy:
 
     def to_request_params(self) -> RequestParams:
         return self._request_params
+
+    def explicit_fields(self) -> Set[str]:
+        return set(self._explicit_fields)
 
 
 class SamplingParams(_RequestParamsProxy):

@@ -23,6 +23,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/service_config.h"
 #include "framework/request/finish_reason.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
@@ -34,18 +35,34 @@ namespace xllm {
 AsyncResponseProcessor::AsyncResponseProcessor(
     const Tokenizer* tokenizer,
     const std::optional<InstanceRole>& role,
-    bool enable_service_routing)
-    : response_threadpool_(FLAGS_num_response_handling_threads),
+    bool enable_service_routing,
+    bool disable_log_stats)
+    : response_threadpool_(
+          /*num_threads=*/::xllm::ServiceConfig::get_instance()
+              .num_response_handling_threads(),
+          /*cpu_binding=*/false,
+          /*pool_name=*/"AsyncResponseProcessor.response"),
+      rpc_threadpool_(/*num_threads=*/1,
+                      /*cpu_binding=*/false,
+                      /*pool_name=*/"AsyncResponseProcessor.rpc"),
+      generate_output_threadpool_(
+          /*num_threads=*/16,
+          /*cpu_binding=*/false,
+          /*pool_name=*/"AsyncResponseProcessor.generate_output"),
       tokenizer_(tokenizer->clone()),
       role_(role.value_or(InstanceRole::DEFAULT)),
-      enable_batch_response_(enable_service_routing) {}
+      enable_batch_response_(enable_service_routing),
+      disable_log_stats_(disable_log_stats) {}
 
 void AsyncResponseProcessor::process_failed_request(
     std::shared_ptr<Request> request,
     Status status) {
   // schedule the response handling
-  auto runnable = [request = request, status = status]() {
-    request->log_error_statistic(status);
+  const bool disable_log_stats = disable_log_stats_;
+  auto runnable = [disable_log_stats, request = request, status = status]() {
+    if (!disable_log_stats) {
+      request->log_error_statistic(status);
+    }
     RequestOutput output;
     output.request_id = request->request_id();
     output.service_request_id = request->service_request_id();
@@ -90,7 +107,9 @@ void AsyncResponseProcessor::process_completed_request(
                       static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
     RequestOutput req_output =
         request->generate_output(*tokenizer_, &generate_output_threadpool_);
-    request->log_statistic(end_2_end_latency_seconds);
+    if (!disable_log_stats_) {
+      request->log_statistic(end_2_end_latency_seconds);
+    }
     request->state().output_func(req_output);
   };
   if (request->state().response_thread_id < 0) {
@@ -121,7 +140,9 @@ void AsyncResponseProcessor::batch_process_completed_requests(
           end_2_end_latency_milliseconds,
           static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
       if (request->finished() || request->cancelled()) {
-        request->log_statistic(end_2_end_latency_seconds);
+        if (!disable_log_stats_) {
+          request->log_statistic(end_2_end_latency_seconds);
+        }
       }
 
       *request_output = std::move(request->generate_output(*tokenizer_));
@@ -327,16 +348,19 @@ void AsyncResponseProcessor::process_stream_requests(
 
 // for batch generate, wait all response done.
 void AsyncResponseProcessor::wait_completion() {
-  size_t thread_num = response_threadpool_.size();
-  // Add a task to each thread, and when all tasks are completed, it indicates
-  // that all previously scheduled tasks in the thread pool have finished
-  // executing.
-  BlockingCounter counter(thread_num);
-  for (size_t i = 0; i < thread_num; ++i) {
-    auto runnable = [&counter]() mutable { counter.decrement_count(); };
-    response_threadpool_.schedule_with_tid(std::move(runnable), i);
-  }
-  counter.wait();
+  auto wait_threadpool = [](ThreadPool& threadpool) {
+    size_t thread_num = threadpool.size();
+    // Add a task to each thread, and when all tasks are completed, it indicates
+    // that all previously scheduled tasks in the thread pool have finished.
+    BlockingCounter counter(thread_num);
+    for (size_t i = 0; i < thread_num; ++i) {
+      auto runnable = [&counter]() mutable { counter.decrement_count(); };
+      threadpool.schedule_with_tid(std::move(runnable), i);
+    }
+    counter.wait();
+  };
+  wait_threadpool(response_threadpool_);
+  wait_threadpool(rpc_threadpool_);
 }
 
 }  // namespace xllm

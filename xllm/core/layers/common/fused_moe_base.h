@@ -22,6 +22,7 @@ struct FusedMoEArgs {
   bool is_gated = true;
   bool enable_result_reduction = true;
   bool skip_gate_load = false;
+  bool use_hash = false;
 };
 
 }  // namespace layer

@@ -37,9 +37,16 @@ constexpr size_t kRequestQueueSize = 100;
 
 void DiTAsyncResponseProcessor::process_completed_request(
     std::shared_ptr<DiTRequest> request) {
-  response_threadpool_.schedule([request = std::move(request)]() {
-    LOG(INFO) << "request_id: " << request->request_id();
+  const bool disable_log_stats = disable_log_stats_;
+  response_threadpool_.schedule([disable_log_stats,
+                                 request = std::move(request)]() {
+    double end_2_end_latency_seconds = request->elapsed_seconds();
+    HISTOGRAM_OBSERVE(end_2_end_latency_milliseconds,
+                      static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
 
+    if (!disable_log_stats) {
+      request->log_statistic(end_2_end_latency_seconds);
+    }
     request->state().output_func()(request->generate_output());
   });
 }
@@ -55,7 +62,8 @@ DiTDynamicBatchScheduler::DiTDynamicBatchScheduler(Engine* engine,
       request_queue_(kRequestQueueSize) {
   CHECK(engine_ != nullptr);
 
-  response_handler_ = std::make_unique<DiTAsyncResponseProcessor>();
+  response_handler_ =
+      std::make_unique<DiTAsyncResponseProcessor>(options_.disable_log_stats());
 }
 
 DiTDynamicBatchScheduler::~DiTDynamicBatchScheduler() {

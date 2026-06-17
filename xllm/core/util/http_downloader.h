@@ -31,13 +31,18 @@ class HttpDownloader {
   HttpDownloader() = default;
   virtual ~HttpDownloader() {}
 
-  bool fetch_data(const std::string& url, std::string& data);
+  bool fetch_data(
+      const std::string& url,
+      std::string& data,
+      const std::unordered_map<std::string, std::string>& headers = {});
 
  protected:
   bool parse_url(const std::string& url, std::string& host);
-  virtual bool download(const std::string& host,
-                        const std::string& url,
-                        std::string& data) = 0;
+  virtual bool download(
+      const std::string& host,
+      const std::string& url,
+      std::string& data,
+      const std::unordered_map<std::string, std::string>& headers = {}) = 0;
 };
 
 class BRpcDownloader : public HttpDownloader {
@@ -47,7 +52,9 @@ class BRpcDownloader : public HttpDownloader {
 
   bool download(const std::string& host,
                 const std::string& url,
-                std::string& data) override;
+                std::string& data,
+                const std::unordered_map<std::string, std::string>& headers =
+                    {}) override;
 
  private:
   std::shared_ptr<brpc::Channel> get_channel(const std::string& host);
@@ -57,5 +64,14 @@ class BRpcDownloader : public HttpDownloader {
   inline static std::unordered_map<std::string, std::shared_ptr<brpc::Channel>>
       channels_;
 };
+
+// Parse a JSON string of headers into a key-value map.
+// Returns empty map on empty input or parse failure.
+// Exposed for testing.
+std::unordered_map<std::string, std::string> parse_headers_json(
+    const std::string& raw);
+
+// Parse the --mm_download_headers gflag. Cached after first call.
+std::unordered_map<std::string, std::string> parse_global_headers();
 
 }  // namespace xllm

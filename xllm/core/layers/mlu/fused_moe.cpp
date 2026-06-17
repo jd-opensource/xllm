@@ -17,7 +17,13 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <optional>
+#include <vector>
+
 #include "common/global_flags.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/scheduler_config.h"
+#include "core/framework/config/speculative_config.h"
 #include "kernels/ops_api.h"
 #include "layers/common/dp_utils.h"
 #include "util/tensor_helper.h"
@@ -38,6 +44,10 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       is_gated_(moe_args.is_gated),
       enable_result_reduction_(moe_args.enable_result_reduction),
       hidden_act_(model_args.hidden_act()),
+      swiglu_limit_(model_args.model_type() == "deepseek_v4"
+                        ? std::make_optional(model_args.swiglu_limit())
+                        : std::nullopt),
+      use_hash_(moe_args.use_hash),
       quant_args_(quant_args),
       parallel_args_(parallel_args),
       options_(options),
@@ -77,7 +87,9 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   }
 
   // Deep EP initialization check
-  enable_deep_ep_ = FLAGS_expert_parallel_degree == 2 && ep_size > 1;
+  enable_deep_ep_ =
+      ::xllm::EPLBConfig::get_instance().expert_parallel_degree() == 2 &&
+      ep_size > 1;
   if (enable_deep_ep_) {
     // for now, we only implement the deep ep for decode stage.
     // so we will assume the max_token_num is limited to max_batch_size * (1+K)
@@ -94,16 +106,20 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
     torch::ScalarType combine_dtype = options_.dtype().toScalarType();
     int64_t combine_token_size = hidden_size_ * get_dtype_size(combine_dtype);
     // Ensure calculation base is at least ep_size
-    int64_t effective_seqs =
-        std::max((int64_t)FLAGS_max_seqs_per_batch, (int64_t)ep_size);
-    // NOTE: FLAGS_max_seqs_per_batch represents the maximum total batch size,
-    // regardless of the dp size. To ensure robust scheduling and account
-    // for the worst-case scenario, we must guarantee that each rank is capable
-    // of handling the maximum possible number of tokens. Therefore, we define
-    // max_num_tokens_per_rank as the full maximum value, without dividing by
-    // either the rank count or the dp size.
+    int64_t effective_seqs = std::max(
+        (int64_t)::xllm::SchedulerConfig::get_instance().max_seqs_per_batch(),
+        (int64_t)ep_size);
+    // NOTE: ::xllm::SchedulerConfig::get_instance().max_seqs_per_batch()
+    // represents the maximum total batch size, regardless of the dp size. To
+    // ensure robust scheduling and account for the worst-case scenario, we must
+    // guarantee that each rank is capable of handling the maximum possible
+    // number of tokens. Therefore, we define max_num_tokens_per_rank as the
+    // full maximum value, without dividing by either the rank count or the dp
+    // size.
     int64_t max_num_tokens_per_rank =
-        (1 + FLAGS_num_speculative_tokens) * effective_seqs * topk_;
+        (1 +
+         ::xllm::SpeculativeConfig::get_instance().num_speculative_tokens()) *
+        effective_seqs * topk_;
 
     // make sure that all layers share the same deep ep instance
     //  so that the memory footprint is minimized
@@ -143,24 +159,27 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   num_experts_per_rank_ = num_experts / ep_size;
   start_expert_id_ = ep_rank * num_experts_per_rank_;
 
-  gate_ = register_module("gate", MoEGate(model_args, quant_args, options));
+  gate_ = register_module("gate",
+                          MoEGate(model_args, quant_args, options, use_hash_));
   if (n_shared_experts_ > 0) {
     CHECK(parallel_args.single_rank_group_ != nullptr)
         << "shared experts require single_rank_group_";
     // Shared experts always run with full weights on the local rank. This
     // keeps the shared path independent from TP/EP sharding.
     shared_pg_ = parallel_args.single_rank_group_;
-    shared_experts_ =
-        register_module("shared_experts",
-                        DenseMLP(hidden_size_,
-                                 intermediate_size * n_shared_experts_,
-                                 is_gated_,
-                                 false,
-                                 hidden_act_,
-                                 enable_result_reduction_,
-                                 quant_args,
-                                 shared_pg_,
-                                 options));
+    shared_experts_ = register_module(
+        "shared_experts",
+        DenseMLP(hidden_size_,
+                 intermediate_size * n_shared_experts_,
+                 is_gated_,
+                 false,
+                 hidden_act_,
+                 enable_result_reduction_,
+                 quant_args,
+                 shared_pg_,
+                 options,
+                 "",
+                 static_cast<double>(swiglu_limit_.value_or(0.0f))));
   }
 
   // create weight buffer
@@ -375,6 +394,15 @@ torch::Tensor FusedMoEImpl::compute_routed_experts(
     gemm1_out = xllm::kernel::group_gemm(group_gemm_params);
   }
 
+  if (swiglu_limit_.has_value()) {
+    const float limit = swiglu_limit_.value();
+    std::vector<torch::Tensor> gate_up_chunks = gemm1_out.chunk(2, -1);
+    torch::Tensor gate = torch::clamp_max(gate_up_chunks[0], /*max=*/limit);
+    torch::Tensor up =
+        torch::clamp(gate_up_chunks[1], /*min=*/-limit, /*max=*/limit);
+    gemm1_out = torch::cat({gate, up}, -1);
+  }
+
   torch::Tensor act_out;
   torch::Tensor act_out_scale;
   if (is_smoothquant_) {
@@ -443,13 +471,15 @@ torch::Tensor FusedMoEImpl::compute_routed_experts(
   return gemm2_out;
 }
 
-FusedMoEImpl::RouteInfo FusedMoEImpl::prep_route(torch::Tensor& hidden_states) {
+FusedMoEImpl::RouteInfo FusedMoEImpl::prep_route(
+    torch::Tensor& hidden_states,
+    const std::optional<torch::Tensor>& input_ids) {
   torch::Tensor hidden_states_2d =
       hidden_states.reshape({-1, hidden_states.size(-1)});
 
   RouteInfo route_info;
   std::tie(route_info.reduce_weight, route_info.expert_id) =
-      gate_->forward(hidden_states_2d);
+      gate_->forward(hidden_states_2d, input_ids);
   return route_info;
 }
 
@@ -489,9 +519,10 @@ void FusedMoEImpl::check_route(const torch::Tensor& hidden_states_2d,
 FusedMoEImpl::RouteInfo FusedMoEImpl::get_route(
     torch::Tensor& hidden_states_2d,
     bool enable_all2all_communication,
-    const std::optional<RouteInfo>& route_info) {
+    const std::optional<RouteInfo>& route_info,
+    const std::optional<torch::Tensor>& input_ids) {
   if (!route_info.has_value()) {
-    return prep_route(hidden_states_2d);
+    return prep_route(hidden_states_2d, input_ids);
   }
 
   CHECK(!enable_all2all_communication)
@@ -503,12 +534,13 @@ FusedMoEImpl::RouteInfo FusedMoEImpl::get_route(
 torch::Tensor FusedMoEImpl::forward_experts(
     const torch::Tensor& hidden_states,
     bool enable_all2all_communication,
-    const std::optional<RouteInfo>& route_info) {
+    const std::optional<RouteInfo>& route_info,
+    const std::optional<torch::Tensor>& input_ids) {
   // Dispatcher: route to the appropriate path based on communication mode
   if (enable_all2all_communication) {
-    return forward_experts_all2all(hidden_states, route_info);
+    return forward_experts_all2all(hidden_states, route_info, input_ids);
   } else {
-    return forward_experts_base(hidden_states, route_info);
+    return forward_experts_base(hidden_states, route_info, input_ids);
   }
 }
 

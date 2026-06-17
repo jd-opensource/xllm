@@ -37,7 +37,8 @@ namespace xllm {
 
 class DiTAsyncResponseProcessor final {
  public:
-  DiTAsyncResponseProcessor() = default;
+  explicit DiTAsyncResponseProcessor(bool disable_log_stats = false)
+      : disable_log_stats_(disable_log_stats) {}
   ~DiTAsyncResponseProcessor() = default;
 
   void process_completed_request(std::shared_ptr<DiTRequest> request);
@@ -48,7 +49,12 @@ class DiTAsyncResponseProcessor final {
   DISALLOW_COPY_AND_ASSIGN(DiTAsyncResponseProcessor);
 
   // the threadpool to handle responses
-  ThreadPool response_threadpool_;
+  ThreadPool response_threadpool_{
+      /*num_threads=*/1,
+      /*cpu_binding=*/false,
+      /*pool_name=*/"DiTAsyncResponseProcessor.response"};
+
+  bool disable_log_stats_ = false;
 };
 
 class DiTScheduler : public SchedulerBase {
@@ -56,6 +62,7 @@ class DiTScheduler : public SchedulerBase {
   struct Options {
     // the request per batch
     PROPERTY(int32_t, max_request_per_batch) = 4;
+    PROPERTY(bool, disable_log_stats) = false;
   };
 
   virtual ~DiTScheduler() = default;

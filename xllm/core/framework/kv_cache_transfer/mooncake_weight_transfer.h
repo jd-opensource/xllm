@@ -30,17 +30,17 @@ namespace xllm {
 // Weight transfer using Mooncake transfer engine for remote weight loading
 class MooncakeWeightTransfer {
  public:
-  MooncakeWeightTransfer(int16_t listen_port, const torch::Device& device);
+  MooncakeWeightTransfer(uint16_t listen_port, const torch::Device& device);
   ~MooncakeWeightTransfer() = default;
 
   bool initialize();
 
   bool register_global_xtensor();
 
-  bool link_d2d(const std::string& remote_addr);
-  bool link_d2d(const std::vector<std::string>& remote_addrs);
-  bool unlink_d2d(const std::string& remote_addr);
-  bool unlink_d2d(const std::vector<std::string>& remote_addrs);
+  bool link_p2p(const std::string& remote_addr);
+  bool link_p2p(const std::vector<std::string>& remote_addrs);
+  bool unlink_p2p(const std::string& remote_addr);
+  bool unlink_p2p(const std::vector<std::string>& remote_addrs);
 
   bool pull_weights(const std::string& remote_addr,
                     uint64_t src_offset,
@@ -53,7 +53,7 @@ class MooncakeWeightTransfer {
                     size_t size);
 
  private:
-  int16_t listen_port_;
+  uint16_t listen_port_;
   int32_t device_id_;
   std::string addr_;
   uint64_t cluster_id_ = 0;

@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <optional>
+#include <string>
 #include <utility>
 
 #include "framework/model/model_args.h"
@@ -26,6 +27,7 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
+#include "layers/common/activation.h"
 #include "layers/common/dense_mlp.h"
 #include "layers/common/fused_moe_base.h"
 #include "layers/common/linear.h"
@@ -75,7 +77,6 @@ class FusedMoEImpl : public torch::nn::Module {
   int64_t topk_;
   int64_t num_expert_group_;
   int64_t topk_group_;
-  double route_scale_;
   int64_t hidden_size_;
   int64_t n_shared_experts_;
   bool is_gated_;
@@ -83,7 +84,10 @@ class FusedMoEImpl : public torch::nn::Module {
   bool has_bias_;
   bool skip_bias_add_;
   bool skip_gate_load_;
+  bool is_deepseek_v4_ = false;
+  bool shared_expert_gate_is_loaded_ = false;
   int64_t renormalize_;
+  double swiglu_limit_ = 0.0;
   std::string hidden_act_;
   std::string scoring_func_;
   bool is_smoothquant_;
@@ -94,8 +98,11 @@ class FusedMoEImpl : public torch::nn::Module {
   int64_t start_expert_id_;
   int64_t local_intermediate_size_;
   bool w4a8_dynamic_preprocessed_ = false;
+  bool w13_group_gemm_layout_prepared_ = false;
+  bool w2_group_gemm_layout_prepared_ = false;
 
   ReplicatedLinear gate_{nullptr};
+  Activation act_{nullptr};
   DenseMLP shared_experts_{nullptr};
   torch::nn::Linear shared_expert_gate_{nullptr};
   QuantArgs quant_args_;
@@ -128,7 +135,43 @@ class FusedMoEImpl : public torch::nn::Module {
   void resolve_quant_method_from_state_dict(const StateDict& state_dict);
   void validate_resolved_quant_method() const;
   void ensure_quant_weight_layout();
+  void ensure_group_gemm_weight_layout(torch::Tensor& weight,
+                                       bool& prepared,
+                                       int64_t input_dim,
+                                       int64_t output_dim,
+                                       const char* name);
   void preprocess_w4a8_dynamic_weights();
+  void clear_w4a8_dynamic_source_weight_cache();
+  bool should_gather_dp_inputs_for_moe() const;
+  bool can_use_ep2_dispatch_combine(const ModelInputParams& input_params,
+                                    const torch::Tensor& hidden_states) const;
+  int32_t fused_mc2_mode() const;
+  bool prepare_dispatch_ffn_combine_inputs();
+  bool prepare_dispatch_gmm_combine_decode_inputs();
+  torch::Tensor forward_with_dispatch_ffn_combine(
+      const torch::Tensor& input_2d,
+      const torch::Tensor& weights_2d,
+      const torch::Tensor& ids_2d,
+      at::IntArrayRef hidden_states_shape);
+  torch::Tensor forward_with_dispatch_gmm_combine_decode(
+      const torch::Tensor& input_2d,
+      const torch::Tensor& weights_2d,
+      const torch::Tensor& ids_2d,
+      at::IntArrayRef hidden_states_shape,
+      int64_t global_bs);
+  torch::Tensor forward_with_selected_experts_ep2(
+      const torch::Tensor& hidden_states,
+      const torch::Tensor& topk_weights,
+      const torch::Tensor& topk_ids,
+      const ModelInputParams& input_params);
+  const std::string& get_moe_ep_group_name();
+
+  bool enable_ep2_dispatch_combine_ = false;
+  bool dispatch_ffn_combine_prepared_ = false;
+  bool dispatch_gmm_combine_decode_prepared_ = false;
+  torch::Tensor dispatch_ffn_w13_scale_;
+  torch::Tensor dispatch_ffn_w2_scale_;
+  std::string moe_ep_group_name_;
 };
 TORCH_MODULE(FusedMoE);
 

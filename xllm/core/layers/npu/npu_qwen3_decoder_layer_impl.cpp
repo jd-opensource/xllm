@@ -20,7 +20,15 @@ limitations under the License.
 
 #include <map>
 
-#include "common/global_flags.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/config/scheduler_config.h"
+#include "core/layers/npu/loader/qwen3_decoder_loader.h"
+#include "operations/fusion/mlp/mlp.h"
 #include "util/rec_model_utils.h"
 
 // #include "attn_mask.h"
@@ -48,7 +56,9 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
   param.rmsnormQKNorm = true;
   param.isPrefill = isPrefill;
   param.isBF16 = args.dtype() == "bfloat16";
-  param.enableSplitFuse = FLAGS_enable_chunked_prefill && isPrefill;
+  param.enableSplitFuse =
+      ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() &&
+      isPrefill;
   param.loraEnableGMM = false;
   param.enableXattention = is_rec_multi_round_mode();
 
@@ -66,19 +76,25 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
   std::optional<long int> optionalValue = args.n_kv_heads();
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optionalValue.value()) / parallel_args.world_size();
-  param.backend = FLAGS_communication_backend;
+  param.backend =
+      ::xllm::ParallelConfig::get_instance().communication_backend();
   param.enableLogN = false;
-  param.tensorParallelInfo = {parallel_args.rank(),
-                              parallel_args.world_size(),
-                              FLAGS_communication_backend};
+  param.tensorParallelInfo = {
+      parallel_args.rank(),
+      parallel_args.world_size(),
+      ::xllm::ParallelConfig::get_instance().communication_backend()};
   param.linearHasBias = {0, 0, 0, 0};
   param.useQKNorm = true;
 
   param.numHiddenLayers = args.n_layers();
   param.enableIntraLayerAddNorm = true;
-  param.enableInterLayerAddNorm = false;
-  param.enablePreFetchWeight = FLAGS_enable_prefetch_weight;
-  param.enableAclGraphPagedAttention = FLAGS_enable_graph && !isPrefill;
+  if (::xllm::KernelConfig::get_instance().enable_interlayer_addnorm()) {
+    param.enableInterLayerAddNorm = true;
+  }
+  param.enablePreFetchWeight =
+      ::xllm::LoadConfig::get_instance().enable_prefetch_weight();
+  param.enableAclGraphPagedAttention =
+      ::xllm::ExecutionConfig::get_instance().enable_graph() && !isPrefill;
   initialize_parallel_parameters(param, parallel_args);
   initialize_quantization_parameters(param);
 
@@ -88,14 +104,20 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
             ? false
             : quantize_type_.empty();
     // for prefix cache without chunked prefill.
-    if (FLAGS_enable_prefix_cache && !FLAGS_enable_chunked_prefill &&
-        FLAGS_block_size != 128) {
+    if (::xllm::KVCacheConfig::get_instance().enable_prefix_cache() &&
+        !::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() &&
+        ::xllm::KVCacheConfig::get_instance().block_size() != 128) {
       LOG(ERROR) << "try to enable prefix cache without chunked prefill but "
                     "failed, because the block_size is required to be 128.";
     }
-    param.isPrefixCacheWithoutChunk = FLAGS_enable_prefix_cache &&
-                                      !FLAGS_enable_chunked_prefill &&
-                                      FLAGS_block_size == 128;
+    param.isPrefixCacheWithoutChunk =
+        ::xllm::KVCacheConfig::get_instance().enable_prefix_cache() &&
+        !::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() &&
+        ::xllm::KVCacheConfig::get_instance().block_size() == 128;
+  }
+  num_hidden_layers_ = args.n_layers();
+  if (::xllm::KernelConfig::get_instance().enable_split_rmsnorm_rope()) {
+    param.enableSplitRmsNormRope = true;
   }
 }
 
@@ -103,12 +125,13 @@ void NpuQwen3DecoderLayerImpl::initialize_parallel_parameters(
     atb_speed::qwen::QwenLayerParam& param,
     const ParallelArgs& parallel_args) {
   param.mapping = parallel_args.mapping();
-  param.tensorParallelInfo = {parallel_args.rank(),
-                              parallel_args.world_size(),
-                              FLAGS_communication_backend,
-                              FLAGS_rank_tablefile,
-                              nullptr,
-                              ""};
+  param.tensorParallelInfo = {
+      parallel_args.rank(),
+      parallel_args.world_size(),
+      ::xllm::ParallelConfig::get_instance().communication_backend(),
+      ::xllm::EPLBConfig::get_instance().rank_tablefile(),
+      nullptr,
+      ""};
 }
 
 void NpuQwen3DecoderLayerImpl::initialize_quantization_parameters(
@@ -157,7 +180,9 @@ NpuQwen3DecoderLayerImpl::NpuQwen3DecoderLayerImpl(const ModelContext& context)
   auto options = context.get_tensor_options();
 
   param_from_args(prefill_param_, model_args, parallel_args, true);
-  param_from_args(decode_param_, model_args, parallel_args, false);
+  param_from_args(decode_graph_param_, model_args, parallel_args, false);
+  decode_eager_param_ = decode_graph_param_;
+  decode_eager_param_.enableAclGraphPagedAttention = false;
   atb_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   placeholder_vec_ = {1};
   dtype_ = c10::typeMetaToScalarType(options.dtype());
@@ -173,15 +198,37 @@ NpuQwen3DecoderLayerImpl::NpuQwen3DecoderLayerImpl(const ModelContext& context)
       context,
       prefill_param_.enableIntraLayerAddNorm ||
           prefill_param_.enableInterLayerAddNorm,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
 }
 
 int64_t NpuQwen3DecoderLayerImpl::init_layer() {
   init_attn_mask();
   name_ = "qwen3_decoder_layer";
   model_name_ = "qwen3";
+
+  if (quantize_type_ == "w8a8") {
+    Qwen3DecoderLoader* qwen3_loader =
+        dynamic_cast<Qwen3DecoderLoader*>(loader_.get());
+    if (qwen3_loader && qwen3_loader->down_proj_quantized()) {
+      auto update_down_proj = [](atb_speed::qwen::QwenLayerParam& p) {
+        p.linearDescs[atb_speed::common::DOWN_LINEAR_INDEX] =
+            static_cast<int>(LinearTypeV2::W8A8);
+        p.linearQuantType[atb_speed::common::DOWN_LINEAR_INDEX] =
+            static_cast<int>(LinearType::INT);
+      };
+      update_down_proj(prefill_param_);
+      update_down_proj(decode_graph_param_);
+      update_down_proj(decode_eager_param_);
+    }
+  }
+
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
-  CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
+  CHECK_OPERATION_STATUS_RETURN(
+      init_node(decode_graph_node_, decode_graph_param_));
+  CHECK_OPERATION_STATUS_RETURN(
+      init_node(decode_eager_node_, decode_eager_param_));
 
   return atb::NO_ERROR;
 }
@@ -204,7 +251,7 @@ int64_t NpuQwen3DecoderLayerImpl::init_node(
   CHECK_NOTNULL(node.operation);
   CHECK_GT(node.operation->GetInputNum(), 0);
   node.inTensors.resize(node.operation->GetInputNum());
-  node.outTensors.resize(1);
+  node.outTensors.resize(node.operation->GetOutputNum());
   size_t inTensorId = 1;
 
   for (size_t weightTensorId = 0; weightTensorId < WEIGHT_COUNT_PER_LAYER;
@@ -212,10 +259,8 @@ int64_t NpuQwen3DecoderLayerImpl::init_node(
     node.inTensors.at(weightTensorId) = &atb_weight_tensors_[weightTensorId];
   }
 
-  node.variantPack.inTensors.reserve(node.inTensors.size());
   node.variantPack.inTensors.resize(node.inTensors.size());
-  node.variantPack.outTensors.reserve(1);
-  node.variantPack.outTensors.resize(1);
+  node.variantPack.outTensors.resize(node.outTensors.size());
 
   return atb::NO_ERROR;
 }
@@ -230,7 +275,7 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
                                                 std::atomic<bool>* event_flag,
                                                 int node_id) {
   atb::Status st;
-  if (!input_params.batch_forward_type.is_decode()) {
+  if (!input_params.meta.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,
@@ -239,13 +284,19 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
                             kv_cache,
                             input_params,
                             /*is_prefill=*/true,
-                            node_id);
+                            node_id,
+                            /*use_graph_decode_input=*/false);
     // mstxRangeEnd(id);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute prefill layer fail, error code: " << st;
+                           << "execute prefill layer fail, error code: " << st;
   } else {
-    build_node_variant_pack(decode_node_,
+    const bool use_graph_decode_input =
+        ::xllm::ExecutionConfig::get_instance().enable_graph() &&
+        input_params.graph.tiling_data.defined();
+    auto& decode_node =
+        use_graph_decode_input ? decode_graph_node_ : decode_eager_node_;
+    build_node_variant_pack(decode_node,
                             x,
                             cos_pos,
                             sin_pos,
@@ -253,10 +304,11 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
                             kv_cache,
                             input_params,
                             /*is_prefill=*/false,
-                            node_id);
-    st = execute_node(decode_node_, node_id + 1000, event, event_flag);
+                            node_id,
+                            use_graph_decode_input);
+    st = execute_node(decode_node, node_id + 1000, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute decode layer fail, error code: " << st;
+                           << "execute decode layer fail, error code: " << st;
   }
 
   return at_placeholder_;
@@ -271,8 +323,13 @@ void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
     KVCache& kv_cache,
     ModelInputParams& input_params,
     bool is_prefill,
-    int node_id) {
+    int node_id,
+    bool use_graph_decode_input) {
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
+  if (::xllm::KernelConfig::get_instance().enable_interlayer_addnorm() &&
+      residual_.defined()) {
+    residual_tensors_ = atb_speed::Utils::AtTensor2Tensor(residual_);
+  }
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensors_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
       atb_speed::Utils::AtTensor2Tensor(cos_pos);
@@ -281,15 +338,17 @@ void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =
       atb_speed::Utils::AtTensor2Tensor(attn_mask);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
+      atb_speed::Utils::AtTensor2Tensor(
+          input_params.attention.device.kv_seq_lens);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6).hostData =
-      input_params.kv_seq_lens_vec.data();
+      input_params.attention.host.kv_seq_lens.data();
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7) = placeholder_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7).hostData =
       placeholder_vec_.data();
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 8) = placeholder_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
+      atb_speed::Utils::AtTensor2Tensor(
+          input_params.attention.device.block_tables);
 
   int input_idx = WEIGHT_COUNT_PER_LAYER + 11;
   if (is_rec_multi_round_mode()) {
@@ -324,22 +383,29 @@ void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 5) =
         atb_speed::Utils::AtTensor2Tensor(kv_cache.get_v_cache());
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.attention.device.new_cache_slots);
   }
 
   if (is_prefill &&
-      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
-    node.variantPack.inTensors.at(input_idx++) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
-    node.variantPack.inTensors.at(input_idx - 1).hostData =
-        input_params.q_seq_lens_vec.data();
-  }
-
-  if (FLAGS_enable_graph && !is_prefill &&
-      input_params.graph_buffer.tiling_data.defined()) {
+      (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ||
+       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache())) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(
-            input_params.graph_buffer.tiling_data);
+            input_params.attention.device.q_seq_lens);
+    node.variantPack.inTensors.at(input_idx - 1).hostData =
+        input_params.attention.host.q_seq_lens.data();
+  }
+
+  if (::xllm::KernelConfig::get_instance().enable_interlayer_addnorm() &&
+      node_id > 0 && residual_.defined()) {
+    node.variantPack.inTensors.at(input_idx++) = residual_tensors_;
+  }
+
+  if (!is_prefill && use_graph_decode_input &&
+      input_params.graph.tiling_data.defined()) {
+    node.variantPack.inTensors.at(input_idx++) =
+        atb_speed::Utils::AtTensor2Tensor(input_params.graph.tiling_data);
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
@@ -349,6 +415,10 @@ void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
   }
 
   node.variantPack.outTensors.at(0) = internal_tensors_;
+  if (::xllm::KernelConfig::get_instance().enable_interlayer_addnorm() &&
+      (node_id < num_hidden_layers_ - 1) && residual_.defined()) {
+    node.variantPack.outTensors.at(1) = residual_tensors_;
+  }
 }
 
 }  // namespace layer

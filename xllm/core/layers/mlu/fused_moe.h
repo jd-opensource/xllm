@@ -50,11 +50,14 @@ class FusedMoEImpl : public torch::nn::Module {
                const ParallelArgs& parallel_args,
                const torch::TensorOptions& options);
 
-  RouteInfo prep_route(torch::Tensor& hidden_states);
+  RouteInfo prep_route(
+      torch::Tensor& hidden_states,
+      const std::optional<torch::Tensor>& input_ids = std::nullopt);
   torch::Tensor forward_experts(
       const torch::Tensor& hidden_states,
       bool enable_all2all_communication,
-      const std::optional<RouteInfo>& route_info = std::nullopt);
+      const std::optional<RouteInfo>& route_info = std::nullopt,
+      const std::optional<torch::Tensor>& input_ids = std::nullopt);
   torch::Tensor forward_shared(const torch::Tensor& hidden_states);
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
@@ -86,7 +89,8 @@ class FusedMoEImpl : public torch::nn::Module {
 
   torch::Tensor forward_experts_base(
       const torch::Tensor& hidden_states,
-      const std::optional<RouteInfo>& route_info);
+      const std::optional<RouteInfo>& route_info,
+      const std::optional<torch::Tensor>& input_ids);
 
   virtual void final_comm_allreduce(torch::Tensor& final_hidden_states,
                                     const torch::Tensor& hidden_states,
@@ -100,7 +104,8 @@ class FusedMoEImpl : public torch::nn::Module {
 
   torch::Tensor forward_experts_all2all(
       const torch::Tensor& hidden_states,
-      const std::optional<RouteInfo>& route_info);
+      const std::optional<RouteInfo>& route_info,
+      const std::optional<torch::Tensor>& input_ids);
 
   // Result structure for combine_step
   struct CombineResult {
@@ -118,7 +123,8 @@ class FusedMoEImpl : public torch::nn::Module {
   prepare_group_gemm_weight_scale(const torch::Tensor& b_scale) const;
   RouteInfo get_route(torch::Tensor& hidden_states_2d,
                       bool enable_all2all_communication,
-                      const std::optional<RouteInfo>& route_info);
+                      const std::optional<RouteInfo>& route_info,
+                      const std::optional<torch::Tensor>& input_ids);
   void check_route(const torch::Tensor& hidden_states_2d,
                    const RouteInfo& route_info) const;
   void init_streams(const torch::Tensor& hidden_states);
@@ -156,8 +162,10 @@ class FusedMoEImpl : public torch::nn::Module {
   std::unique_ptr<Stream> routed_stream_;
   xllm::Device device_;
   bool stream_initialized_ = false;
+  bool use_hash_ = false;
 
   MoEGate gate_{nullptr};
+  std::optional<float> swiglu_limit_;
   DenseMLP shared_experts_{nullptr};
   DeepEP deep_ep_{nullptr};
 

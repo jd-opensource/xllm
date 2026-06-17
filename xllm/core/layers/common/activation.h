@@ -24,13 +24,16 @@ namespace layer {
 
 class ActivationImpl : public torch::nn::Module {
  public:
-  ActivationImpl(const std::string& act_mode, bool is_gated);
+  ActivationImpl(const std::string& act_mode,
+                 bool is_gated,
+                 double swiglu_limit = 0.0);
 
   void forward(torch::Tensor& input, torch::Tensor& output);
 
  private:
   std::string act_mode_;
   bool is_gated_;
+  double swiglu_limit_ = 0.0;
 };
 TORCH_MODULE(Activation);
 

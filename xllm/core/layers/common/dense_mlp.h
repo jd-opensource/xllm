@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <optional>
+
 #include "activation.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
@@ -39,7 +41,8 @@ class DenseMLPImpl : public torch::nn::Module {
                const QuantArgs& quant_args,
                ProcessGroup* process_group,
                const torch::TensorOptions& options,
-               const std::string& module_prefix = "");
+               const std::string& module_prefix = "",
+               double swiglu_limit = 0.0);
 
   torch::Tensor forward(const torch::Tensor& hidden_states);
 
@@ -60,6 +63,7 @@ class DenseMLPImpl : public torch::nn::Module {
   Activation act_{nullptr};
   bool is_smoothquant_;
   std::string hidden_act_;
+  double swiglu_limit_ = 0.0;
 };
 TORCH_MODULE(DenseMLP);
 

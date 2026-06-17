@@ -48,7 +48,9 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
         register_module("embed_tokens", layer::WordEmbedding(context));
     norm_ = register_module("norm", layer::RMSNorm(context));
 #if defined(USE_NPU)
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
+    int32_t mask_value =
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ? -9984
+                                                                         : 1;
     attn_mask_ = layer::AttentionMask(
         options.device(), options.dtype().toScalarType(), mask_value);
 #endif
@@ -56,16 +58,6 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       auto layer = layer::Qwen3MoeDecoderLayer(context, i);
       layers_.push_back(layer);
     }
-  }
-
-  torch::Tensor deepstack_process(torch::Tensor hidden_states,
-                                  torch::Tensor visual_pos_masks,
-                                  torch::Tensor visual_embeds) {
-    visual_pos_masks = visual_pos_masks.to(hidden_states.device());
-    auto selected = hidden_states.index({visual_pos_masks});
-    auto local_this = selected + visual_embeds;
-    hidden_states.index_put_({visual_pos_masks}, local_this);
-    return hidden_states;
   }
 
   std::pair<torch::Tensor, torch::Tensor> apply_mrope(
@@ -115,9 +107,9 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
       positions = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
     }
-    auto& dp_token_nums = modified_input_params.dp_global_token_nums;
+    auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
-    auto inputs_embeds = input_params.input_embedding;
+    auto inputs_embeds = input_params.embedding.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
@@ -125,7 +117,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       h = embed_tokens_(tokens);
     }
 
-    auto deep_stacks = input_params.deep_stacks;
+    auto deep_stacks = input_params.multimodal.deep_stacks;
     int deep_stack_size = deep_stacks.size();
     if (!modified_input_params.attn_metadata) {
       modified_input_params.attn_metadata =
@@ -165,6 +157,14 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
 #if defined(USE_CUDA) || defined(USE_MUSA)
       attn_metadata.plan_info->layer_id = i;
 #endif
+#if defined(USE_CUDA)
+      if (attn_metadata.shared_plan_info != nullptr) {
+        attn_metadata.shared_plan_info->layer_id = i;
+      }
+      if (attn_metadata.unshared_plan_info != nullptr) {
+        attn_metadata.unshared_plan_info->layer_id = i;
+      }
+#endif
       auto& layer = layers_[i];
       h = layer(h,
                 residual,
@@ -178,7 +178,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       }
 
       if (deep_stack_size && i < deep_stack_size) {
-        h = deepstack_process(h, input_params.visual_pos_masks, deep_stacks[i]);
+        h = h + deep_stacks[i];
       }
     }
     auto [hidden_states, residual_out] = norm_(h, residual);
@@ -235,21 +235,22 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       const ModelInputParams& params,
       const torch::Tensor& h) {
 #if defined(USE_NPU)
-    max_seq_len_ = std::max(params.kv_max_seq_len, max_seq_len_);
+    max_seq_len_ = std::max(params.meta.kv_max_seq_len, max_seq_len_);
     torch::Tensor attn_mask;
-    if (FLAGS_enable_chunked_prefill) {
-      const int32_t max_kv_seq = params.kv_max_seq_len;
-      const int32_t num_sequences = params.num_sequences;
+    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
+      const int32_t max_kv_seq = params.meta.kv_max_seq_len;
+      const int32_t num_sequences = params.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
         req_mask_vec.reserve(num_sequences);
 
         for (int32_t j = 0; j < num_sequences; ++j) {
-          auto mask = attn_mask_.gen_append_mask(params.q_seq_lens_vec[j],
-                                                 params.kv_seq_lens_vec[j],
-                                                 max_kv_seq,
-                                                 h.dtype().toScalarType(),
-                                                 h.device());
+          auto mask =
+              attn_mask_.gen_append_mask(params.attention.host.q_seq_lens[j],
+                                         params.attention.host.kv_seq_lens[j],
+                                         max_kv_seq,
+                                         h.dtype().toScalarType(),
+                                         h.device());
           req_mask_vec.emplace_back(mask);
         }
         attn_mask = torch::cat(req_mask_vec, 0);

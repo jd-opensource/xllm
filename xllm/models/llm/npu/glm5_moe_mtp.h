@@ -42,6 +42,32 @@ class GlmMoeDsaMtpModelImpl
         model_args.rope_theta(),
         options);
   }
+
+ protected:
+  void forward_layer(DeepseekV32DecoderLayer& layer,
+                     torch::Tensor& h,
+                     torch::Tensor& cos_pos,
+                     torch::Tensor& sin_pos,
+                     torch::Tensor& attn_mask,
+                     KVCache& kv_cache,
+                     const ModelInputParams& input_params,
+                     torch::Tensor& topk_indices,
+                     int32_t layer_index,
+                     aclrtEvent* event,
+                     std::atomic<bool>* event_flag) override {
+    layer->forward_with_mtp_topk(h,
+                                 cos_pos,
+                                 sin_pos,
+                                 attn_mask,
+                                 kv_cache,
+                                 input_params,
+                                 topk_indices,
+                                 index_topk_,
+                                 device_,
+                                 layer_index,
+                                 event,
+                                 event_flag);
+  }
 };
 TORCH_MODULE(GlmMoeDsaMtpModel);
 
@@ -96,6 +122,11 @@ REGISTER_MODEL_ARGS(glm_moe_dsa_mtp, [&] {
   LOAD_ARG_OR(index_head_dim, "index_head_dim", 128);
   LOAD_ARG_OR(index_n_heads, "index_n_heads", 0);
   LOAD_ARG_OR(index_topk, "index_topk", 2048);
+  LOAD_ARG_OR(index_topk_freq, "index_topk_freq", 1);
+  LOAD_ARG_OR(index_topk_pattern, "index_topk_pattern", "");
+  LOAD_ARG_OR(index_skip_topk_offset, "index_skip_topk_offset", 0);
+  LOAD_ARG_OR(
+      index_share_for_mtp_iteration, "index_share_for_mtp_iteration", false);
 
   LOAD_ARG_OR(use_qk_norm, "use_qk_norm", true);
   LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
