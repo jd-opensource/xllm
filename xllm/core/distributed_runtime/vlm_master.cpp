@@ -300,6 +300,10 @@ void VLMMaster::generate() {
   running_.store(false, std::memory_order_relaxed);
 }
 
+bool VLMMaster::shutdown_remote_workers() {
+  return engine_->shutdown_remote_workers();
+}
+
 std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
                                                      MMData mm_data,
                                                      RequestParams sp,
@@ -485,6 +489,7 @@ VLMAssistantMaster::VLMAssistantMaster(const Options& options)
 }
 
 VLMAssistantMaster::~VLMAssistantMaster() {
+  stop();
   if (loop_thread_.joinable()) {
     loop_thread_.join();
   }
@@ -499,6 +504,10 @@ void VLMAssistantMaster::run() {
       std::this_thread::sleep_for(std::chrono::seconds(5));
     }
   });
+}
+
+void VLMAssistantMaster::stop() {
+  running_ = false;
 }
 
 }  // namespace xllm

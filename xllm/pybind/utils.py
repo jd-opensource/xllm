@@ -14,8 +14,11 @@
 
 import json
 import os
+import signal
 import socket
-from typing import Dict, Optional, Tuple, Union
+import sys
+import time
+from typing import Any, Dict, Optional, Tuple, Union
 
 import psutil
 import xllm_export
@@ -49,6 +52,56 @@ def get_free_port() -> int:
         s.bind(('0.0.0.0', 0))
         _, port = s.getsockname()
     return port
+
+
+def require_multi_node_master_addr(
+    nnodes: int,
+    master_node_addr: str,
+) -> None:
+    if nnodes < 1:
+        raise ValueError("nnodes must be greater than or equal to 1.")
+    if nnodes <= 1:
+        return
+    if not master_node_addr:
+        raise ValueError(
+            "master_node_addr is required for multi-node offline inference."
+        )
+    host, sep, port = master_node_addr.rpartition(":")
+    if not sep or not host or not port.isdigit():
+        raise ValueError(
+            "master_node_addr must be in host:port format for "
+            "multi-node offline inference."
+        )
+    if host in ("127.0.0.1", "localhost", "::1", "0.0.0.0", "::"):
+        raise ValueError(
+            "master_node_addr must be reachable by all nodes for "
+            "multi-node offline inference."
+        )
+
+
+def is_offline_worker_node(nnodes: int, node_rank: int) -> bool:
+    if node_rank < 0 or node_rank >= nnodes:
+        raise ValueError("node_rank must be in range [0, nnodes).")
+    return nnodes > 1 and node_rank > 0
+
+
+def block_offline_worker(master: Optional[Any] = None) -> None:
+    stop = False
+
+    def _handle_signal(signum, frame) -> None:
+        nonlocal stop
+        if master is not None:
+            stop_master = getattr(master, "stop", None)
+            if callable(stop_master):
+                stop_master()
+        stop = True
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
+    while not stop:
+        time.sleep(1)
+    sys.exit(0)
 
 
 def _read_json(path: str) -> Dict[str, object]:

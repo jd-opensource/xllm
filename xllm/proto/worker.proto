@@ -371,4 +371,5 @@ service DistributeWorker {
   rpc UpdateWeights (UpdateWeightsRequest) returns (Status);
   rpc StartProfile (Empty) returns (Status);
   rpc StopProfile (Empty) returns (Status);
+  rpc Shutdown (Empty) returns (Status);
 }

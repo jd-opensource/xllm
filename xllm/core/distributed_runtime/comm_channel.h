@@ -122,6 +122,8 @@ class CommChannel {
 
   virtual bool stop_profile();
 
+  virtual bool shutdown();
+
  protected:
   bool execute_model_with_brpc(
       const ForwardInput& input,

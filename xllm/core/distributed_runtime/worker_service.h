@@ -150,6 +150,11 @@ class WorkerService : public proto::DistributeWorker {
                    proto::Status* resp,
                    ::google::protobuf::Closure* done) override;
 
+  void Shutdown(::google::protobuf::RpcController* controller,
+                const proto::Empty* req,
+                proto::Status* resp,
+                ::google::protobuf::Closure* done) override;
+
  private:
   void step(ForwardInput& fwd_input,
             torch::Tensor& next_tokens,
