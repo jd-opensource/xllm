@@ -44,7 +44,7 @@ struct OptimizationConfig {
   // Broadcast speculative-decoding sampling results across the TP consensus
   // group so every rank adopts rank 0's accepted/draft tokens. Guards against
   // per-rank RNG divergence crashing the draft decoder's TP all-reduce under
-  // enable_schedule_overlap. Only set on the MLU backend (see ADR-0001).
+  // enable_schedule_overlap.
   bool enable_spec_token_broadcast = false;
 
   // we can detailize this part later. for example:

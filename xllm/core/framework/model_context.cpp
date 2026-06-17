@@ -118,7 +118,7 @@ void ModelContext::derive_optimization_config() {
     //  weights and bias loading.
     optimization_config_.enable_fused_indexer_qk = true;
     // Unify speculative sampling results across TP ranks to guard against
-    // per-rank RNG divergence under enable_schedule_overlap (see ADR-0001).
+    // per-rank RNG divergence under enable_schedule_overlap.
     optimization_config_.enable_spec_token_broadcast = true;
   }
 }

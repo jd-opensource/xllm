@@ -46,20 +46,11 @@ constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
 
 namespace {
 
-// The TP consensus group whose post-attention all-reduce the draft decoder
-// runs on. Speculative sampling results must be unified across exactly this
-// group so the next draft-extend step lays out identical rows on every rank
-// (see ADR-0001). Falls back to the global process group when no dedicated TP
-// group exists.
 ProcessGroup* spec_consensus_group(const ParallelArgs& parallel_args) {
   return parallel_args.tp_group_ != nullptr ? parallel_args.tp_group_
                                             : parallel_args.process_group_;
 }
 
-// In-place unify a speculative-decoding token tensor across the consensus group
-// to root_rank's copy. No-op for single-rank groups or undefined tensors. Must
-// be issued under the stream that produced the tensor so the collective orders
-// after the sampler kernel without a host sync.
 void unify_spec_tokens_across_tp(torch::Tensor& tokens,
                                  ProcessGroup* pg,
                                  int32_t root_rank = 0) {
@@ -1028,12 +1019,7 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
     // Unify this step's draft next_tokens across the consensus group before
     // process_draft_sample_output() compresses the still-full [batch, vocab]
     // probs into the cache: gathering the cached prob with a unified token
-    // yields a unified prob, so we only broadcast the [batch] token tensor (see
-    // ADR-0001). The single broadcast also feeds identical draft tokens to the
-    // next-step draft input and to the validate forward, so every TP rank's
-    // model shard consumes the same token. Same gating/stream as the validate
-    // exit; runs every step (including the last, since
-    // process_draft_sample_output precedes the draft_idx==last continue).
+    // yields a unified prob, so we only broadcast the [batch] token tensor
     if (get_optimization_config().enable_spec_token_broadcast &&
         enable_schedule_overlap()) {
       c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
@@ -1128,11 +1114,7 @@ std::optional<ForwardOutput> MTPWorkerImpl::run_validate(
 
   // Catch-all for cross-rank RNG divergence: unify the accepted next_tokens to
   // the consensus group's rank 0 so all_draft_accepted and the next
-  // draft-extend row layout agree across ranks (see ADR-0001). Issued under
-  // compute_stream_ (the sampler kernel's stream) so the collective orders
-  // after the kernel without a host sync; must run before the device->host copy
-  // below. Only on MLU + overlap; collective is called unconditionally on every
-  // rank to avoid hangs.
+  // draft-extend row layout agree across ranks.
   if (get_optimization_config().enable_spec_token_broadcast &&
       enable_schedule_overlap()) {
     c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
