@@ -57,6 +57,7 @@ void unify_spec_tokens_across_tp(torch::Tensor& tokens,
   if (pg == nullptr || pg->world_size() <= 1 || !tokens.defined()) {
     return;
   }
+  tokens = tokens.contiguous();
   pg->broadcast(tokens, root_rank);
 }
 
@@ -1024,7 +1025,6 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
         enable_schedule_overlap()) {
       c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
       SampleOutput& draft_sample = draft_outputs.back().sample_output;
-      draft_sample.next_tokens = draft_sample.next_tokens.contiguous();
       unify_spec_tokens_across_tp(draft_sample.next_tokens,
                                   spec_consensus_group(parallel_args_));
     }
@@ -1118,7 +1118,6 @@ std::optional<ForwardOutput> MTPWorkerImpl::run_validate(
   if (get_optimization_config().enable_spec_token_broadcast &&
       enable_schedule_overlap()) {
     c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
-    val_output.next_tokens = val_output.next_tokens.contiguous();
     unify_spec_tokens_across_tp(val_output.next_tokens,
                                 spec_consensus_group(parallel_args_));
   }
