@@ -193,8 +193,7 @@ class GraphPersistentParam final {
   std::vector<int32_t> update_expanded_spec_decode_attention(
       const ModelInputParams& input_params,
       uint32_t actual_num_tokens,
-      uint32_t padded_num_tokens,
-      int64_t actual_batch_size);
+      uint32_t padded_num_tokens);
 
   const ModelArgs& args_;
   const torch::Device& device_;

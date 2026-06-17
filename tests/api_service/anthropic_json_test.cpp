@@ -157,5 +157,79 @@ TEST(AnthropicJsonTest, KeepsEmptyToolUseInputObject) {
   EXPECT_TRUE(input.empty());
 }
 
+TEST(AnthropicJsonTest, EmitsThinkingContentBlockFields) {
+  proto::AnthropicMessagesResponse response;
+  response.set_id("msg_123");
+  response.set_type("message");
+  response.set_role("assistant");
+  response.set_model("test_model");
+
+  auto* thinking_block = response.add_content();
+  thinking_block->set_type("thinking");
+  thinking_block->set_thinking("need tool");
+  thinking_block->set_signature("sig_123");
+
+  std::string json;
+  std::string err_msg;
+  ASSERT_TRUE(api_service::proto_to_anthropic_json(
+      response, json_options(), &json, &err_msg))
+      << err_msg;
+
+  nlohmann::json parsed = nlohmann::json::parse(json);
+  ASSERT_TRUE(parsed["content"].is_array());
+  ASSERT_EQ(parsed["content"].size(), 1);
+  const nlohmann::json& block = parsed["content"][0];
+  EXPECT_EQ(block["type"], "thinking");
+  EXPECT_EQ(block["thinking"], "need tool");
+  EXPECT_EQ(block["signature"], "sig_123");
+}
+
+TEST(AnthropicJsonTest, EmitsRedactedThinkingContentBlockFields) {
+  proto::AnthropicMessagesResponse response;
+  response.set_id("msg_123");
+  response.set_type("message");
+  response.set_role("assistant");
+  response.set_model("test_model");
+
+  auto* thinking_block = response.add_content();
+  thinking_block->set_type("redacted_thinking");
+  thinking_block->set_data("opaque_base64");
+
+  std::string json;
+  std::string err_msg;
+  ASSERT_TRUE(api_service::proto_to_anthropic_json(
+      response, json_options(), &json, &err_msg))
+      << err_msg;
+
+  nlohmann::json parsed = nlohmann::json::parse(json);
+  ASSERT_TRUE(parsed["content"].is_array());
+  ASSERT_EQ(parsed["content"].size(), 1);
+  const nlohmann::json& block = parsed["content"][0];
+  EXPECT_EQ(block["type"], "redacted_thinking");
+  EXPECT_EQ(block["data"], "opaque_base64");
+}
+
+TEST(AnthropicJsonTest, EmitsSignatureDeltaField) {
+  proto::AnthropicStreamEvent event;
+  event.set_type("content_block_delta");
+  event.set_index(0);
+  auto* delta = event.mutable_delta();
+  delta->set_type("signature_delta");
+  delta->set_signature("sig_123");
+
+  std::string json;
+  std::string err_msg;
+  ASSERT_TRUE(api_service::proto_to_anthropic_json(
+      event, json_options(), &json, &err_msg))
+      << err_msg;
+
+  nlohmann::json parsed = nlohmann::json::parse(json);
+  EXPECT_EQ(parsed["type"], "content_block_delta");
+  EXPECT_EQ(parsed["index"], 0);
+  ASSERT_TRUE(parsed["delta"].is_object());
+  EXPECT_EQ(parsed["delta"]["type"], "signature_delta");
+  EXPECT_EQ(parsed["delta"]["signature"], "sig_123");
+}
+
 }  // namespace
 }  // namespace xllm

@@ -27,6 +27,8 @@ limitations under the License.
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
+#include "core/layers/npu/loader/qwen3_decoder_loader.h"
+#include "operations/fusion/mlp/mlp.h"
 #include "util/rec_model_utils.h"
 
 // #include "attn_mask.h"
@@ -205,6 +207,23 @@ int64_t NpuQwen3DecoderLayerImpl::init_layer() {
   init_attn_mask();
   name_ = "qwen3_decoder_layer";
   model_name_ = "qwen3";
+
+  if (quantize_type_ == "w8a8") {
+    Qwen3DecoderLoader* qwen3_loader =
+        dynamic_cast<Qwen3DecoderLoader*>(loader_.get());
+    if (qwen3_loader && qwen3_loader->down_proj_quantized()) {
+      auto update_down_proj = [](atb_speed::qwen::QwenLayerParam& p) {
+        p.linearDescs[atb_speed::common::DOWN_LINEAR_INDEX] =
+            static_cast<int>(LinearTypeV2::W8A8);
+        p.linearQuantType[atb_speed::common::DOWN_LINEAR_INDEX] =
+            static_cast<int>(LinearType::INT);
+      };
+      update_down_proj(prefill_param_);
+      update_down_proj(decode_graph_param_);
+      update_down_proj(decode_eager_param_);
+    }
+  }
+
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
   CHECK_OPERATION_STATUS_RETURN(
       init_node(decode_graph_node_, decode_graph_param_));
@@ -270,7 +289,7 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
     // mstxRangeEnd(id);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute prefill layer fail, error code: " << st;
+                           << "execute prefill layer fail, error code: " << st;
   } else {
     const bool use_graph_decode_input =
         ::xllm::ExecutionConfig::get_instance().enable_graph() &&
@@ -289,7 +308,7 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
                             use_graph_decode_input);
     st = execute_node(decode_node, node_id + 1000, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute decode layer fail, error code: " << st;
+                           << "execute decode layer fail, error code: " << st;
   }
 
   return at_placeholder_;

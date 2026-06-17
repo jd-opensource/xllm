@@ -511,51 +511,37 @@ std::vector<int32_t>
 GraphPersistentParam::update_expanded_spec_decode_attention(
     const ModelInputParams& input_params,
     uint32_t actual_num_tokens,
-    uint32_t padded_num_tokens,
-    int64_t actual_batch_size) {
+    uint32_t padded_num_tokens) {
   CHECK(input_params.is_spec_verify)
       << "expanded spec decode attention is only for spec verify";
   CHECK(input_params.meta.batch_forward_type.is_chunked_prefill())
       << "expanded spec decode attention expects chunked prefill";
-  CHECK_EQ(input_params.attention.host.q_seq_lens.size(),
-           static_cast<size_t>(actual_batch_size))
-      << "q_seq_lens_vec must be sequence-scoped";
-  CHECK_EQ(input_params.attention.host.kv_seq_lens.size(),
-           static_cast<size_t>(actual_batch_size))
-      << "kv_seq_lens_vec must be sequence-scoped";
+  CHECK(input_params.graph.use_expanded_decode_for_spec_verify_attention)
+      << "MTP worker must prepare expanded spec-verify graph input";
+  CHECK(input_params.graph.expanded_kv_seq_lens.defined())
+      << "expanded spec-verify kv seq lens must be defined";
+  CHECK(input_params.graph.expanded_block_tables.defined())
+      << "expanded spec-verify block tables must be defined";
+  CHECK_EQ(input_params.graph.expanded_kv_seq_lens_vec.size(),
+           static_cast<size_t>(actual_num_tokens))
+      << "expanded kv seq lens size must match validate tokens";
+  CHECK_EQ(input_params.graph.expanded_kv_seq_lens.numel(),
+           static_cast<int64_t>(actual_num_tokens))
+      << "expanded kv seq lens tensor size must match validate tokens";
+  CHECK_EQ(input_params.graph.expanded_block_tables.dim(), 2)
+      << "expanded block tables must be 2D";
+  CHECK_EQ(input_params.graph.expanded_block_tables.size(0),
+           static_cast<int64_t>(actual_num_tokens))
+      << "expanded block table rows must match validate tokens";
 
-  std::vector<int32_t> expanded_kv_seq_lens_vec;
+  std::vector<int32_t> expanded_kv_seq_lens_vec =
+      input_params.graph.expanded_kv_seq_lens_vec;
   expanded_kv_seq_lens_vec.reserve(padded_num_tokens);
-  std::vector<torch::Tensor> expanded_block_rows;
-  expanded_block_rows.reserve(padded_num_tokens);
-
-  int64_t expanded_tokens = 0;
-  for (int64_t seq_idx = 0; seq_idx < actual_batch_size; ++seq_idx) {
-    const int32_t q_len = input_params.attention.host.q_seq_lens[seq_idx];
-    const int32_t kv_len = input_params.attention.host.kv_seq_lens[seq_idx];
-    CHECK_GE(q_len, 1) << "spec verify q_len must be positive";
-    CHECK_GE(kv_len, q_len) << "kv_len must include the validate query tokens";
-    for (int32_t token_idx = 0; token_idx < q_len; ++token_idx) {
-      expanded_kv_seq_lens_vec.emplace_back(kv_len - q_len + token_idx + 1);
-      expanded_block_rows.emplace_back(
-          input_params.attention.device.block_tables.select(/*dim=*/0,
-                                                            seq_idx));
-      ++expanded_tokens;
-    }
-  }
-  CHECK_EQ(expanded_tokens, static_cast<int64_t>(actual_num_tokens))
-      << "expanded spec decode token count must match validate tokens";
 
   if (padded_num_tokens > actual_num_tokens) {
     const int64_t pad_count = padded_num_tokens - actual_num_tokens;
-    torch::Tensor pad_row = torch::zeros(
-        {input_params.attention.device.block_tables.size(1)},
-        torch::TensorOptions()
-            .dtype(input_params.attention.device.block_tables.dtype())
-            .device(input_params.attention.device.block_tables.device()));
     for (int64_t i = 0; i < pad_count; ++i) {
       expanded_kv_seq_lens_vec.emplace_back(1);
-      expanded_block_rows.emplace_back(pad_row);
     }
   }
 
@@ -565,12 +551,14 @@ GraphPersistentParam::update_expanded_spec_decode_attention(
       .copy_(expanded_kv_tensor, /*non_blocking=*/true);
 
   const int64_t block_table_len =
-      input_params.attention.device.block_tables.size(1);
-  torch::Tensor expanded_block_table = torch::stack(expanded_block_rows, 0);
+      input_params.graph.expanded_block_tables.size(1);
   persistent_expanded_block_tables_
       .slice(/*dim=*/0, /*start=*/0, /*end=*/padded_num_tokens)
+      .zero_();
+  persistent_expanded_block_tables_
+      .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
       .slice(/*dim=*/1, /*start=*/0, /*end=*/block_table_len)
-      .copy_(expanded_block_table, /*non_blocking=*/true);
+      .copy_(input_params.graph.expanded_block_tables, /*non_blocking=*/true);
   return expanded_kv_seq_lens_vec;
 }
 
@@ -901,12 +889,16 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
         is_chunked_prefill ? q_max_seq_len : 1;
   }
   const bool use_expanded_spec_decode_attention =
-      params.is_spec_verify && is_chunked_prefill &&
-      is_qwen3_5_model_type(args_.model_type());
+      params.graph.use_expanded_decode_for_spec_verify_attention;
+  if (is_qwen3_5_spec_verify_chunked_prefill) {
+    CHECK(use_expanded_spec_decode_attention)
+        << "Qwen3.5 spec-verify ACL graph requires MTP worker expanded "
+           "decode attention input";
+  }
   std::vector<int32_t> expanded_kv_seq_lens_vec;
   if (use_expanded_spec_decode_attention) {
     expanded_kv_seq_lens_vec = update_expanded_spec_decode_attention(
-        params, actual_num_tokens, padded_num_tokens, actual_batch_size);
+        params, actual_num_tokens, padded_num_tokens);
   }
 
   if (uses_paged_attention_tiling()) {

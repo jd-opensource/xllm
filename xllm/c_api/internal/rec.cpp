@@ -159,6 +159,10 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
             xllm_init_options.enable_xattention_one_stage)
         .rec_worker_max_concurrency(
             xllm_init_options.rec_worker_max_concurrency);
+    if (xllm_init_options.request_queue_size > 0) {
+      xllm::RecConfig::get_instance().request_queue_size(
+          xllm_init_options.request_queue_size);
+    }
     xllm::SchedulerConfig::get_instance()
         .max_seqs_per_batch(xllm_init_options.max_seqs_per_batch)
         .max_tokens_per_batch(xllm_init_options.max_tokens_per_batch)

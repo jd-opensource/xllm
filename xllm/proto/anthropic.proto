@@ -42,7 +42,8 @@ message AnthropicStructList {
 }
 
 message AnthropicContentBlock {
-  // Type of content block: "text", "image", "tool_use", "tool_result"
+  // Type of content block: "text", "image", "tool_use", "tool_result",
+  // "thinking", or "redacted_thinking"
   string type = 1;
 
   // Text content (for text type)
@@ -69,6 +70,15 @@ message AnthropicContentBlock {
 
   // Whether tool result is an error (for tool_result type)
   optional bool is_error = 9;
+
+  // Thinking content (for thinking type)
+  optional string thinking = 10;
+
+  // Opaque thinking signature (for thinking type)
+  optional string signature = 11;
+
+  // Redacted thinking data (for redacted_thinking type)
+  optional string data = 12;
 }
 
 message AnthropicContentBlockList {
@@ -161,7 +171,8 @@ message AnthropicMessagesRequest {
 }
 
 message AnthropicDelta {
-  // Type of delta: "text_delta" or "input_json_delta"
+  // Type of delta: "text_delta", "input_json_delta", "thinking_delta",
+  // or "signature_delta"
   optional string type = 1;
 
   // Text content (for text_delta)
@@ -175,6 +186,9 @@ message AnthropicDelta {
 
   // Stop sequence that triggered the stop
   optional string stop_sequence = 5;
+
+  // Opaque thinking signature (for signature_delta)
+  optional string signature = 6;
 }
 
 message AnthropicStreamEvent {

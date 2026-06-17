@@ -149,7 +149,7 @@ torch::Tensor NpuKimik25VisionEncoderLayerImpl::forward(
   // mstxRangeEnd(id);
   st = execute_node(encode_node_, node_id);
   LOG_IF(FATAL, st != 0) << model_name_
-                         << "excute encode layer fail, error code: " << st;
+                         << "execute encode layer fail, error code: " << st;
   return x;
 }
 

@@ -434,7 +434,7 @@ torch::Tensor NpuGlm4MoeDecoderLiteImpl::forward(
                             true);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << " excute prefill layer fail, error code: " << st;
+                           << " execute prefill layer fail, error code: " << st;
   } else {
     build_node_variant_pack(decode_node_,
                             x,
@@ -446,7 +446,7 @@ torch::Tensor NpuGlm4MoeDecoderLiteImpl::forward(
                             false);
     st = execute_node(decode_node_, node_id + 1000, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << " excute decode layer fail, error code: " << st;
+                           << " execute decode layer fail, error code: " << st;
   }
 
   return tensor_placeholder_;

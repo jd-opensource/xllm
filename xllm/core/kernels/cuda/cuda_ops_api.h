@@ -288,4 +288,19 @@ torch::Tensor cutlass_fused_moe(
     bool use_packed_weights = false,
     int32_t tune_max_num_tokens = 8192,
     ActivationType activation_type = ActivationType::SWIGLU);
+
+// ---- moe_compute_index (moe_compute_index.cu) ----
+// Fused routing index: bincount + argsort replacement.
+// Returns {src_dst, dst_src, expert_sizes}.
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> moe_compute_index(
+    const torch::Tensor& expert_id,
+    int64_t num_experts);
+
+// ---- moe_combine_result (moe_combine.cu) ----
+// Fused combine: reorder + weighted sum in one pass.
+torch::Tensor moe_combine_result(const torch::Tensor& gemm2,
+                                 const torch::Tensor& reduce_weight,
+                                 int64_t N,
+                                 int32_t topk);
+
 }  // namespace xllm::kernel::cuda

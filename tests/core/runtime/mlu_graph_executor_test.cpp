@@ -538,6 +538,8 @@ TEST_F(MluGraphExecutorTest, UnevenDpDecodePadsToTpGraphSize) {
 TEST_F(MluGraphExecutorTest, MtpSeqLensCapacityUsesSpecFactor) {
   options_.is_draft_engine(false);
   options_.num_speculative_tokens(1);
+  options_.num_decoding_tokens(options_.num_speculative_tokens() + 1);
+  options_.enable_speculative_decode(true);
   options_.max_seqs_per_batch(2);
   rebuild_impl();
 

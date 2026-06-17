@@ -49,6 +49,7 @@ set(DCU_LOCAL_HIP_SOURCES
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/attention_runner.cpp
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/piecewise_graphs.cpp
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/global_capture_instance.cpp
+  ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/group_gemm.cpp
 )
 
 hipify_sources_target(
@@ -89,3 +90,15 @@ target_include_directories(dcu_kernels
   PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}/..
 )
+
+target_compile_definitions(dcu_kernels PRIVATE
+  _GLIBCXX_USE_CXX11_ABI=${USE_CXX11_ABI}
+)
+
+# ---- CK Tile grouped_gemm: pre-compiled shared library ----
+# The CK template code (ck_tile) is compiled separately with aicc into
+# libck_grouped_gemm.so and installed at /opt/dtk/lib/.
+# Build script: /opt/dtk/ck_tile/build_ck_gg_so.sh
+# The bridge (group_gemm.cpp) uses forward declarations and links
+# against this shared library at runtime.
+target_link_libraries(dcu_kernels PRIVATE /opt/dtk/lib/libck_grouped_gemm.so)

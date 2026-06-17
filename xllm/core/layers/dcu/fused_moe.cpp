@@ -62,14 +62,16 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   start_expert_id_ = ep_rank * num_experts_per_rank_;
 
   if (topk_method == "noaux_tc") {
-    e_score_correction_bias_ = register_parameter(
-        "e_score_correction_bias", torch::empty({num_experts}, options),
-	/*requires_grad*/false);
+    e_score_correction_bias_ =
+        register_parameter("e_score_correction_bias",
+                           torch::empty({num_experts}, options),
+                           /*requires_grad*/ false);
   }
 
   gate_ = register_module(
       "gate_proj",
-      ReplicatedLinear(hidden_size_, num_experts, /*bias*/false, quant_args, options));
+      ReplicatedLinear(
+          hidden_size_, num_experts, /*bias*/ false, quant_args, options));
 
   if (n_shared_experts_ > 0) {
     ProcessGroup* shared_expert_pg;
@@ -86,7 +88,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
                         DenseMLP(hidden_size_,
                                  intermediate_size * n_shared_experts_,
                                  is_gated_,
-                                 /*bias*/false,
+                                 /*bias*/ false,
                                  hidden_act_,
                                  /*enable_result_reduction=*/true,
                                  quant_args,
@@ -113,36 +115,29 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
 }
 
 // ---------------------------------------------------------------------------
-// expert_gemm: batched per-expert matmul via torch::mm.
-// input is ordered by expert; token_count[e] tokens for each expert.
+// expert_gemm: dispatched through ops_api::group_gemm.
+// On DCU this routes to the fused cuda::moe_fused_group_gemm kernel.
 // ---------------------------------------------------------------------------
 torch::Tensor FusedMoEImpl::expert_gemm(const torch::Tensor& input,
                                         const torch::Tensor& weight,
                                         const torch::Tensor& token_count) {
-  int64_t num_experts = token_count.size(0);
-  auto token_count_cpu = token_count.to(torch::kCPU);
-
-  std::vector<torch::Tensor> outputs;
-  outputs.reserve(num_experts);
-  int64_t offset = 0;
-  for (int64_t e = 0; e < num_experts; ++e) {
-    int64_t cnt = token_count_cpu[e].item<int64_t>();
-    if (cnt > 0) {
-      auto tokens = input.slice(0, offset, offset + cnt);
-      outputs.push_back(torch::mm(tokens, weight[e].t()));
-      offset += cnt;
-    }
-  }
-  if (outputs.empty()) {
-    return torch::empty({0, weight.size(1)}, input.options());
-  }
-  return torch::cat(outputs, 0);
+  auto output = torch::empty({input.size(0), weight.size(1)}, input.options());
+  xllm::kernel::GroupGemmParams params;
+  params.a = input;
+  params.b = weight;
+  params.token_count = token_count;
+  params.output = output;
+  params.max_dim = input.size(0);
+  params.trans_a = false;
+  params.trans_b = true;
+  params.a_quant_bit = -1;
+  return xllm::kernel::group_gemm(params);
 }
 
 // ---------------------------------------------------------------------------
 // select_experts: steps 1–3 of the MoE pipeline
-//   step 1 — moe_active_topk (softmax + topk) → cuda::moe_fused_topk
-//   step 2 — moe_gen_idx → torch::argsort / bincount / cumsum
+//   step 1 — moe_active_topk → cuda::moe_fused_topk
+//   step 2 — moe_gen_idx     → cuda::moe_fused_compute_index (fused)
 //   step 3 — moe_expand_input → torch index_select
 // ---------------------------------------------------------------------------
 torch::Tensor FusedMoEImpl::select_experts(
@@ -171,33 +166,31 @@ torch::Tensor FusedMoEImpl::select_experts(
     std::tie(reduce_weight, expert_id) = xllm::kernel::moe_active_topk(params);
   }
 
-  // ---- Step 2: moe_gen_idx (torch ops) ----
-  auto expert_id_flat = expert_id.view({-1});  // [N*topk], int32
-  int64_t N = expert_id.size(0);
-
-  // Count tokens per global expert
-  auto expert_sizes =
-      torch::bincount(expert_id_flat.to(torch::kInt64),
-                      torch::nullopt,
-                      num_total_experts_);  // [num_experts], int64
-
-  // Sort by expert id → expert-grouped ordering
-  auto dst_src = torch::argsort(expert_id_flat);  // [N*topk], pos→flat_idx
-  auto src_dst = torch::argsort(dst_src);         // [N*topk], flat_idx→pos
+  // ---- Step 2: moe_gen_idx (fused kernel) ----
+  torch::Tensor src_dst, dst_src, expert_sizes;
+  {
+    xllm::kernel::MoeGenIdxParams gen_params;
+    gen_params.expert_id = expert_id;
+    gen_params.expert_num = num_total_experts_;
+    auto output_vec = xllm::kernel::moe_gen_idx(gen_params);
+    src_dst = output_vec[0];
+    dst_src = output_vec[1];
+    expert_sizes = output_vec[2];
+  }
 
   // Compute global offset for local expert subset
   int64_t global_offset = 0;
   if (start_expert_id_ > 0) {
-    global_offset = expert_sizes.slice(0, 0, start_expert_id_).sum().item<int64_t>();
+    global_offset =
+        expert_sizes.slice(0, 0, start_expert_id_).sum().item<int64_t>();
   }
   int64_t local_total =
-      expert_sizes.slice(0, start_expert_id_, start_expert_id_ + num_experts_per_rank_)
+      expert_sizes
+          .slice(0, start_expert_id_, start_expert_id_ + num_experts_per_rank_)
           .sum()
           .item<int64_t>();
 
-  // ---- Step 3: moe_expand_input (torch ops) ----
-  // For the expand we still need ALL tokens (the token ordering groups all
-  // global experts).  The per-rank GEMMs will slice into the local portion.
+  // ---- Step 3: moe_expand_input (torch index_select) ----
   auto token_ids = dst_src.div(topk_, "floor").to(torch::kInt64);
   auto expand_all = hidden_states_2d.index_select(0, token_ids);
 
@@ -283,9 +276,9 @@ torch::Tensor FusedMoEImpl::forward_experts(
   expand_local = torch::Tensor();
   act_out = torch::Tensor();
 
-  // ---- Step 7: combine ----
-  // Scatter local expert outputs into a full flat buffer
-  // dst_src[global_offset + j] = flat index for local position j
+  // ---- Step 7: combine (fused kernel via ops_api::moe_combine_result) ----
+  // Scatter local expert outputs into full flat buffer via index_copy_,
+  // then weighted reduction via cuda::moe_fused_combine kernel.
   int64_t NT = N * topk_;
   auto gemm2_full = torch::zeros({NT, hidden_size_}, gemm2_local.options());
   if (local_total > 0) {
@@ -294,17 +287,21 @@ torch::Tensor FusedMoEImpl::forward_experts(
             .to(torch::kInt64);
     gemm2_full.index_copy_(0, local_indices, gemm2_local);
   }
-
-  // Weighted sum: reshape to [N, topk, hidden], multiply by router weights
-  auto reduce_weight =
-      selected_expert_info.reduce_weight.to(hidden_states_dtype);
-  gemm2_full = gemm2_full.view({N, topk_, -1});  // [N, topk, hidden]
-  auto final_hidden_states =
-      (gemm2_full * reduce_weight.unsqueeze(-1)).sum(1);  // [N, hidden]
+  torch::Tensor final_hidden_states;
+  {
+    xllm::kernel::MoeCombineResultParams combine_params;
+    combine_params.input = gemm2_full;
+    combine_params.reduce_weight = selected_expert_info.reduce_weight;
+    combine_params.gather_ids = src_dst;
+    combine_params.cusum_token_count = std::nullopt;
+    combine_params.start_expert_id = 0;
+    combine_params.expert_size = 0;
+    combine_params.bias = std::nullopt;
+    final_hidden_states = xllm::kernel::moe_combine_result(combine_params);
+  }
   final_hidden_states = final_hidden_states.reshape(hidden_states_shape);
 
-  // Communication: EP + TP AllReduce on final_hidden_states (smaller than
-  // gemm2_full), overlapped with shared expert computation
+  // Communication: EP + TP AllReduce, overlapped with shared experts
   auto current_stream = device_.current_stream();
   routed_stream_->wait_stream(*current_stream);
   {

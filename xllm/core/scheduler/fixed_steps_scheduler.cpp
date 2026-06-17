@@ -23,6 +23,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -193,9 +194,7 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
   Timer timer;
   // propogate new requests to waiting_priority_queue_
   // Include those requests that are preempted by others.
-  std::shared_ptr<Request> request;
-  // read from request queue then push to waiting priority queue
-  while (request_queue_.read(request)) {
+  auto propagate_request = [this](std::shared_ptr<Request>& request) {
     CHECK(request);
 
     // expand sequences to the target number if prefix cache is disabled.
@@ -210,6 +209,18 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
       // request from prefill instance in disagge pd mode.
       running_requests_.emplace_back(request);
     }
+  };
+
+  // Drain the request prefetched by the blocking wait in schedule_request().
+  if (prefetched_request_) {
+    propagate_request(prefetched_request_);
+    prefetched_request_.reset();
+  }
+
+  std::shared_ptr<Request> request;
+  // read from request queue then push to waiting priority queue
+  while (request_queue_.read(request)) {
+    propagate_request(request);
   }
 
   // handle finished/cancelled requests
@@ -325,14 +336,20 @@ ScheduleResult FixedStepsScheduler::schedule_request(
       return result;
     }
     const auto now = absl::Now();
-    if (now > deadline) {
+    if (now >= deadline) {
       break;
     }
-    // wait for new requests to arrive
-    constexpr uint64_t kStepSleepTimeMs = 1;
-    const auto time_to_sleep =
-        std::min(absl::Milliseconds(kStepSleepTimeMs), deadline - now);
-    absl::SleepFor(time_to_sleep);
+    // Event-driven wait instead of fixed-interval busy polling: block on the
+    // request queue until a new request arrives or the deadline is reached.
+    // This wakes up immediately on arrival, avoiding the extra latency and CPU
+    // spinning of a fixed sleep under high concurrency. The prefetched request
+    // is consumed by the next prepare_batch() call.
+    std::shared_ptr<Request> request;
+    const auto wait_deadline = std::chrono::steady_clock::now() +
+                               absl::ToChronoNanoseconds(deadline - now);
+    if (request_queue_.tryReadUntil(wait_deadline, request)) {
+      prefetched_request_ = std::move(request);
+    }
   }
   // return empty result
   return result;

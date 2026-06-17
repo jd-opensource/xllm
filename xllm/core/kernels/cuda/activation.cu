@@ -164,9 +164,10 @@ namespace xllm::kernel::cuda {
 void act_and_mul(torch::Tensor out,
                  torch::Tensor input,
                  const std::string& act_mode) {
-  if (act_mode != "silu" && act_mode != "gelu" && act_mode != "gelu_tanh") {
+  if (act_mode != "silu" && act_mode != "gelu" && act_mode != "gelu_tanh" &&
+      act_mode != "gelu_pytorch_tanh") {
     LOG(FATAL) << "Unsupported act mode: " << act_mode
-               << ", only support silu, gelu, gelu_tanh";
+               << ", only support silu, gelu, gelu_tanh, gelu_pytorch_tanh";
   }
 
   // flashinfer act_and_mul ops
@@ -178,7 +179,8 @@ void act_and_mul(torch::Tensor out,
     silu_and_mul(out, input);
   } else if (act_mode == "gelu") {
     gelu_and_mul(out, input);
-  } else if (act_mode == "gelu_tanh") {
+  } else if (act_mode == "gelu_tanh" || act_mode == "gelu_pytorch_tanh") {
+    // gelu_tanh or gelu_pytorch_tanh (mathematically equivalent)
     gelu_tanh_and_mul(out, input);
   }
 }

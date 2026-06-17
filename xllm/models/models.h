@@ -107,6 +107,10 @@ limitations under the License.
 #include "llm/qwen2.h"
 #include "llm/qwen3.h"
 #include "llm/qwen3_moe.h"
+#include "vlm/qwen2_5_vl.h"
+#include "vlm/qwen2_vl.h"
+#include "vlm/qwen3_vl.h"
+#include "vlm/qwen3_vl_moe.h"
 #else
 #error "Unsupported device type, only support NPU, CUDA, MLU, ILU and MUSA now."
 #endif
