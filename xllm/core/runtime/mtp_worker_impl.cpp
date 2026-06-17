@@ -1593,6 +1593,13 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
     }
   }
   input_params.attention.rebuild_device_buffer(device_);
+
+  // Establish cross-stream ordering before stacking the draft-extend
+  // embeddings. The stack runs on prepare_stream_, but the embedding rows it
+  // reads are produced/finalized by work enqueued on compute_stream_. Make
+  // prepare_stream_ wait on compute_stream_ via an event.
+  prepare_stream_->wait_stream(*compute_stream_);
+
   input_params.embedding.input_embedding = torch::stack(expanded_embeddings);
 
   if (!input_params.parallel.dp_global_token_nums.empty()) {
