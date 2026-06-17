@@ -54,7 +54,13 @@ class DiTConfig final {
          "dit_sp_communication_overlap",
          "dit_debug_print",
          "dit_generation_image_area_max",
-         "dit_vae_image_size"}};
+         "dit_vae_image_size",
+         "rainfusion_enabled",
+         "rainfusion_sparsity",
+         "rainfusion_mask_refresh_interval",
+         "rainfusion_pool_size",
+         "rainfusion_sparse_start_step",
+         "rainfusion_inner_precise"}};
     return kOptionCategory;
   }
 
@@ -85,6 +91,18 @@ class DiTConfig final {
   PROPERTY(int64_t, dit_generation_image_area_max) = 0;
 
   PROPERTY(int64_t, dit_vae_image_size) = 1048576;
+
+  PROPERTY(bool, rainfusion_enabled) = false;
+
+  PROPERTY(double, rainfusion_sparsity) = 0.5;
+
+  PROPERTY(int64_t, rainfusion_mask_refresh_interval) = 1;
+
+  PROPERTY(int64_t, rainfusion_pool_size) = 128;
+
+  PROPERTY(int64_t, rainfusion_sparse_start_step) = 0;
+
+  PROPERTY(int64_t, rainfusion_inner_precise) = 0;
 };
 
 }  // namespace xllm
