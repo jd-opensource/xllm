@@ -15,12 +15,15 @@ limitations under the License.
 
 #pragma once
 
+#include <mutex>
 #include <queue>
+#include <unordered_map>
 #include <vector>
 
 #include "block_manager.h"
 #include "framework/block/kv_cache_manager.h"
 #include "framework/block/single_block_manager.h"
+#include "util/hash_util.h"
 
 namespace xllm {
 
@@ -109,10 +112,15 @@ class BlockManagerPool : public KVCacheManager {
   bool process_beam_search(Sequence* sequence, bool need_swap = false);
   bool allocate_single_block(Sequence* sequence, int32_t dp_rank);
   void deallocate_single_block(Sequence* sequence, int32_t dp_rank);
+  int32_t find_sticky_dp_rank(Sequence* sequence) const;
+  void update_sticky_prefix_routes(Sequence* sequence, int32_t dp_rank);
 
  private:
   std::vector<std::vector<BlockTransferInfo>> swap_block_transfer_infos_;
   std::vector<std::unique_ptr<SingleBlockManager>> single_block_managers_;
+  mutable std::mutex sticky_prefix_routes_mutex_;
+  std::unordered_map<XXH3Key, int32_t, FixedStringKeyHash, FixedStringKeyEqual>
+      sticky_prefix_routes_;
 
  protected:
   // the options for the block manager
