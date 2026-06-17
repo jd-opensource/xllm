@@ -431,7 +431,7 @@ def build_fused_gdn_gating_kernel(
     return fused_gdn_gating_kernel
 
 
-@tilelang.jit(pass_configs=DEFAULT_ASCEND_PASS_CONFIGS)
+@tilelang.jit(pass_configs=DEFAULT_ASCEND_PASS_CONFIGS, target="pto")
 def fused_gdn_gating_kernel_jit(
     num_batches: int,
     compile_max_batch: int,
@@ -487,7 +487,7 @@ class FusedGdnGatingKernel(TilelangKernel):
         with tilelang.tvm.transform.PassContext(
             opt_level=3, config=DEFAULT_ASCEND_PASS_CONFIGS
         ):
-            kernel = tilelang.engine.lower(tilelang_kernel)
+            kernel = tilelang.engine.lower(tilelang_kernel, target="pto")
         return kernel.kernel_source
 
 
