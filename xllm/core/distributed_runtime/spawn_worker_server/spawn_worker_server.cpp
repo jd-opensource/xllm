@@ -123,7 +123,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   KVCacheConfig::get_instance().block_size(block_size);
   EPLBConfig::get_instance().rank_tablefile(rank_tablefile);
 
-  xllm::Device device{torch::Device(xllm::Device::type_torch(), device_idx)};
+  xllm::Device device{device_idx};
   device.set_device();
 
 #if defined(USE_NPU)
