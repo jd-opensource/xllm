@@ -224,8 +224,8 @@ class LLM:
             else:
                 self.master = LLMAssistantMaster(options)
             self.master.run()
-            utils.block_offline_worker(self.master)
-            return
+            self.master.wait()
+            sys.exit(0)
         if backend == "vlm":
             self.master = VLMMaster(options)
         else:

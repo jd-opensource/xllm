@@ -205,8 +205,8 @@ PYBIND11_MODULE(xllm_export, m) {
       .def("run",
            &LLMAssistantMaster::run,
            py::call_guard<py::gil_scoped_release>())
-      .def("stop",
-           &LLMAssistantMaster::stop,
+      .def("wait",
+           &LLMAssistantMaster::wait,
            py::call_guard<py::gil_scoped_release>())
       .def("__repr__", [](const LLMAssistantMaster& self) {
         return "LLMAssistantMaster({})"_s.format(self.options());
@@ -422,8 +422,8 @@ PYBIND11_MODULE(xllm_export, m) {
       .def("run",
            &VLMAssistantMaster::run,
            py::call_guard<py::gil_scoped_release>())
-      .def("stop",
-           &VLMAssistantMaster::stop,
+      .def("wait",
+           &VLMAssistantMaster::wait,
            py::call_guard<py::gil_scoped_release>())
       .def("__repr__", [](const VLMAssistantMaster& self) {
         return "VLMAssistantMaster({})"_s.format(self.options());

@@ -489,10 +489,8 @@ VLMAssistantMaster::VLMAssistantMaster(const Options& options)
 }
 
 VLMAssistantMaster::~VLMAssistantMaster() {
-  stop();
-  if (loop_thread_.joinable()) {
-    loop_thread_.join();
-  }
+  running_ = false;
+  wait();
 }
 
 void VLMAssistantMaster::run() {
@@ -506,8 +504,10 @@ void VLMAssistantMaster::run() {
   });
 }
 
-void VLMAssistantMaster::stop() {
-  running_ = false;
+void VLMAssistantMaster::wait() {
+  if (loop_thread_.joinable()) {
+    loop_thread_.join();
+  }
 }
 
 }  // namespace xllm

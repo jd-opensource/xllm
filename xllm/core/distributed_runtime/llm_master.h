@@ -152,7 +152,7 @@ class LLMAssistantMaster : public Master {
   LLMAssistantMaster(const Options& options);
   ~LLMAssistantMaster();
   void run() override;
-  void stop();
+  void wait() override;
 
   static void handle_signal(int signum) { running_ = false; }
 

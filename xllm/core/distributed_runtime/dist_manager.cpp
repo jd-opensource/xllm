@@ -55,7 +55,7 @@ DistManager::~DistManager() {
   HealthCheckManager::instance().stop_health_check_thread();
 
   XllmServer* collective_server =
-      ServerRegistry::get_instance().get_server(server_name_);
+      ServerRegistry::get_instance().try_get_server(server_name_);
   if (collective_server != nullptr) {
     collective_server->stop();
 

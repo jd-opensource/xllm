@@ -123,8 +123,8 @@ class Embedding:
         if not self._is_driver:
             self.master = LLMAssistantMaster(options)
             self.master.run()
-            utils.block_offline_worker(self.master)
-            return
+            self.master.wait()
+            sys.exit(0)
         self.master = LLMMaster(options)
 
     def finish(self) -> None:

@@ -131,7 +131,7 @@ class VLMAssistantMaster : public Master {
   explicit VLMAssistantMaster(const Options& options);
   ~VLMAssistantMaster();
   void run() override;
-  void stop();
+  void wait() override;
 
   static void handle_signal(int signum) { running_ = false; }
 

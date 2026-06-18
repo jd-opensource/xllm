@@ -14,11 +14,8 @@
 
 import json
 import os
-import signal
 import socket
-import sys
-import time
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import psutil
 import xllm_export
@@ -83,25 +80,6 @@ def is_offline_worker_node(nnodes: int, node_rank: int) -> bool:
     if node_rank < 0 or node_rank >= nnodes:
         raise ValueError("node_rank must be in range [0, nnodes).")
     return nnodes > 1 and node_rank > 0
-
-
-def block_offline_worker(master: Optional[Any] = None) -> None:
-    stop = False
-
-    def _handle_signal(signum, frame) -> None:
-        nonlocal stop
-        if master is not None:
-            stop_master = getattr(master, "stop", None)
-            if callable(stop_master):
-                stop_master()
-        stop = True
-
-    signal.signal(signal.SIGTERM, _handle_signal)
-    signal.signal(signal.SIGINT, _handle_signal)
-
-    while not stop:
-        time.sleep(1)
-    sys.exit(0)
 
 
 def _read_json(path: str) -> Dict[str, object]:

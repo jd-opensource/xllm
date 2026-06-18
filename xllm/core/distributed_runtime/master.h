@@ -65,6 +65,8 @@ class Master {
 
   virtual bool shutdown_remote_workers() { return false; }
 
+  virtual void wait() {}
+
   MasterStatus get_master_status() const { return master_status_; }
 
   bool is_sleeping() const { return master_status_ != MasterStatus::WAKEUP; }

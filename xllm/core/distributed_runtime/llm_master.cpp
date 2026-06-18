@@ -594,11 +594,8 @@ LLMAssistantMaster::LLMAssistantMaster(const Options& options)
 }
 
 LLMAssistantMaster::~LLMAssistantMaster() {
-  stop();
-  // wait for the loop thread to finish
-  if (loop_thread_.joinable()) {
-    loop_thread_.join();
-  }
+  running_ = false;
+  wait();
 }
 
 void LLMAssistantMaster::run() {
@@ -610,6 +607,12 @@ void LLMAssistantMaster::run() {
       std::this_thread::sleep_for(std::chrono::seconds(5));
     }
   });
+}
+
+void LLMAssistantMaster::wait() {
+  if (loop_thread_.joinable()) {
+    loop_thread_.join();
+  }
 }
 
 // ============== Async RL training support: Pause/Resume ==============

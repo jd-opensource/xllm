@@ -160,8 +160,8 @@ class VLM:
         if not self._is_driver:
             self.master = VLMAssistantMaster(options)
             self.master.run()
-            utils.block_offline_worker(self.master)
-            return
+            self.master.wait()
+            sys.exit(0)
         self.master = VLMMaster(options)
 
     def finish(self) -> None:
