@@ -59,10 +59,11 @@ int32_t get_numa_node_from_sysfs(const std::string& backend,
                                  const std::string& pci_bus_id) {
   // Device APIs may return uppercase hex, but sysfs PCI dirs require lowercase.
   std::string lower_bus_id = pci_bus_id;
-  std::transform(lower_bus_id.begin(),
-                 lower_bus_id.end(),
-                 lower_bus_id.begin(),
-                 [](unsigned char ch) { return std::tolower(ch); });
+  std::transform(
+      lower_bus_id.begin(),
+      lower_bus_id.end(),
+      lower_bus_id.begin(),
+      [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   std::string numa_path = "/sys/bus/pci/devices/" + lower_bus_id + "/numa_node";
   LOG(INFO) << backend << " device " << device_index
             << " NUMA sysfs path: " << numa_path;
