@@ -30,6 +30,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/platform/device.h"
+#include "core/platform/platform.h"
 #include "core/util/env_var.h"
 #include "core/util/utils.h"
 
@@ -365,7 +366,7 @@ bool should_use_tensor_core(torch::ScalarType kv_cache_dtype,
   return false;
 }
 
-bool support_pdl() { return Device::is_enable_pdl(); }
+bool support_pdl() { return Platform::is_enable_pdl(); }
 
 std::string path_to_uri_so_lib(const std::string& uri) {
   return util::get_string_env("FLASHINFER_OPS_PATH") + "/" + uri + "/" + uri +
@@ -378,7 +379,7 @@ std::string determine_attention_backend(int64_t pos_encoding_mode,
   bool support_fa3_backend =
       (pos_encoding_mode == 0) && !use_fp16_qk_reduction && !use_custom_mask;
 
-  if (Device::is_support_sm90a() && support_fa3_backend) {
+  if (Platform::is_support_sm90a() && support_fa3_backend) {
     return "fa3";
   }
   return "fa2";

@@ -30,6 +30,7 @@ limitations under the License.
 #include "layers/mlu/attention.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -75,7 +76,7 @@ class MockDeepseekScalingRotaryEmbedding
 class IndexerTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    torch::Device torch_device(Device::type_torch(), 0);
+    torch::Device torch_device(Platform::type_torch(), 0);
     Device device(torch_device);
     device.set_seed();
     options_ = torch::TensorOptions()

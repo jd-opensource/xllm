@@ -27,6 +27,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 #include "util/net.h"
 
 namespace xllm {
@@ -35,7 +36,7 @@ namespace layer {
 class Qwen2AttentionTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    torch::Device device(Device::type_torch(), 0);
+    torch::Device device(Platform::type_torch(), 0);
     Device xllm_device(device);
     xllm_device.set_seed(42);
     model_args_.model_type() = "qwen2";

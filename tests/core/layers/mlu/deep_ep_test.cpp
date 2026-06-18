@@ -29,6 +29,7 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 #include "util/tensor_helper.h"
 
 #if defined(USE_MLU)
@@ -76,7 +77,7 @@ struct TestParams {
 int32_t run_deep_ep_test_child(TestParams params) {
   try {
     // 1. Check devices
-    int32_t dev_count = xllm::Device::device_count();
+    int32_t dev_count = xllm::Platform::device_count();
     if (dev_count < params.world_size) {
       LOG(WARNING) << "Rank " << params.rank
                    << ": Insufficient devices. Skipping.";

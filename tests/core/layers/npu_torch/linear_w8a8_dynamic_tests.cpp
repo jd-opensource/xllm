@@ -29,6 +29,7 @@ limitations under the License.
 #include "kernels/ops_api.h"
 #include "layers/common/linear.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 #include "tests_utils.h"
 
 namespace xllm {
@@ -44,7 +45,7 @@ class NpuLinearW8A8TestBase : public ::testing::Test {
 
     options_ = torch::TensorOptions()
                    .dtype(torch::kBFloat16)
-                   .device(Device::type_torch(), 0)
+                   .device(Platform::type_torch(), 0)
                    .requires_grad(false);
     parallel_args_ = test::create_default_parallel_args(mock_process_group_);
   }

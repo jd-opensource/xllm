@@ -39,11 +39,11 @@ size_t PrefixCacheWithUpload::insert(const Slice<int32_t>& token_ids,
                                      const Slice<XXH3Key>& block_hashes) {
   std::vector<XXH3Key> insert_keys;
   size_t n_tokens = PrefixCache::insert(token_ids,
-                                      blocks,
-                                      existed_shared_blocks_num,
-                                      mm_data,
-                                      block_hashes,
-                                      &insert_keys);
+                                        blocks,
+                                        existed_shared_blocks_num,
+                                        mm_data,
+                                        block_hashes,
+                                        &insert_keys);
   save_event_async(true, insert_keys);
   return n_tokens;
 }

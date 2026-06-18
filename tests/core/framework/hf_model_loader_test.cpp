@@ -23,6 +23,7 @@ limitations under the License.
 
 #include "core/framework/model/rec_causal_lm.h"
 #include "core/platform/device.h"
+#include "core/platform/platform.h"
 #include "core/util/model_config_utils.h"
 #include "models/model_registry.h"
 
@@ -164,7 +165,7 @@ TEST(HFModelLoaderTest, LoadCompressedTensorsFp8StaticConfig) {
   )json"));
 
   QuantArgs quant_args;
-  if (Device::type_str() == "cuda") {
+  if (Platform::is_cuda()) {
     ASSERT_TRUE(load_quant_cfg(reader, quant_args));
     EXPECT_EQ(quant_args.quant_method(), kQuantMethodFp8);
     EXPECT_EQ(quant_args.bits(), 8);

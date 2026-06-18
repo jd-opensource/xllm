@@ -20,6 +20,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 
@@ -27,7 +28,7 @@ TEST(EplbPolicyTest, Build) {
   // use init device to trigger the loading of torch backend for different
   // devices
   //  since the allocation of pinnned memory on cpu is still backend-dependent.
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   std::string rank_table_file;
   EplbPolicy eplb_policy(5, 4, 1);
   std::vector<torch::Tensor> tensors;

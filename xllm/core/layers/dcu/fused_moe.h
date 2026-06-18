@@ -31,7 +31,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class FusedMoEImpl final: public torch::nn::Module {
+class FusedMoEImpl final : public torch::nn::Module {
  public:
   FusedMoEImpl() = default;
   FusedMoEImpl(const ModelArgs& model_args,

@@ -19,6 +19,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include "core/platform/device.h"
+#include "core/platform/platform.h"
 
 #if defined(USE_NPU)
 #include <acl/acl.h>
@@ -55,7 +56,7 @@ class SharedVMMAllocatorTestEnvironment : public ::testing::Environment {
 ::testing::Environment* const test_env =
     ::testing::AddGlobalTestEnvironment(new SharedVMMAllocatorTestEnvironment);
 
-bool HasDevice() { return xllm::Device::device_count() > 0; }
+bool HasDevice() { return xllm::Platform::device_count() > 0; }
 
 void InitDevice() {
   xllm::Device device(0);

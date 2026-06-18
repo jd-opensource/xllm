@@ -31,6 +31,7 @@ limitations under the License.
 #include "layers/mlu/deepseek_v4_ref_utils.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 #include "util/linalg.h"
 
 namespace xllm {
@@ -235,7 +236,7 @@ void verify_live_state(const torch::Tensor& actual,
 class DeepseekV4CompressorTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    torch::Device torch_device(Device::type_torch(), 0);
+    torch::Device torch_device(Platform::type_torch(), 0);
     Device device(torch_device);
     device.set_seed();
     options_ = torch::TensorOptions()

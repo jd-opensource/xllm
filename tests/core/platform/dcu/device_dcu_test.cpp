@@ -22,6 +22,7 @@ limitations under the License.
 #include <memory>
 
 #include "core/platform/device.h"
+#include "core/platform/platform.h"
 
 namespace {
 
@@ -50,7 +51,7 @@ void PrepareDeviceOrSkip() {
     GTEST_SKIP() << "No DCU/HIP device available";
   }
 
-  ASSERT_GT(xllm::Device::device_count(), 0);
+  ASSERT_GT(xllm::Platform::device_count(), 0);
   ASSERT_EQ(hipSetDevice(kDeviceId), hipSuccess);
   ASSERT_EQ(hipFree(nullptr), hipSuccess);
 }
@@ -62,7 +63,7 @@ TEST(DeviceDcuTest, DeviceCountMatchesHipRuntime) {
   int hip_count = 0;
   ASSERT_EQ(hipGetDeviceCount(&hip_count), hipSuccess);
 
-  int xllm_count = xllm::Device::device_count();
+  int32_t xllm_count = xllm::Platform::device_count();
 
   EXPECT_EQ(xllm_count, hip_count);
   EXPECT_GT(xllm_count, 0);

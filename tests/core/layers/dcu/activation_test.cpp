@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -80,7 +81,7 @@ std::string to_string(torch::ScalarType dtype) {
 
 class ActivationImplTest : public ::testing::Test {
  protected:
-  void SetUp() override { device_ = torch::Device(Device::type_torch(), 0); }
+  void SetUp() override { device_ = torch::Device(Platform::type_torch(), 0); }
 
   void test_gated(torch::ScalarType dtype,
                   const std::string& act_mode,

@@ -26,6 +26,7 @@ limitations under the License.
 #include <vector>
 
 #include "platform/device.h"
+#include "platform/platform.h"
 
 #if defined(USE_MLU)
 #include "framework/parallel_state/mlu_process_group.h"
@@ -324,7 +325,7 @@ class ReduceScatterMultiDeviceTest : public ::testing::Test {
         params.world_size = world_size_;
         params.port = port_;
         params.host = host_;
-        params.device_index = rank % Device::device_count();
+        params.device_index = rank % Platform::device_count();
         params.input_size = input_size;
         params.hidden_dim = hidden_dim_;
         params.test_padding = test_padding;
@@ -396,7 +397,7 @@ class AllGatherBaseMultiDeviceTest : public ::testing::Test {
         params.world_size = world_size_;
         params.port = port_;
         params.host = host_;
-        params.device_index = rank % Device::device_count();
+        params.device_index = rank % Platform::device_count();
         params.input_size = input_size;
         params.hidden_dim = hidden_dim;
         _exit(run_allgather_base_test_child(params));

@@ -36,6 +36,7 @@ limitations under the License.
 #include "framework/request/stopping_checker.h"
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 #include "runtime/cp_input_partition.h"
 #include "runtime/forward_shared_memory_manager.h"
 #include "runtime/params_utils.h"
@@ -403,7 +404,7 @@ TEST(BatchTest, Basic) {
   // use init device to trigger the loading of torch backend for different
   // devices
   //  since the allocation of pinnned memory on cpu is still backend-dependent.
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const uint32_t n_blocks = 20;
   const uint32_t block_size = 4;
   BlockManager::Options options;
@@ -581,7 +582,7 @@ TEST(BatchTest, Basic) {
 }
 
 TEST(BatchTest, SampleRequestInjectsAllMatchedSlots) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const uint32_t n_blocks = 8;
   const uint32_t block_size = 4;
   BlockManager::Options options;
@@ -641,7 +642,7 @@ TEST(BatchTest, SampleRequestInjectsAllMatchedSlots) {
 }
 
 TEST(BatchTest, ChunkedPDTransferUsesStepWindow) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const uint32_t n_blocks = 8;
   const uint32_t block_size = 4;
   BlockManager::Options options;
@@ -703,7 +704,7 @@ TEST(BatchTest, ChunkedPDTransferUsesStepWindow) {
 }
 
 TEST(BatchTest, PrefixCacheTransferIgnoresKvCacheCursor) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const uint32_t block_size = 4;
   BlockManager::Options options;
   options.num_blocks(8).block_size(block_size);
@@ -1068,7 +1069,7 @@ TEST(BatchTest, KVCacheEmptySupportsLinearOnlyAndFullOnlyLayouts) {
 }
 
 TEST(BatchTest, SampleRequestKeepsThreadedForwardBuilderOffsetsStable) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const uint32_t n_blocks = 8;
   const uint32_t block_size = 4;
   BlockManager::Options options;
@@ -1177,7 +1178,7 @@ TEST(BatchTest, SampleRequestKeepsThreadedForwardBuilderOffsetsStable) {
 }
 
 TEST(BatchTest, DecodeMinBatchSizeDoesNotPadTransportState) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const uint32_t n_blocks = 8;
   const uint32_t block_size = 4;
   BlockManager::Options options;
@@ -1392,7 +1393,7 @@ TEST(BatchTest, SharedMemoryRoundTripPreservesEmptyRankTensors) {
 }
 
 TEST(BatchTest, SampleRequestProcessesAllMatchedRawOutputs) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const uint32_t n_blocks = 8;
   const uint32_t block_size = 4;
   BlockManager::Options options;
@@ -1467,7 +1468,7 @@ TEST(BatchTest, SampleRequestProcessesAllMatchedRawOutputs) {
 }
 
 TEST(BatchTest, SampleRequestDistributesRawOutputsAcrossSequences) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const uint32_t n_blocks = 8;
   const uint32_t block_size = 4;
   BlockManager::Options options;
@@ -1549,7 +1550,7 @@ TEST(BatchTest, SampleRequestDistributesRawOutputsAcrossSequences) {
 }
 
 TEST(BatchTest, SampleRequestFallsBackToEmptyPlaceholderOnPartialRawOutputs) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const uint32_t n_blocks = 8;
   const uint32_t block_size = 4;
   BlockManager::Options options;
@@ -1616,7 +1617,7 @@ TEST(BatchTest, KeepTargetsForOverlapReplacement) {
       SchedulerConfig::get_instance().enable_schedule_overlap();
   SchedulerConfig::get_instance().enable_schedule_overlap(true);
 
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const uint32_t n_blocks = 8;
   const uint32_t block_size = 4;
   BlockManager::Options options;
@@ -1674,7 +1675,7 @@ TEST(BatchTest, OverlapMTPReplacementSkipsPreemptedSequenceWithoutKVBlocks) {
       SchedulerConfig::get_instance().enable_schedule_overlap();
   SchedulerConfig::get_instance().enable_schedule_overlap(true);
 
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const uint32_t n_blocks = 8;
   const uint32_t block_size = 4;
   BlockManager::Options options;

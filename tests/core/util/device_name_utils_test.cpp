@@ -21,6 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/platform/device.h"
+#include "core/platform/platform.h"
 
 namespace xllm {
 namespace {
@@ -28,7 +29,7 @@ namespace {
 TEST(DeviceNameUtilsTest, ToDeviceStringUsesCompiledDeviceType) {
   const std::string device_string = DeviceNameUtils::to_device_string(3);
 
-  EXPECT_EQ(device_string, Device::type_str() + ":3");
+  EXPECT_EQ(device_string, Platform::type_str() + ":3");
 }
 
 TEST(DeviceNameUtilsTest, ParseGeneratedDeviceString) {
@@ -36,7 +37,7 @@ TEST(DeviceNameUtilsTest, ParseGeneratedDeviceString) {
       DeviceNameUtils::parse_devices(DeviceNameUtils::to_device_string(2));
 
   ASSERT_EQ(devices.size(), 1);
-  EXPECT_EQ(devices[0].type(), Device::type_torch());
+  EXPECT_EQ(devices[0].type(), Platform::type_torch());
   EXPECT_EQ(devices[0].index(), 2);
 }
 
