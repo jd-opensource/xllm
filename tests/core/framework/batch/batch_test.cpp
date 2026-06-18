@@ -1793,7 +1793,7 @@ TEST(BatchTest, OverlapMTPReplacementKeepsCompositeKvBlocks) {
   stopping_checker.set_max_generated_tokens(/*max_generated_tokens=*/8);
 
   Sequence seq = make_overlap_sequence(
-      {1, 10, 11}, 128, &sampling_param, &stopping_checker);
+      /*prompt_token_ids=*/{1, 10, 11}, /*seq_capacity=*/128, &sampling_param, &stopping_checker);
   ASSERT_TRUE(manager.allocate_for_sequence(&seq, seq.num_prompt_tokens()));
   ASSERT_EQ(seq.kv_state().num_kv_blocks(), 0u);
   ASSERT_GT(seq.kv_state().current_max_tokens_capacity(), 0u);
@@ -1807,19 +1807,19 @@ TEST(BatchTest, OverlapMTPReplacementKeepsCompositeKvBlocks) {
   RawSampleOutput fake_sample_output;
   RawToken fake_token;
   fake_token.id = -1;
-  fake_sample_output.tokens.push_back(fake_token);
-  fake_output.outputs.push_back(std::move(fake_sample_output));
+  fake_sample_output.tokens.emplace_back(std::move(fake_token));
+  fake_output.outputs.emplace_back(std::move(fake_sample_output));
   batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
 
   RawForwardOutput real_output;
   RawSampleOutput real_sample_output;
   RawToken real_token_0;
   real_token_0.id = 101;
-  real_sample_output.tokens.push_back(real_token_0);
+  real_sample_output.tokens.emplace_back(std::move(real_token_0));
   RawToken real_token_1;
   real_token_1.id = 102;
-  real_sample_output.tokens.push_back(real_token_1);
-  real_output.outputs.push_back(std::move(real_sample_output));
+  real_sample_output.tokens.emplace_back(std::move(real_token_1));
+  real_output.outputs.emplace_back(std::move(real_sample_output));
   batch.process_sample_output(real_output, /*replace_fake_token=*/true);
 
   ASSERT_EQ(seq.num_generated_tokens(), 2);
