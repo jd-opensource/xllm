@@ -74,7 +74,8 @@ const QuantArgs& DiTModelContext::get_quant_args(
   }
 }
 
-#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU)
+#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU) || \
+    defined(USE_DCU)
 ModelContext DiTModelContext::get_model_context(
     const std::string& component) const {
 #if defined(USE_NPU)

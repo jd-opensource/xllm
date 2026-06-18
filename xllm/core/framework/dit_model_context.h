@@ -48,7 +48,8 @@ class DiTModelContext {
     return model_args_.count(component) > 0;
   }
 
-#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU)
+#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU) || \
+    defined(USE_DCU)
   ModelContext get_model_context(const std::string& component) const;
 #endif
 
