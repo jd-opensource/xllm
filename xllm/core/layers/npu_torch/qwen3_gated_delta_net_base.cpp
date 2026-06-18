@@ -357,9 +357,9 @@ torch::Tensor run_causal_conv1d_graph_update(
                                   torch::IntArrayRef(cache_indices),
                                   torch::IntArrayRef(empty_host_args),
                                   torch::IntArrayRef(num_accepted_tokens),
-                                  1,
+                                  xllm::npu::kCausalConv1dActivationSilu,
                                   xllm::npu::kCausalConv1dGraphPadSlotId,
-                                  1);
+                                  xllm::npu::kCausalConv1dRunModeUpdate);
   c10_npu::NPUTaskGroupHandle handle = c10_npu::graph_task_group_end(stream);
 
   xllm::npu::CausalConv1dGraphTask task;
@@ -368,9 +368,9 @@ torch::Tensor run_causal_conv1d_graph_update(
   task.weight = weight;
   task.conv_state = conv_state;
   task.bias = bias;
-  task.activation_mode = 1;
+  task.activation_mode = xllm::npu::kCausalConv1dActivationSilu;
   task.pad_slot_id = xllm::npu::kCausalConv1dGraphPadSlotId;
-  task.run_mode = 1;
+  task.run_mode = xllm::npu::kCausalConv1dRunModeUpdate;
   task.branch = branch;
   task.handle = handle;
   task.event = std::move(event);
@@ -588,10 +588,9 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
         torch::IntArrayRef(linear_state_indices_vec),
         torch::IntArrayRef(input_params.parallel.has_initial_state),
         num_accepted_tokens_opt,
-        1,   // activation_mode
-        -1,  // pad_slot_id
-        0    // run mode  0:fn, 1:update
-    );
+        xllm::npu::kCausalConv1dActivationSilu,
+        xllm::npu::kCausalConv1dGraphPadSlotId,
+        xllm::npu::kCausalConv1dRunModeForward);
 
     mixed_qkv = reshape_qkvz_with_pad(attn_metadata, mixed_qkv);
     mixed_qkv = mixed_qkv.transpose(1, 2);
@@ -633,9 +632,9 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
           torch::IntArrayRef(linear_state_indices_host),
           torch::IntArrayRef(std::vector<int64_t>()),
           torch::IntArrayRef(num_accepted),
-          1,
+          xllm::npu::kCausalConv1dActivationSilu,
           xllm::npu::kCausalConv1dGraphPadSlotId,
-          1);
+          xllm::npu::kCausalConv1dRunModeUpdate);
       mixed_qkv = output;
     }
     mixed_qkv = reshape_qkvz_with_pad(attn_metadata, mixed_qkv);

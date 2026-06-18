@@ -31,6 +31,37 @@ if(USE_NPU)
     "-Wl,--whole-archive"
     "${CMAKE_BINARY_DIR}/third_party/spdlog/libspdlog.a"
     "-Wl,--no-whole-archive")
+
+  cc_test(
+    NAME
+      acl_graph_task_update_test
+    SRCS
+      acl_graph_task_update_test.cpp
+    DEPS
+      :xllm_server
+      :runtime
+      :model_loader
+      :batch
+      :block
+      :model
+      :models
+      :sampler
+      :kv_cache
+      GTest::gtest_main
+      torch_npu
+      atb_customize
+  )
+  target_link_libraries(acl_graph_task_update_test
+                        PRIVATE
+                        torch_npu
+                        ascendcl
+                        hccl
+                        c_sec
+                        nnopbase)
+  target_link_options(acl_graph_task_update_test PRIVATE
+    "-Wl,--whole-archive"
+    "${CMAKE_BINARY_DIR}/third_party/spdlog/libspdlog.a"
+    "-Wl,--no-whole-archive")
 endif()
 
 cc_test(

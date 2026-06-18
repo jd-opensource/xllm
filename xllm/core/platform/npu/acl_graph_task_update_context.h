@@ -37,6 +37,9 @@ limitations under the License.
 namespace xllm::npu {
 
 constexpr int64_t kCausalConv1dGraphPadSlotId = -1;
+constexpr int64_t kCausalConv1dActivationSilu = 1;
+constexpr int64_t kCausalConv1dRunModeForward = 0;
+constexpr int64_t kCausalConv1dRunModeUpdate = 1;
 
 enum class CausalConv1dGraphBranch {
   kDecode,
@@ -49,15 +52,16 @@ struct CausalConv1dGraphTask {
   torch::Tensor weight;
   torch::Tensor conv_state;
   std::optional<torch::Tensor> bias;
-  int64_t activation_mode = 1;
+  int64_t activation_mode = kCausalConv1dActivationSilu;
   int64_t pad_slot_id = kCausalConv1dGraphPadSlotId;
-  int64_t run_mode = 1;
+  int64_t run_mode = kCausalConv1dRunModeUpdate;
   CausalConv1dGraphBranch branch = CausalConv1dGraphBranch::kDecode;
   c10_npu::NPUTaskGroupHandle handle{};
   std::shared_ptr<c10_npu::NPUEvent> event;
 };
 
-struct AclGraphTaskUpdateContext {
+class AclGraphTaskUpdateContext final {
+ public:
   void begin_capture() {
     capturing = true;
     causal_conv1d_tasks.clear();
