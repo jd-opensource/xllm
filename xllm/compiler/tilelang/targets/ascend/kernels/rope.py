@@ -199,7 +199,7 @@ class RopeKernel(TilelangKernel):
         with tilelang.tvm.transform.PassContext(
             opt_level=3, config=DEFAULT_ASCEND_PASS_CONFIGS
         ):
-            kernel = tilelang.engine.lower(tilelang_kernel)
+            kernel = tilelang.engine.lower(tilelang_kernel, target="pto")
         return kernel.kernel_source
 
 
