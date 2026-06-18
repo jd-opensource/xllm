@@ -11,6 +11,7 @@ cc_library(
     indexer.h
     deepseek_v4/compressor.h
     deepseek_v4/dsa_cache_mapping.h
+    deepseek_v4/dsa_empty_dp_input.h
     deepseek_v4/dsa_metadata_builder_mlu.h
     deepseek_v4/deepseek_v4_indexer.h
     deepseek_v4/deepseek_v4_attention.h
@@ -33,6 +34,7 @@ cc_library(
     deepseek_v2_sparse_moe_block.cpp
     indexer.cpp
     deepseek_v4/compressor.cpp
+    deepseek_v4/dsa_empty_dp_input.cpp
     deepseek_v4/dsa_metadata_builder_mlu.cpp
     deepseek_v4/deepseek_v4_indexer.cpp
     deepseek_v4/deepseek_v4_attention.cpp
