@@ -1790,7 +1790,7 @@ TEST(BatchTest, OverlapMTPReplacementKeepsCompositeKvBlocks) {
 
   RequestSamplingParam sampling_param;
   StoppingChecker stopping_checker;
-  stopping_checker.set_max_generated_tokens(8);
+  stopping_checker.set_max_generated_tokens(/*max_generated_tokens=*/8);
 
   Sequence seq = make_overlap_sequence(
       {1, 10, 11}, 128, &sampling_param, &stopping_checker);
