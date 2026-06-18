@@ -150,6 +150,9 @@ class RemoteWorker : public WorkerClient {
   virtual folly::SemiFuture<bool> wakeup_async(
       const WakeupOptions& options) override;
 
+  virtual folly::SemiFuture<bool> update_weights_async(
+      const std::string& weights_path) override;
+
   virtual folly::SemiFuture<bool> start_profile_async() override;
 
   virtual folly::SemiFuture<bool> stop_profile_async() override;

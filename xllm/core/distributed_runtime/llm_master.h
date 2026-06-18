@@ -88,6 +88,8 @@ class LLMMaster : public Master {
 
   bool wakeup(const WakeupOptions& options) override;
 
+  bool update_weights(const std::string& weights_path) override;
+
   bool link_p2p(const std::vector<std::string>& remote_addrs) override;
 
   bool unlink_p2p(const std::vector<std::string>& remote_addrs) override;

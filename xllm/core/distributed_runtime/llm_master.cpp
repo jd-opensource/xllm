@@ -553,6 +553,10 @@ bool LLMMaster::wakeup(const WakeupOptions& options) {
   return engine_->wakeup(opts);
 }
 
+bool LLMMaster::update_weights(const std::string& weights_path) {
+  return engine_->update_weights(weights_path);
+}
+
 bool LLMMaster::link_p2p(const std::vector<std::string>& remote_addrs) {
   return engine_->link_p2p(remote_addrs);
 }

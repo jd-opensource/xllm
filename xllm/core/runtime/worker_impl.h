@@ -144,6 +144,10 @@ class WorkerImpl {
 
   virtual bool wakeup(const WakeupOptions& options);
 
+  // RL deep-sleep: reload model weights in place from disk (vllm-ascend
+  // `reload_weights`). `weights_path` empty = reuse the original model path.
+  virtual bool update_weights(const std::string& weights_path);
+
   // Start/stop online timeline profiling on this worker's device. CUDA only
   // for now; on other backends these are no-ops returning false.
   virtual bool start_profile();

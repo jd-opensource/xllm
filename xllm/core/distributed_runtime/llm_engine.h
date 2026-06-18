@@ -123,6 +123,8 @@ class LLMEngine : public Engine {
 
   bool wakeup(const WakeupOptions& options) override;
 
+  bool update_weights(const std::string& weights_path) override;
+
   bool start_profile() override;
 
   bool stop_profile() override;

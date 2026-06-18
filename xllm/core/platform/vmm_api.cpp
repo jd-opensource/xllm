@@ -140,6 +140,58 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
       granularity_size);
 }
 
+void create_phy_mem_handle(PhyMemHandle& phy_mem_handle,
+                           int32_t device_id,
+                           size_t size) {
+  int ret = 0;
+#if defined(USE_NPU)
+  aclrtPhysicalMemProp prop = {};
+  prop.handleType = ACL_MEM_HANDLE_TYPE_NONE;
+  prop.allocationType = ACL_MEM_ALLOCATION_TYPE_PINNED;
+  prop.memAttr = ACL_HBM_MEM_HUGE;  // 2MB
+  prop.location.type = ACL_MEM_LOCATION_TYPE_DEVICE;
+  prop.location.id = device_id;
+  prop.reserve = 0;
+
+  ret = aclrtMallocPhysical(&phy_mem_handle, size, &prop, 0);
+#elif defined(USE_MLU)
+  CNmemAllocationProp prop = {};
+  prop.type = CN_MEM_ALLOCATION_TYPE_DEFAULT;
+  prop.location.type = CN_MEM_LOCATION_TYPE_DEVICE;
+  prop.location.id = device_id;
+  prop.requestedHandleTypes = CN_MEM_HANDLE_TYPE_NONE;
+  prop.allocFlags.compressionType = CN_MEM_ALLOCATION_COMP_NONE;
+
+  ret = cnMemCreate(&phy_mem_handle, size, &prop, 0);
+
+  CNmemAccessDesc accessDesc = {};
+  accessDesc.location.type = CN_MEM_LOCATION_TYPE_DEVICE;
+  accessDesc.location.id = device_id;
+  accessDesc.accessFlags = CN_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  ret = cnMemSetAccess(phy_mem_handle, size, &accessDesc, 1);
+#elif defined(USE_CUDA) || defined(USE_ILU)
+  CUmemAllocationProp prop = {};
+  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  prop.location.id = device_id;
+
+  ret = cuMemCreate(&phy_mem_handle, size, &prop, 0);
+  // Note: cuMemSetAccess is called in map() after cuMemMap, not here
+#elif defined(USE_DCU)
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device_id;
+
+  ret = hipMemCreate(&phy_mem_handle, size, &prop, 0);
+#else
+  (void)device_id;
+  (void)size;
+#endif
+  CHECK_EQ(ret, 0) << "Failed to create physical memory handle of size "
+                   << size;
+}
+
 void create_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
   int ret = 0;
 #if defined(USE_NPU)
@@ -270,6 +322,28 @@ void unmap(VirPtr& vir_ptr, size_t aligned_size) {
   ret = hipMemUnmap(vir_ptr, aligned_size);
   CHECK_EQ(ret, 0) << "Failed to unmap virtual memory from physical memory";
 #endif
+}
+
+void unmap_chunk(VirPtr& vir_ptr, size_t size) {
+  int ret = 0;
+#if defined(USE_NPU)
+  // The chunk was mapped by a single aclrtMapMem covering `size`, so a single
+  // aclrtUnmapMem at the base address unmaps the whole chunk.
+  (void)size;
+  ret = aclrtUnmapMem(reinterpret_cast<void*>(vir_ptr));
+#elif defined(USE_MLU)
+  ret = cnMemUnmap(vir_ptr, size);
+#elif defined(USE_CUDA) || defined(USE_ILU)
+  ret = cuMemUnmap(vir_ptr, size);
+#elif defined(USE_DCU)
+  ret = hipMemUnmap(vir_ptr, size);
+#elif defined(USE_MUSA)
+  ret = muMemUnmap(vir_ptr, size);
+#else
+  (void)vir_ptr;
+  (void)size;
+#endif
+  CHECK_EQ(ret, 0) << "Failed to unmap virtual memory chunk";
 }
 
 }  // namespace vmm

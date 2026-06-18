@@ -405,6 +405,7 @@ Master::Master(const Options& options, EngineType type)
             options_.enable_prefill_piecewise_graph())
         .max_tokens_for_graph_mode(options_.max_tokens_for_graph_mode())
         .kv_cache_dtype(options_.kv_cache_dtype())
+        .enable_sleep_mode(options_.enable_sleep_mode())
         .model_id(options_.model_id());
 
     engine_ = std::make_unique<LLMEngine>(eng_options);

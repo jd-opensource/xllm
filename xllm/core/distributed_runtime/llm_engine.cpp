@@ -1154,9 +1154,17 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
 }
 
 bool LLMEngine::sleep(MasterStatus master_status) {
-  // sleep/wakeup/fork_master requires
+  // RL sleep mode (SleepableAllocator) is mutually exclusive with the
+  // xtensor-based sleep path: it does not require xtensor and does not touch
+  // PageAllocator. When xtensor is on, sleep mode is disabled so the xtensor
+  // path is preserved.
+  const bool sleep_mode =
+      options_.enable_sleep_mode() &&
+      !::xllm::KVCacheConfig::get_instance().enable_xtensor();
+
+  // sleep/wakeup/fork_master (xtensor path) requires
   // ::xllm::KVCacheConfig::get_instance().enable_xtensor()
-  if (!::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
+  if (!sleep_mode && !::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     LOG(WARNING) << "sleep requires --enable_xtensor=true";
     return false;
   }
@@ -1168,13 +1176,15 @@ bool LLMEngine::sleep(MasterStatus master_status) {
     return false;
   }
 
-  // Put the model to sleep in PageAllocator
-  // This releases both weight pages and KV cache pages
-  const std::string& model_id = options_.model_id();
-  auto& page_allocator = PageAllocator::get_instance();
-  if (!page_allocator.sleep_model(model_id)) {
-    LOG(ERROR) << "PageAllocator sleep_model failed, aborting sleep flow";
-    return false;
+  if (!sleep_mode) {
+    // Put the model to sleep in PageAllocator (xtensor path).
+    // This releases both weight pages and KV cache pages.
+    const std::string& model_id = options_.model_id();
+    auto& page_allocator = PageAllocator::get_instance();
+    if (!page_allocator.sleep_model(model_id)) {
+      LOG(ERROR) << "PageAllocator sleep_model failed, aborting sleep flow";
+      return false;
+    }
   }
 
   std::vector<folly::SemiFuture<bool>> futures;
@@ -1193,6 +1203,31 @@ bool LLMEngine::sleep(MasterStatus master_status) {
     }
   }
 
+  return true;
+}
+
+bool LLMEngine::update_weights(const std::string& weights_path) {
+  LOG(INFO) << "Updating weights on " << worker_clients_num_
+            << " worker(s) from: "
+            << (weights_path.empty() ? "<original path>" : weights_path);
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "No worker clients available to update weights.";
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+  for (auto& worker : worker_clients_) {
+    futures.push_back(worker->update_weights_async(weights_path));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.hasValue() || !result.value()) {
+      LOG(ERROR) << "UpdateWeights failed on a worker.";
+      return false;
+    }
+  }
   return true;
 }
 
@@ -1245,9 +1280,17 @@ bool LLMEngine::stop_profile() {
 }
 
 bool LLMEngine::wakeup(const WakeupOptions& options) {
-  // sleep/wakeup/fork_master requires
+  // RL sleep mode (SleepableAllocator) is mutually exclusive with the
+  // xtensor-based wakeup path: it does not require xtensor and does not touch
+  // PageAllocator. When xtensor is on, sleep mode is disabled so the xtensor
+  // path is preserved.
+  const bool sleep_mode =
+      options_.enable_sleep_mode() &&
+      !::xllm::KVCacheConfig::get_instance().enable_xtensor();
+
+  // sleep/wakeup/fork_master (xtensor path) requires
   // ::xllm::KVCacheConfig::get_instance().enable_xtensor()
-  if (!::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
+  if (!sleep_mode && !::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     LOG(WARNING) << "wakeup requires --enable_xtensor=true";
     return false;
   }
@@ -1259,13 +1302,15 @@ bool LLMEngine::wakeup(const WakeupOptions& options) {
     return false;
   }
 
-  // Wake up the model in PageAllocator
-  // This re-allocates both KV cache pages and weight pages
-  const std::string& model_id = options_.model_id();
-  auto& page_allocator = PageAllocator::get_instance();
-  if (!page_allocator.wakeup_model(model_id)) {
-    LOG(ERROR) << "PageAllocator wakeup_model failed, aborting wakeup flow";
-    return false;
+  if (!sleep_mode) {
+    // Wake up the model in PageAllocator (xtensor path).
+    // This re-allocates both KV cache pages and weight pages.
+    const std::string& model_id = options_.model_id();
+    auto& page_allocator = PageAllocator::get_instance();
+    if (!page_allocator.wakeup_model(model_id)) {
+      LOG(ERROR) << "PageAllocator wakeup_model failed, aborting wakeup flow";
+      return false;
+    }
   }
 
   LOG(INFO) << "Waking up LLM engine, remote_addrs.size()="

@@ -221,6 +221,10 @@ bool Worker::wakeup(const WakeupOptions& options) {
   return impl_->wakeup(options);
 }
 
+bool Worker::update_weights(const std::string& weights_path) {
+  return impl_->update_weights(weights_path);
+}
+
 folly::SemiFuture<bool> Worker::wakeup_async(const WakeupOptions& options) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
