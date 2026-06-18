@@ -233,6 +233,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
       torch::Tensor out_token_index;  // [num_seq, 1]
       torch::Tensor out_beam_count_prefix_sums;  // [num_seq, 1]
       torch::Tensor out_seqgroup;  // [batch_size, beam_width, total_rounds]
+      torch::Tensor
+          token_step_logprobs;  // [batch_size, beam_width, total_rounds]
     };
 
     // Prepare beam search tensors

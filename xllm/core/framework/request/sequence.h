@@ -333,11 +333,13 @@ class Sequence final {
   void set_beam_result(int32_t bw,
                        int32_t total_rounds,
                        const std::vector<std::vector<int32_t>>& flat,
-                       const std::vector<float>& last_logprobs) {
+                       const std::vector<float>& last_logprobs,
+                       std::vector<std::vector<float>> token_logprobs = {}) {
     beam_width_cached_ = bw;
     total_rounds_cached_ = total_rounds;
     beam_seq_group_flat_ = flat;
     beam_last_logprobs_ = last_logprobs;
+    beam_token_logprobs_flat_ = std::move(token_logprobs);
   }
   bool has_beam_result() const {
     return beam_width_cached_ > 0 && total_rounds_cached_ > 0 &&
@@ -348,6 +350,9 @@ class Sequence final {
   }
   const std::vector<float>& beam_last_logprobs() const {
     return beam_last_logprobs_;
+  }
+  const std::vector<std::vector<float>>& beam_token_logprobs_flat() const {
+    return beam_token_logprobs_flat_;
   }
   int32_t beam_width_cached() const { return beam_width_cached_; }
   int32_t total_rounds_cached() const { return total_rounds_cached_; }
@@ -542,6 +547,7 @@ class Sequence final {
   int32_t total_rounds_cached_ = 0;
   std::vector<std::vector<int32_t>> beam_seq_group_flat_;
   std::vector<float> beam_last_logprobs_;
+  std::vector<std::vector<float>> beam_token_logprobs_flat_;
 
   // Mark whether the sequence has new token updates in current decode step.
   // This is only consumed by software beam search to distinguish:
