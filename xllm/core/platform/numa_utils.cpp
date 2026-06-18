@@ -28,6 +28,8 @@ limitations under the License.
 #include <sched.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cstring>
 #include <fstream>
@@ -55,7 +57,13 @@ bool read_numa_node(const std::string& numa_path, int32_t* numa_node) {
 int32_t get_numa_node_from_sysfs(const std::string& backend,
                                  int32_t device_index,
                                  const std::string& pci_bus_id) {
-  std::string numa_path = "/sys/bus/pci/devices/" + pci_bus_id + "/numa_node";
+  // Device APIs may return uppercase hex, but sysfs PCI dirs require lowercase.
+  std::string lower_bus_id = pci_bus_id;
+  std::transform(lower_bus_id.begin(),
+                 lower_bus_id.end(),
+                 lower_bus_id.begin(),
+                 [](unsigned char ch) { return std::tolower(ch); });
+  std::string numa_path = "/sys/bus/pci/devices/" + lower_bus_id + "/numa_node";
   LOG(INFO) << backend << " device " << device_index
             << " NUMA sysfs path: " << numa_path;
 
@@ -220,6 +228,34 @@ int32_t get_device_numa_node(int32_t device_index) {
 #endif
 
   return -1;
+}
+
+int32_t reset_inherited_numa_binding() {
+  if (!is_numa_available()) {
+    LOG(WARNING) << "NUMA not available, skipping inherited binding reset";
+    return -1;
+  }
+
+  // Reset to all CPUs so build_cpu_set_for_numa_node can pick the target
+  // NUMA's CPUs (inherited mask would leave the intersection empty).
+  cpu_set_t all_cpus;
+  CPU_ZERO(&all_cpus);
+  const int32_t nr_possible_cpus = numa_num_possible_cpus();
+  for (int32_t cpu = 0; cpu < nr_possible_cpus && cpu < CPU_SETSIZE; ++cpu) {
+    CPU_SET(cpu, &all_cpus);
+  }
+  if (sched_setaffinity(0, sizeof(cpu_set_t), &all_cpus) != 0) {
+    LOG(ERROR) << "Failed to reset CPU affinity: " << strerror(errno);
+    return -1;
+  }
+
+  // Clear inherited strict membind so bind_process_to_numa_node can
+  // install a fresh policy without bad_alloc.
+  numa_set_strict(0);
+  numa_set_localalloc();
+
+  LOG(INFO) << "Reset inherited NUMA CPU affinity and memory policy";
+  return 0;
 }
 
 int32_t bind_process_to_numa_node(int32_t numa_node) {
