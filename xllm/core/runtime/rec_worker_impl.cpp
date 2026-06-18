@@ -171,6 +171,11 @@ void move_onerec_xattention_output_to_cpu(ForwardOutput& output) {
     output.beam_sequence_group =
         safe_to(output.beam_sequence_group, torch::kCPU, true);
   }
+  if (output.beam_sequence_group_logprobs.defined() &&
+      output.beam_sequence_group_logprobs.numel() > 0) {
+    output.beam_sequence_group_logprobs =
+        safe_to(output.beam_sequence_group_logprobs, torch::kCPU, true);
+  }
   if (output.beam_search_output.out_logprobs.defined() &&
       output.beam_search_output.out_logprobs.numel() > 0) {
     output.beam_search_output.out_logprobs =
@@ -234,6 +239,7 @@ struct OneRecBeamSearchTensors {
   torch::Tensor out_token_index;
   torch::Tensor out_beam_count_prefix_sums;
   torch::Tensor out_seqgroup;
+  torch::Tensor token_step_logprobs;
 };
 
 OneRecBeamSearchTensors prepare_onerec_beam_search_tensors(
@@ -256,6 +262,8 @@ OneRecBeamSearchTensors prepare_onerec_beam_search_tensors(
   tensors.out_token_index = torch::zeros({num_seq, 1}, int_options);
   tensors.out_beam_count_prefix_sums = torch::zeros({num_seq, 1}, int_options);
   tensors.out_seqgroup = torch::zeros_like(tensors.sequence_group);
+  tensors.token_step_logprobs =
+      torch::zeros({batch_size, beam_width, total_rounds}, fp32_options);
   return tensors;
 }
 
@@ -2035,6 +2043,13 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
 #else
     LOG(FATAL) << "OneRec xattention beam search requires NPU or CUDA.";
 #endif
+    if (FLAGS_enable_output_sku_logprobs || output_logprobs) {
+      runtime::detail::write_beam_round_step_logprobs(
+          beam_tensors.out_log_probs,
+          batch_size,
+          round,
+          beam_tensors.token_step_logprobs);
+    }
     std::swap(beam_tensors.sequence_group, beam_tensors.out_seqgroup);
     std::swap(beam_tensors.acc_logprob, beam_tensors.out_log_probs);
     if (round > 0 && round < total_rounds - 1) {
@@ -2061,6 +2076,9 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
       output.beam_search_output.out_logprobs =
           beam_tensors.acc_logprob.reshape({-1});
       output.beam_sequence_group = beam_tensors.sequence_group;
+      if (FLAGS_enable_output_sku_logprobs) {
+        output.beam_sequence_group_logprobs = beam_tensors.token_step_logprobs;
+      }
     }
   }
 
@@ -2495,6 +2513,8 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_beam_search_tensors(
   tensors.out_token_index = torch::zeros({num_seq, 1}, int_options);
   tensors.out_beam_count_prefix_sums = torch::zeros({num_seq, 1}, int_options);
   tensors.out_seqgroup = torch::zeros_like(tensors.sequence_group);
+  tensors.token_step_logprobs =
+      torch::zeros({batch_size, beam_width, total_rounds}, fp32_options);
   return tensors;
 }
 
@@ -2546,6 +2566,13 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_beam_search(
                                   requested_result_width,
                                   round);
 #endif
+  if (FLAGS_enable_output_sku_logprobs) {
+    runtime::detail::write_beam_round_step_logprobs(
+        beam_tensors.out_log_probs,
+        batch_size,
+        round,
+        beam_tensors.token_step_logprobs);
+  }
   std::swap(beam_tensors.sequence_group, beam_tensors.out_seqgroup);
   std::swap(beam_tensors.acc_logprob, beam_tensors.out_log_probs);
 }
@@ -2608,6 +2635,14 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_final_beam_search(
 #else
   LOG(FATAL) << "Rec multi-round final beam search requires NPU or CUDA.";
 #endif
+
+  if (FLAGS_enable_output_sku_logprobs) {
+    runtime::detail::write_beam_round_step_logprobs(
+        final_tensors.out_log_probs,
+        batch_size,
+        round,
+        beam_tensors.token_step_logprobs);
+  }
 
   beam_tensors.out_token_ids = std::move(final_tensors.out_token_ids);
   beam_tensors.out_token_index = std::move(final_tensors.out_token_index);
@@ -2688,6 +2723,9 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::build_final_output(
   output.beam_search_output.out_logprobs =
       beam_tensors.acc_logprob.reshape({-1});
   output.beam_sequence_group = beam_tensors.sequence_group;
+  if (FLAGS_enable_output_sku_logprobs) {
+    output.beam_sequence_group_logprobs = beam_tensors.token_step_logprobs;
+  }
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_two_stage_round_input(

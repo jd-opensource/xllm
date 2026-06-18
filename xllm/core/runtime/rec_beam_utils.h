@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <cstdint>
 
 namespace xllm::runtime::detail {
@@ -60,6 +61,45 @@ inline void write_first_round_beam_outputs(
   out_log_probs.copy_(flat_top_logprobs);
   out_seqgroup.select(/*dim=*/2, /*index=*/0)
       .copy_(flat_top_tokens.view({batch_size, beam_width}));
+}
+
+// Records per-beam incremental logprobs for one decode round into
+// token_step_logprobs[batch, beam, round].
+inline void write_beam_round_step_logprobs(const torch::Tensor& out_log_probs,
+                                           int32_t batch_size,
+                                           int32_t round,
+                                           torch::Tensor& token_step_logprobs) {
+  if (!out_log_probs.defined() || out_log_probs.numel() == 0 ||
+      !token_step_logprobs.defined()) {
+    return;
+  }
+  CHECK_GT(batch_size, 0);
+  CHECK_EQ(out_log_probs.dim(), 2);
+  const int64_t step_width = out_log_probs.size(0) / batch_size;
+  CHECK_EQ(out_log_probs.size(0), batch_size * step_width);
+  CHECK_GE(round, 0);
+  CHECK_LT(round, token_step_logprobs.size(2));
+
+  if (token_step_logprobs.size(1) != step_width) {
+    const int64_t total_rounds = token_step_logprobs.size(2);
+    auto resized = torch::zeros({batch_size, step_width, total_rounds},
+                                token_step_logprobs.options());
+    const int64_t copy_beams =
+        std::min(token_step_logprobs.size(1), step_width);
+    if (copy_beams > 0 && round > 0) {
+      resized.index({torch::indexing::Slice(),
+                     torch::indexing::Slice(0, copy_beams),
+                     torch::indexing::Slice(0, round)}) =
+          token_step_logprobs.index({torch::indexing::Slice(),
+                                     torch::indexing::Slice(0, copy_beams),
+                                     torch::indexing::Slice(0, round)});
+    }
+    token_step_logprobs = std::move(resized);
+  }
+
+  token_step_logprobs.index(
+      {torch::indexing::Slice(), torch::indexing::Slice(), round}) =
+      out_log_probs.view({batch_size, step_width});
 }
 
 }  // namespace xllm::runtime::detail

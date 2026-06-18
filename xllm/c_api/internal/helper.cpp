@@ -208,15 +208,61 @@ XLLM_InferOutputTensor make_string_output_tensor(
   return tensor;
 }
 
+XLLM_InferOutputTensor make_float_output_tensor(
+    const char* name,
+    const std::vector<int64_t>& shape_dims,
+    const std::vector<float>& values) {
+  auto* shape = new int64_t[shape_dims.size()];
+  CHECK(nullptr != shape);
+  for (size_t i = 0; i < shape_dims.size(); ++i) {
+    shape[i] = shape_dims[i];
+  }
+
+  XLLM_InferOutputTensor tensor{};
+  tensor.name = duplicate_tensor_name(name);
+  tensor.data_type = static_cast<int32_t>(proto::DataType::FLOAT);
+  tensor.shape = shape;
+  tensor.shape_len = shape_dims.size();
+  tensor.num_elements = values.size();
+  if (!values.empty()) {
+    auto* data = new char[values.size() * sizeof(float)];
+    CHECK(nullptr != data);
+    std::memcpy(data, values.data(), values.size() * sizeof(float));
+    tensor.data = data;
+  } else {
+    tensor.data = nullptr;
+  }
+  return tensor;
+}
+
+void append_rec_logprobs_to_vector(std::vector<float>* out,
+                                   const SequenceOutput& output,
+                                   int32_t expected_count) {
+  if (out == nullptr || expected_count <= 0) {
+    return;
+  }
+  const auto& token_logprobs = output.token_ids_logprobs;
+  const int32_t actual_count = static_cast<int32_t>(token_logprobs.size());
+  for (int32_t i = 0; i < expected_count; ++i) {
+    if (i < actual_count && token_logprobs[i].has_value()) {
+      out->push_back(token_logprobs[i].value());
+    } else {
+      out->push_back(0.0f);
+    }
+  }
+}
+
 // Populate the raw (proto-free) output_tensors view on XLLM_Response from
 // RequestOutput. Mirrors the intent of serialize_completion_response_proto for
 // the rec_result tensor, but emits a single contiguous host buffer per tensor
 // (one memcpy) instead of going through proto::CompletionResponse,
 // SerializeToString, and the caller's ParseFromArray + RepeatedField copies.
 //
-// Layout / dtype:
+// Layout / dtype (tensor order matches RecCompletionServiceImpl):
 //   - FLAGS_enable_convert_tokens_to_item == true
 //       rec_result  = INT64[item_count]
+//       sku_logprobs = FLOAT[item_count, logprob_width]
+//                      (when enable_output_sku_logprobs)
 //       item_did    = STRING[item_count] (when enable_extended_item_info)
 //       item_type   = STRING[item_count] (when enable_extended_item_info)
 //       item_count follows total_conversion_threshold aggregation, aligned
@@ -257,7 +303,15 @@ bool populate_raw_output_tensors(const InferenceType inference_type,
   if (convert_to_item) {
     const std::vector<RecEmitRecord> emitted_items =
         collect_rec_emit_records(req_output);
-    const size_t tensor_count = FLAGS_enable_extended_item_info ? 3U : 1U;
+    const bool output_sku_logprobs =
+        FLAGS_enable_output_sku_logprobs && !req_output.outputs.empty();
+    size_t tensor_count = 1;
+    if (output_sku_logprobs) {
+      ++tensor_count;
+    }
+    if (FLAGS_enable_extended_item_info) {
+      tensor_count += 2;
+    }
     auto* entries = new XLLM_InferOutputTensor[tensor_count]();
 
     std::vector<int64_t> item_ids;
@@ -265,7 +319,30 @@ bool populate_raw_output_tensors(const InferenceType inference_type,
     for (const RecEmitRecord& emitted_item : emitted_items) {
       item_ids.emplace_back(emitted_item.item_id);
     }
-    entries[0] = make_int64_output_tensor("rec_result", item_ids);
+
+    size_t entry_idx = 0;
+    entries[entry_idx++] = make_int64_output_tensor("rec_result", item_ids);
+
+    if (output_sku_logprobs) {
+      const int32_t logprob_width =
+          static_cast<int32_t>(req_output.outputs[0].token_ids_logprobs.size());
+      std::vector<float> logprob_values;
+      if (logprob_width > 0) {
+        logprob_values.reserve(emitted_items.size() *
+                               static_cast<size_t>(logprob_width));
+        for (const RecEmitRecord& emitted_item : emitted_items) {
+          append_rec_logprobs_to_vector(
+              &logprob_values,
+              req_output.outputs[emitted_item.output_index],
+              logprob_width);
+        }
+      }
+      const int64_t emitted_count = static_cast<int64_t>(emitted_items.size());
+      entries[entry_idx++] = make_float_output_tensor(
+          "sku_logprobs",
+          {emitted_count, static_cast<int64_t>(logprob_width)},
+          logprob_values);
+    }
 
     if (FLAGS_enable_extended_item_info) {
       std::vector<std::string> item_dids;
@@ -281,8 +358,8 @@ bool populate_raw_output_tensors(const InferenceType inference_type,
           item_types.emplace_back("");
         }
       }
-      entries[1] = make_string_output_tensor("item_did", item_dids);
-      entries[2] = make_string_output_tensor("item_type", item_types);
+      entries[entry_idx++] = make_string_output_tensor("item_did", item_dids);
+      entries[entry_idx++] = make_string_output_tensor("item_type", item_types);
     }
 
     response->output_tensors.entries = entries;
@@ -292,7 +369,10 @@ bool populate_raw_output_tensors(const InferenceType inference_type,
 
   const size_t token_dim = req_output.outputs.front().token_ids.size();
   const size_t alloc_elems = num_outputs * token_dim;
-  auto* entries = new XLLM_InferOutputTensor[1]();
+  const bool output_sku_logprobs =
+      FLAGS_enable_output_sku_logprobs && !req_output.outputs.empty();
+  const size_t tensor_count = output_sku_logprobs ? 2U : 1U;
+  auto* entries = new XLLM_InferOutputTensor[tensor_count]();
   CHECK(nullptr != entries);
   auto* shape = new int64_t[2]();
   CHECK(nullptr != shape);
@@ -322,8 +402,25 @@ bool populate_raw_output_tensors(const InferenceType inference_type,
   entries[0].data = data;
   entries[0].num_elements = alloc_elems;
 
+  if (output_sku_logprobs) {
+    const int32_t logprob_width =
+        static_cast<int32_t>(req_output.outputs[0].token_ids_logprobs.size());
+    std::vector<float> logprob_values;
+    if (logprob_width > 0) {
+      logprob_values.reserve(num_outputs * static_cast<size_t>(logprob_width));
+      for (size_t i = 0; i < num_outputs; ++i) {
+        append_rec_logprobs_to_vector(
+            &logprob_values, req_output.outputs[i], logprob_width);
+      }
+    }
+    entries[1] = make_float_output_tensor("sku_logprobs",
+                                          {static_cast<int64_t>(num_outputs),
+                                           static_cast<int64_t>(logprob_width)},
+                                          logprob_values);
+  }
+
   response->output_tensors.entries = entries;
-  response->output_tensors.entries_size = 1;
+  response->output_tensors.entries_size = tensor_count;
   return true;
 }
 

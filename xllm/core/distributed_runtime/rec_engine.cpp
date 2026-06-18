@@ -103,6 +103,11 @@ bool onerec_xattention_output_on_cpu(const ForwardOutput& output) {
       !output.beam_sequence_group.device().is_cpu()) {
     return false;
   }
+  if (output.beam_sequence_group_logprobs.defined() &&
+      output.beam_sequence_group_logprobs.numel() > 0 &&
+      !output.beam_sequence_group_logprobs.device().is_cpu()) {
+    return false;
+  }
   if (output.beam_search_output.out_logprobs.defined() &&
       output.beam_search_output.out_logprobs.numel() > 0 &&
       !output.beam_search_output.out_logprobs.device().is_cpu()) {
@@ -1046,6 +1051,11 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::get_model_output(
       log_engine_stage("after_beam_sequence_group_to_cpu",
                        output.beam_sequence_group);
     }
+    if (output.beam_sequence_group_logprobs.defined() &&
+        output.beam_sequence_group_logprobs.numel() > 0) {
+      output.beam_sequence_group_logprobs =
+          safe_to(output.beam_sequence_group_logprobs, torch::kCPU, true);
+    }
     if (output.beam_search_output.out_logprobs.defined() &&
         output.beam_search_output.out_logprobs.numel() > 0) {
       log_engine_stage("before_beam_out_logprobs_to_cpu",
@@ -1271,6 +1281,10 @@ ForwardOutput RecEngine::RecMultiRoundEnginePipeline::get_model_output(
   auto& output = forward_output.value();
   // TODO. uncomment this in next pr.
   output.beam_sequence_group = safe_to(output.beam_sequence_group, torch::kCPU);
+  if (output.beam_sequence_group_logprobs.defined()) {
+    output.beam_sequence_group_logprobs =
+        safe_to(output.beam_sequence_group_logprobs, torch::kCPU);
+  }
   if (output.beam_search_output.out_logprobs.defined()) {
     output.beam_search_output.out_logprobs =
         safe_to(output.beam_search_output.out_logprobs, torch::kCPU);

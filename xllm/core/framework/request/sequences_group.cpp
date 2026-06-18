@@ -389,6 +389,22 @@ void SequencesGroup::generate_multi_round_output(
     log_probs[0].logprob = rank[i].first;
     out.logprobs = log_probs;
 
+    if (FLAGS_enable_output_sku_logprobs) {
+      const auto& per_token_lps = base.beam_token_logprobs_flat();
+      out.token_ids_logprobs.reserve(out.token_ids.size());
+      if (b < per_token_lps.size() &&
+          per_token_lps[b].size() == out.token_ids.size()) {
+        for (float lp : per_token_lps[b]) {
+          out.token_ids_logprobs.emplace_back(lp);
+        }
+      } else {
+        const float fallback_lp = rank[i].first;
+        for (size_t t = 0; t < out.token_ids.size(); ++t) {
+          out.token_ids_logprobs.emplace_back(fallback_lp);
+        }
+      }
+    }
+
     auto fr = base.finish_reason().to_string();
     if (fr.has_value()) {
       out.finish_reason = fr.value();

@@ -206,6 +206,9 @@ struct ForwardOutput {
 
   BeamSearchOutput beam_search_output;
   torch::Tensor beam_sequence_group;
+  // Per-beam incremental logprobs aligned with beam_sequence_group:
+  // [batch_size, beam_width, total_rounds].
+  torch::Tensor beam_sequence_group_logprobs;
 
   // dit output data
   DiTForwardOutput dit_forward_output;
