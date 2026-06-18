@@ -307,6 +307,8 @@ class Qwen3HybridForCausalLMImplBase : public torch::nn::Module {
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
+  bool is_hybrid_linear_attention() { return true; }
+
   layer::LmHead get_lm_head() { return lm_head_; }
 
   void set_lm_head(layer::LmHead& head) { lm_head_ = head; }

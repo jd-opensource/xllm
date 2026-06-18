@@ -128,6 +128,15 @@ struct has_requires_graph_forward_metadata<
     : std::true_type {};
 
 template <typename T, typename = void>
+struct has_is_hybrid_linear_attention : std::false_type {};
+
+template <typename T>
+struct has_is_hybrid_linear_attention<
+    T,
+    std::void_t<decltype(std::declval<T>()->is_hybrid_linear_attention())>>
+    : std::true_type {};
+
+template <typename T, typename = void>
 struct has_create_graph_forward_metadata_state : std::false_type {};
 
 template <typename T>

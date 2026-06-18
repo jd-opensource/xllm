@@ -1436,6 +1436,8 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
     }
     input_params.num_accepted_tokens =
         torch::tensor(accepted_prefix_lengths, token_options);
+    input_params.num_accepted_tokens_host.assign(
+        accepted_prefix_lengths.begin(), accepted_prefix_lengths.end());
   }
 
   input_params.attention.rebuild_device_buffer(device_);

@@ -61,6 +61,14 @@ class CausalVLMImpl : public CausalVLM {
     return model_->forward(tokens, positions, kv_caches, parameters);
   }
 
+  bool is_hybrid_linear_attention() override {
+    if constexpr (detail::has_is_hybrid_linear_attention<Model>::value) {
+      return model_->is_hybrid_linear_attention();
+    } else {
+      return CausalLM::is_hybrid_linear_attention();
+    }
+  }
+
   torch::Tensor pooler(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) override {
     if constexpr (detail::has_pooler<Model>::value) {
