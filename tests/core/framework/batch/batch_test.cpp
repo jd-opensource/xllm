@@ -1793,7 +1793,7 @@ TEST(BatchTest, OverlapMTPReplacementKeepsCompositeKvBlocks) {
   stopping_checker.set_max_generated_tokens(8);
 
   Sequence seq = make_overlap_sequence(
-      {1, 10, 11}, 128, &sampling_param, &stopping_checker);
+      {1, 10, 11}, /*seq_capacity=*/128, &sampling_param, &stopping_checker);
   ASSERT_TRUE(manager.allocate_for_sequence(&seq, seq.num_prompt_tokens()));
   ASSERT_EQ(seq.kv_state().num_kv_blocks(), 0u);
   ASSERT_GT(seq.kv_state().current_max_tokens_capacity(), 0u);
