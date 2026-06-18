@@ -123,9 +123,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   KVCacheConfig::get_instance().block_size(block_size);
   EPLBConfig::get_instance().rank_tablefile(rank_tablefile);
 
-  const std::string device_type = xllm::Device::type_str();
-  const std::string device_str = device_type + ":" + std::to_string(device_idx);
-  xllm::Device device{torch::Device(device_str)};
+  xllm::Device device{torch::Device(xllm::Device::type_torch(), device_idx)};
   device.set_device();
 
 #if defined(USE_NPU)

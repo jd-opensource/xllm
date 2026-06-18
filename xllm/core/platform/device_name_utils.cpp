@@ -45,8 +45,7 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
     }
     devices.reserve(num_devices);
     for (int32_t i = 0; i < num_devices; ++i) {
-      std::string device_name = to_device_string(i);
-      devices.emplace_back(torch::Device(device_name));
+      devices.emplace_back(torch::Device(Device::type_torch(), i));
     }
     return devices;
   }
