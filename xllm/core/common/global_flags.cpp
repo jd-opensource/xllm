@@ -15,6 +15,9 @@ limitations under the License.
 
 #include "global_flags.h"
 
+#include <glog/logging.h>
+
+#include <cstdlib>
 #include <limits>
 
 #include "brpc/reloadable_flags.h"
@@ -719,6 +722,30 @@ DEFINE_uint32(rec_worker_max_concurrency,
               1,
               "Concurrency for rec worker parallel execution. Less than or "
               "equal to 1 means disable concurrent rec worker.");
+DEFINE_bool(enable_multistream_perf_mode,
+            false,
+            "Enable experimental OneRec xattention multistream performance "
+            "mode. When enabled, it disables OneRec xattention prepare/model "
+            "forward serialization and enables thread-local ACLNN cache.");
+
+namespace {
+
+void set_env_override(const char* name, const char* value) {
+  PCHECK(setenv(name, value, 1) == 0)
+      << "Failed to set environment variable " << name;
+}
+
+}  // namespace
+
+void apply_multistream_perf_mode_env_overrides() {
+  if (!FLAGS_enable_multistream_perf_mode) {
+    return;
+  }
+
+  set_env_override("XLLM_ONEREC_XATTN_SERIALIZE_PREPARE", "false");
+  set_env_override("XLLM_ONEREC_XATTN_SERIALIZE_MODEL_FORWARD", "false");
+  set_env_override("XLLM_ATB_ACLNN_THREAD_LOCAL_CACHE", "1");
+}
 
 #if defined(USE_NPU)
 DEFINE_string(npu_kernel_backend,

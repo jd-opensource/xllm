@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <algorithm>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <numeric>
 #include <optional>
@@ -34,6 +35,7 @@ limitations under the License.
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"
 #include "runtime/dit_forward_params.h"
+#include "runtime/forward_output_ready_event.h"
 
 namespace xllm {
 
@@ -207,6 +209,16 @@ struct ForwardOutput {
 
   // dit output data
   DiTForwardOutput dit_forward_output;
+
+  // Optional readiness event for outputs whose CPU tensors were produced by
+  // asynchronous D2H copies.
+  std::shared_ptr<ForwardOutputReadyEvent> ready_event;
+
+  void wait_ready() const {
+    if (ready_event != nullptr) {
+      ready_event->wait();
+    }
+  }
 };
 
 // Model input with raw data, which will be

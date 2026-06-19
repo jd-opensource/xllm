@@ -558,6 +558,7 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
 }
 
 void Batch::process_beam_sequence_group(const ForwardOutput& output) {
+  output.wait_ready();
   if (!output.beam_sequence_group.defined() ||
       output.beam_sequence_group.numel() == 0) {
     return;
@@ -592,6 +593,13 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
   // Tensor should already be on CPU (transferred in get_model_output)
   bool has_logprobs = output.beam_search_output.out_logprobs.defined() &&
                       output.beam_search_output.out_logprobs.numel() > 0;
+  const float* logprobs_data = nullptr;
+  if (has_logprobs) {
+    CHECK(output.beam_search_output.out_logprobs.device().is_cpu());
+    CHECK_EQ(output.beam_search_output.out_logprobs.scalar_type(),
+             torch::kFloat32);
+    logprobs_data = output.beam_search_output.out_logprobs.data_ptr<float>();
+  }
 
   std::vector<std::vector<int32_t>> group_flat2d;
   std::vector<float> last_logprobs;
@@ -614,8 +622,7 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
         // logprobs is flattened [batch * result_width] for multi-round widened
         // final output.
         int logprob_idx = static_cast<int>(g) * result_width + b;
-        last_logprobs.push_back(
-            output.beam_search_output.out_logprobs[logprob_idx].item<float>());
+        last_logprobs.push_back(logprobs_data[logprob_idx]);
       }
     }
     // Access sequence from sequence_groups_ if available
