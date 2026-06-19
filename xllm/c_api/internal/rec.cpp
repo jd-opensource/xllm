@@ -29,6 +29,7 @@ limitations under the License.
 #include <limits>
 #include <stdexcept>
 
+#include "core/common/global_flags.h"
 #include "c_api/internal/infer_timing.h"
 #include "core/framework/model_loader.h"
 #include "core/util/cpu_affinity.h"
@@ -143,6 +144,8 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         .enable_schedule_overlap(xllm_init_options.enable_schedule_overlap)
         .enable_pd_ooc(xllm_init_options.enable_pd_ooc)
         .kv_cache_transfer_mode(xllm_init_options.kv_cache_transfer_mode)
+        .enable_multistream_perf_mode(
+            xllm_init_options.enable_multistream_perf_mode)
         .enable_shm(xllm_init_options.enable_shm)
         .is_local(true)
         .server_idx(xllm_init_options.server_idx);
@@ -202,6 +205,9 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         xllm_init_options.each_conversion_threshold;
     FLAGS_total_conversion_threshold =
         xllm_init_options.total_conversion_threshold;
+    FLAGS_enable_multistream_perf_mode =
+        xllm_init_options.enable_multistream_perf_mode;
+    apply_multistream_perf_mode_env_overrides();
 
     if (xllm_init_options.request_queue_size > 0) {
       FLAGS_request_queue_size = xllm_init_options.request_queue_size;
@@ -225,7 +231,8 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     // Keep dual-source settings aligned with the FLAGS_* values above.
     options.enable_graph(FLAGS_enable_graph)
         .beam_width(FLAGS_beam_width)
-        .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
+        .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency)
+        .enable_multistream_perf_mode(FLAGS_enable_multistream_perf_mode);
     LOG(INFO) << "REC C API selected pipeline="
               << get_rec_pipeline_name(pipeline_type)
               << ", model_type=" << model_args.model_type()
@@ -237,6 +244,8 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
               << ", enable_prefix_cache=" << FLAGS_enable_prefix_cache
               << ", enable_schedule_overlap=" << FLAGS_enable_schedule_overlap
               << ", enable_chunked_prefill=" << FLAGS_enable_chunked_prefill
+              << ", enable_multistream_perf_mode="
+              << FLAGS_enable_multistream_perf_mode
               << ", enable_rec_fast_sampler=" << FLAGS_enable_rec_fast_sampler
               << ", max_decode_rounds=" << FLAGS_max_decode_rounds;
 

@@ -139,6 +139,7 @@ const XLLM_InitOptions XLLM_INIT_REC_OPTIONS_DEFAULT = {
     .each_conversion_threshold = 1,
     .total_conversion_threshold = 256,
     .rec_worker_max_concurrency = 1,
+    .enable_multistream_perf_mode = false,
     .constrained_decoding_filter_path = "",
     .cpu_affinity = ""};
 

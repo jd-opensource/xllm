@@ -275,6 +275,7 @@ int run() {
       .beam_width(FLAGS_beam_width)
       .kv_cache_dtype(FLAGS_kv_cache_dtype)
       .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency)
+      .enable_multistream_perf_mode(FLAGS_enable_multistream_perf_mode)
       .is_local(is_local);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
@@ -365,6 +366,7 @@ int main(int argc, char** argv) {
   FLAGS_alsologtostderr = true;
   FLAGS_minloglevel = 0;
   google::ParseCommandLineFlags(&argc, &argv, true);
+  apply_multistream_perf_mode_env_overrides();
 
   google::InitGoogleLogging("xllm");
 

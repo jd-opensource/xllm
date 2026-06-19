@@ -380,7 +380,8 @@ Master::Master(const Options& options, EngineType type)
         .enable_graph(options_.enable_graph())
         .max_tokens_per_chunk_for_prefill(
             options_.max_tokens_per_chunk_for_prefill())
-        .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
+        .rec_worker_max_concurrency(options_.rec_worker_max_concurrency())
+        .enable_multistream_perf_mode(options_.enable_multistream_perf_mode());
 
     engine_ = std::make_unique<RecEngine>(eng_options);
   } else if (type == EngineType::DIT) {

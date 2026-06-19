@@ -202,6 +202,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   /** Maximum REC worker pipeline concurrency */
   uint32_t rec_worker_max_concurrency;
 
+  /** Whether to enable OneRec xattention multistream performance mode */
+  bool enable_multistream_perf_mode;
+
   /**
    * Relative filename of the constrained decoding filter file (e.g.
    * `beam_search_filter.bin`), resolved against the model weights directory

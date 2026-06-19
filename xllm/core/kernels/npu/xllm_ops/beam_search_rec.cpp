@@ -19,7 +19,12 @@ limitations under the License.
 #include <torch_npu/csrc/libs/init_npu.h>
 #include <torch_npu/torch_npu.h>
 
+#include <cstdlib>
+#include <cstring>
+#include <map>
 #include <nlohmann/json.hpp>
+#include <utility>
+#include <vector>
 #ifdef TORCH_HIGHER_THAN_PTA6
 #include <torch_npu/csrc/framework/OpCommand.h>
 #else
@@ -36,6 +41,9 @@ limitations under the License.
 namespace xllm::kernel::npu {
 
 namespace {
+
+constexpr const char* kAsyncBeamSearchEnv =
+    "XLLM_ONEREC_XATTN_ASYNC_BEAM_SEARCH";
 
 using BeamSearchGroupGetWorkspaceSizeOldFn = aclnnStatus (*)(const aclTensor*,
                                                              const aclTensor*,
@@ -63,6 +71,60 @@ using BeamSearchGroupGetWorkspaceSizeNewFn = aclnnStatus (*)(const aclTensor*,
                                                              const aclTensor*,
                                                              uint64_t*,
                                                              aclOpExecutor**);
+
+struct BeamSearchWorkspace {
+  void* addr = nullptr;
+  uint64_t size = 0;
+  std::vector<void*> retired_addrs;
+};
+
+using BeamSearchWorkspaceKey = std::pair<int32_t, uint64_t>;
+
+thread_local std::map<BeamSearchWorkspaceKey, BeamSearchWorkspace>
+    g_beam_search_workspaces;
+
+bool enable_async_beam_search_rec() {
+  static const bool enabled = []() {
+    const char* env = std::getenv(kAsyncBeamSearchEnv);
+    return env != nullptr && std::strcmp(env, "1") == 0;
+  }();
+  return enabled;
+}
+
+BeamSearchWorkspaceKey make_workspace_key(int32_t device_id,
+                                          aclrtStream stream) {
+  return std::make_pair(
+      device_id, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(stream)));
+}
+
+void* get_persistent_workspace(uint64_t workspace_size,
+                               int32_t device_id,
+                               aclrtStream stream) {
+  if (workspace_size == 0) {
+    return nullptr;
+  }
+
+  auto& workspace =
+      g_beam_search_workspaces[make_workspace_key(device_id, stream)];
+  if (workspace.addr != nullptr && workspace.size >= workspace_size) {
+    return workspace.addr;
+  }
+
+  void* workspace_addr = nullptr;
+  CHECK_ACL_SUCCESS(
+      aclrtMalloc(&workspace_addr, workspace_size, ACL_MEM_MALLOC_HUGE_FIRST),
+      "beam_search_rec: failed to allocate persistent REC beam search "
+      "workspace");
+  if (workspace.addr != nullptr) {
+    // Do not free the old buffer here. This mode intentionally removes the
+    // post-kernel stream sync, so an earlier same-stream kernel may still own
+    // the previous workspace until the worker's later stream sync.
+    workspace.retired_addrs.push_back(workspace.addr);
+  }
+  workspace.addr = workspace_addr;
+  workspace.size = workspace_size;
+  return workspace.addr;
+}
 
 aclnnStatus beam_search_group_get_workspace_size(
     BeamSearchGroupGetWorkspaceSizeOldFn fn,
@@ -192,6 +254,7 @@ void beam_search_rec(const torch::Tensor& logprobs,
 
   uint64_t workspace_size = 0;
   aclOpExecutor* executor = nullptr;
+  const bool async_beam_search = enable_async_beam_search_rec();
   CHECK_ACL_SUCCESS(
       beam_search_group_get_workspace_size(aclnnBeamSearchGroupGetWorkspaceSize,
                                            logprobs_ids,
@@ -210,16 +273,24 @@ void beam_search_rec(const torch::Tensor& logprobs,
       "beam_search_rec: failed to get workspace size for REC beam search");
   void* workspace_addr = nullptr;
   if (workspace_size > 0) {
-    CHECK_ACL_SUCCESS(
-        aclrtMalloc(&workspace_addr, workspace_size, ACL_MEM_MALLOC_HUGE_FIRST),
-        "beam_search_rec: failed to allocate workspace for REC beam search");
+    if (async_beam_search) {
+      workspace_addr =
+          get_persistent_workspace(workspace_size, device_id, stream);
+    } else {
+      CHECK_ACL_SUCCESS(
+          aclrtMalloc(
+              &workspace_addr, workspace_size, ACL_MEM_MALLOC_HUGE_FIRST),
+          "beam_search_rec: failed to allocate workspace for REC beam search");
+    }
   }
   CHECK_ACL_SUCCESS(
       aclnnBeamSearchGroup(workspace_addr, workspace_size, executor, stream),
       "beam_search_rec: failed to execute REC beam search");
-  CHECK_ACL_SUCCESS(
-      aclrtSynchronizeStream(stream),
-      "beam_search_rec: failed to synchronize stream for REC beam search");
+  if (!async_beam_search) {
+    CHECK_ACL_SUCCESS(
+        aclrtSynchronizeStream(stream),
+        "beam_search_rec: failed to synchronize stream for REC beam search");
+  }
   aclDestroyTensor(logprobs_ids);
   aclDestroyTensor(top_tokens_ids);
   aclDestroyTensor(top_logprobs_ids);
@@ -229,7 +300,7 @@ void beam_search_rec(const torch::Tensor& logprobs,
   aclDestroyTensor(out_log_probs_ids);
   aclDestroyTensor(out_beam_count_prefix_sums_ids);
   aclDestroyTensor(out_sequence_ids);
-  if (workspace_size > 0) {
+  if (!async_beam_search && workspace_size > 0) {
     CHECK_ACL_SUCCESS(
         aclrtFree(workspace_addr),
         "beam_search_rec: failed to free workspace for REC beam search");

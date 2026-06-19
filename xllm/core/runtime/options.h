@@ -243,6 +243,9 @@ struct Options {
 
   // max concurrency for rec worker
   PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
+
+  // Enables OneRec xattention multistream performance mode.
+  PROPERTY(bool, enable_multistream_perf_mode) = false;
 };
 
 }  // namespace runtime

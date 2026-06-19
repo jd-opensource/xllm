@@ -336,6 +336,9 @@ DECLARE_bool(use_audio_in_video);
 
 // --- concurrent rec worker config ---
 DECLARE_uint32(rec_worker_max_concurrency);
+DECLARE_bool(enable_multistream_perf_mode);
+
+void apply_multistream_perf_mode_env_overrides();
 
 #if defined(USE_NPU)
 DECLARE_string(npu_kernel_backend);

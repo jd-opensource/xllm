@@ -9,6 +9,7 @@ cc_library(
   HDRS
     options.h
     forward_params.h
+    forward_output_ready_event.h
     dit_forward_params.h
     params_utils.h
     rec_beam_utils.h
@@ -48,6 +49,7 @@ cc_library(
     $<$<BOOL:${USE_MLU}>:mlu_graph_executor_impl.cpp>
     $<$<BOOL:${USE_CUDA}>:cuda_graph_executor_impl.cpp>
     worker.cpp
+    forward_output_ready_event.cpp
     worker_impl.cpp
     llm_worker_impl.cpp
     vlm_worker_impl.cpp
