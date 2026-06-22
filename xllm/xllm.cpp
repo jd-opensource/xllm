@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -183,10 +183,6 @@ Options create_options(const std::string& instance_name, bool is_local) {
       .priority_strategy(scheduler_config.priority_strategy())
       .enable_online_preempt_offline(
           scheduler_config.enable_online_preempt_offline())
-      .enable_cache_upload((distributed_config.enable_service_routing() ||
-                            disagg_pd_config.enable_disagg_pd()) &&
-                           kv_cache_config.enable_prefix_cache() &&
-                           kv_cache_store_config.enable_cache_upload())
       .host_blocks_factor(kv_cache_store_config.host_blocks_factor())
       .enable_kvcache_store(kv_cache_store_config.enable_kvcache_store() &&
                             kv_cache_config.enable_prefix_cache() &&

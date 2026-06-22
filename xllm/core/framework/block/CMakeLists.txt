@@ -22,16 +22,18 @@ cc_library(
     block_manager_pool.h
     block_manager_impl.h
     concurrent_block_manager_impl.h
-    hierarchy_block_manager_pool.h
+    # hierarchy temporarily disabled during the block-manager refactor
+    # hierarchy_block_manager_pool.h
     sliding_window_block_manager.h
     composite_block_manager.h
-  SRCS 
+  SRCS
     block.cpp
     single_block_manager.cpp
     block_manager_pool.cpp
     concurrent_block_manager_impl.cpp
     block_manager_impl.cpp
-    hierarchy_block_manager_pool.cpp
+    # hierarchy temporarily disabled during the block-manager refactor
+    # hierarchy_block_manager_pool.cpp
     sliding_window_block_manager.cpp
     composite_block_manager.cpp
   DEPS

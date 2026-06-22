@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -266,14 +266,6 @@ void XTensorBlockManagerImpl::cache(const std::vector<Block>& /*blocks*/) {
   // Prefix cache not supported
   VLOG(1) << "cache called but prefix cache is not supported";
   return;
-}
-
-void XTensorBlockManagerImpl::get_merged_kvcache_event(
-    KvCacheEvent* event) const {
-  // Not implemented for XTensor
-  if (event != nullptr) {
-    event->clear();
-  }
 }
 
 size_t XTensorBlockManagerImpl::num_free_blocks() const {

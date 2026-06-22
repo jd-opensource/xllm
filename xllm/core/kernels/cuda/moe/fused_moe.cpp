@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ limitations under the License.
 #include "kernels/cuda/cuda_ops_api.h"
 #include "kernels/cuda/utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm::kernel::cuda {
 
@@ -67,11 +68,11 @@ torch::Tensor cutlass_fused_moe(
   }
 
   std::string fused_moe_uri = "fused_moe";
-  if (Device::is_support_sm90a()) {
+  if (Platform::is_support_sm90a()) {
     fused_moe_uri += "_90";
-  } else if (Device::is_support_sm100a() || Device::is_support_sm100f()) {
+  } else if (Platform::is_support_sm100a() || Platform::is_support_sm100f()) {
     fused_moe_uri += "_100";
-  } else if (Device::is_support_sm120a()) {
+  } else if (Platform::is_support_sm120a()) {
     fused_moe_uri += "_120";
   } else {
     LOG(FATAL) << "FusedMoE is only supported on sm90, sm100, sm120.";

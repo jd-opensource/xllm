@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ limitations under the License.
 #include "layers/mlu/fused_moe.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 #include "util/tensor_helper.h"
 
 #if defined(USE_MLU)
@@ -246,7 +247,7 @@ int32_t run_all2all_basic_test_child(All2AllTestParams params) {
     EPLBConfig::get_instance().expert_parallel_degree(2);
 
     // 1. Check devices
-    int32_t dev_count = xllm::Device::device_count();
+    int32_t dev_count = xllm::Platform::device_count();
     if (dev_count < params.world_size) {
       LOG(WARNING) << "Rank " << params.rank
                    << ": Insufficient devices. Skipping.";
@@ -372,7 +373,7 @@ int32_t run_all2all_route_guard_test_child(All2AllTestParams params) {
   try {
     EPLBConfig::get_instance().expert_parallel_degree(2);
 
-    int32_t dev_count = xllm::Device::device_count();
+    int32_t dev_count = xllm::Platform::device_count();
     if (dev_count < params.world_size) {
       LOG(WARNING) << "Rank " << params.rank
                    << ": Insufficient devices. Skipping.";

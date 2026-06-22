@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ limitations under the License.
 #include "layers/mlu/deepseek_v2_attention.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -44,7 +45,7 @@ KVCache create_indexed_kv_cache(torch::Tensor key_cache,
 class DeepseekMLATest : public ::testing::Test {
  protected:
   void SetUp() override {
-    torch::Device torch_device(Device::type_torch(), 0);
+    torch::Device torch_device(Platform::type_torch(), 0);
     Device device(torch_device);
     device.set_seed();
 

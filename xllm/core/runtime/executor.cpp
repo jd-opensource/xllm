@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ limitations under the License.
 #include "core/framework/config/execution_config.h"
 #include "executor_impl_factory.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 
@@ -26,7 +27,7 @@ Executor::Executor(CausalLM* model,
                    const torch::Device& device,
                    const runtime::Options& options) {
   std::string backend = (options.backend() != "vlm" && options.enable_graph())
-                            ? Device::type_str()
+                            ? Platform::type_str()
                             : options.backend();
   impl_ = ExecutorImplFactory::get_instance().create_executor_impl(
       model, args, device, options, backend);

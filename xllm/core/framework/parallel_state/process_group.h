@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -92,6 +92,11 @@ class ProcessGroup {
   // result. we use default dim 0 for reduce_scatter.
   virtual void reduce_scatter(const torch::Tensor& input,
                               torch::Tensor& output);
+
+  // broadcast: in-place overwrite the input tensor on every process with the
+  // copy held by root_rank. Used to unify per-rank sampling results to a single
+  // source of truth across the consensus group.
+  virtual void broadcast(torch::Tensor& input, int32_t root_rank = 0);
 
   virtual void all_to_all_single(
       torch::Tensor output,

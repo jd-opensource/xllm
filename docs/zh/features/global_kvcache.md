@@ -28,7 +28,6 @@ xLLM 全局KV Cache功能主要通过以下三个模块实现：
 3. xLLM启动添加上下面的 gflag 参数即可：
 ```bash
 --enable_service_routing=true
---enable_cache_upload=true
 # PD分离暂时不支持全局KVCache管理
 --enable_disagg_pd=false
 ```

@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -83,15 +83,6 @@ TEST(SingleBlockManagerTest, PrefixCacheStyleApisAreSafeNoopsWhenDisabled) {
   // cache() overloads should be safe no-ops.
   EXPECT_NO_FATAL_FAILURE(manager.cache(token_ids, blocks));
   EXPECT_NO_FATAL_FAILURE(manager.cache(blocks));
-
-  // get_merged_kvcache_event should be a safe no-op.
-  KvCacheEvent event;
-  // Avoid inserting a default-constructed XXH3Key, whose bytes would be
-  // uninitialized and could trigger undefined behavior in hashing.
-  uint8_t key_bytes[XXH3_128BITS_HASH_VALUE_LEN] = {};
-  event.stored_cache.emplace(key_bytes);
-  EXPECT_NO_FATAL_FAILURE(manager.get_merged_kvcache_event(&event));
-  EXPECT_EQ(event.stored_cache.size(), 1u);
 }
 
 TEST(SingleBlockManagerTest, UsedBlocksAccountingDoesNotLeakWithAliases) {

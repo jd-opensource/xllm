@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ limitations under the License.
 #include <vector>
 
 #include "runtime/llm_worker_impl.h"
+#include "util/blockingconcurrentqueue.h"
 #include "util/rec_model_utils.h"
 #include "util/threadpool.h"
 

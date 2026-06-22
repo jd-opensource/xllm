@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -169,9 +169,6 @@ struct Options {
   PROPERTY(std::string, priority_strategy) = "fcfs";
 
   PROPERTY(bool, enable_online_preempt_offline) = true;
-
-  // enable kvcache upload to service.
-  PROPERTY(bool, enable_cache_upload) = false;
 
   // host block factor, e.g. host block num = host_blocks_factor * hbm block num
   PROPERTY(double, host_blocks_factor) = 0.0;

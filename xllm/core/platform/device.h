@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -41,16 +41,6 @@ class Device {
 
   void init_device_context() const;
 
-  static int device_count();
-  static std::string type_str();
-  static torch::DeviceType type_torch();
-  static int32_t sm_count();
-  static bool is_enable_pdl();
-  static bool is_support_sm90a();
-  static bool is_support_sm100a();
-  static bool is_support_sm100f();
-  static bool is_support_sm120a();
-
   int64_t total_memory();
   int64_t free_memory();
   static void empty_cache(int32_t device_index);
@@ -71,14 +61,6 @@ class Device {
 
  private:
   torch::Device device_;
-
-  // only used for cuda
-  static int32_t sm_count_;
-  static bool enable_pdl_;
-  static bool support_sm90a_;
-  static bool support_sm100a_;
-  static bool support_sm100f_;
-  static bool support_sm120a_;
 };
 
 }  // namespace xllm

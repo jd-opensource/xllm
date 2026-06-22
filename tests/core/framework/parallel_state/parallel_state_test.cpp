@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ limitations under the License.
 #include <vector>
 
 #include "platform/device.h"
+#include "platform/platform.h"
 
 #if defined(USE_MLU)
 #include "framework/parallel_state/mlu_process_group.h"
@@ -74,6 +75,16 @@ struct AllGatherBaseTestParams {
   int32_t device_index;
   int64_t input_size;
   int64_t hidden_dim;
+};
+
+struct BroadcastTestParams {
+  int32_t rank;
+  int32_t world_size;
+  int32_t port;
+  std::string host;
+  int32_t device_index;
+  int64_t numel;
+  int32_t root_rank;
 };
 // Child process test function
 int run_reduce_scatter_test_child(const TestParams& params) {
@@ -206,6 +217,52 @@ int run_reduce_scatter_test_child(const TestParams& params) {
   }
 }
 
+// Child process test function for broadcast.
+// Each rank seeds its tensor with a distinct value (rank + 1); after broadcast
+// from root_rank every rank must hold root_rank's value (root_rank + 1).
+// Verifies int64 dtype and a non-zero root_rank.
+int run_broadcast_test_child(const BroadcastTestParams& params) {
+  try {
+    xllm::Device xllm_device(params.device_index);
+    xllm_device.set_device();
+    torch::Device device = xllm_device.unwrap();
+
+    auto process_group = create_test_process_group(
+        params.rank, params.world_size, params.port, params.host, device);
+    if (!process_group) {
+      LOG(ERROR) << "Rank " << params.rank << ": Failed to create ProcessGroup";
+      return 1;
+    }
+
+    auto options = torch::TensorOptions()
+                       .dtype(torch::kInt64)
+                       .device(device)
+                       .requires_grad(false);
+    torch::Tensor input = torch::full(
+        {params.numel}, static_cast<int64_t>(params.rank + 1), options);
+
+    process_group->broadcast(input, params.root_rank);
+    xllm_device.synchronize_default_stream();
+
+    int64_t expected_value = static_cast<int64_t>(params.root_rank + 1);
+    torch::Tensor input_cpu = input.to(torch::kCPU);
+    auto values = input_cpu.accessor<int64_t, 1>();
+    for (int64_t i = 0; i < params.numel; ++i) {
+      if (values[i] != expected_value) {
+        LOG(ERROR) << "Rank " << params.rank << ": broadcast mismatch at [" << i
+                   << "]: expected=" << expected_value << ", got=" << values[i];
+        return 1;
+      }
+    }
+
+    LOG(INFO) << "Rank " << params.rank << ": broadcast test passed";
+    return 0;
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Rank " << params.rank << ": Exception: " << e.what();
+    return 1;
+  }
+}
+
 int run_allgather_base_test_child(const AllGatherBaseTestParams& params) {
   try {
     xllm::Device xllm_device(params.device_index);
@@ -324,7 +381,7 @@ class ReduceScatterMultiDeviceTest : public ::testing::Test {
         params.world_size = world_size_;
         params.port = port_;
         params.host = host_;
-        params.device_index = rank % Device::device_count();
+        params.device_index = rank % Platform::device_count();
         params.input_size = input_size;
         params.hidden_dim = hidden_dim_;
         params.test_padding = test_padding;
@@ -396,7 +453,7 @@ class AllGatherBaseMultiDeviceTest : public ::testing::Test {
         params.world_size = world_size_;
         params.port = port_;
         params.host = host_;
-        params.device_index = rank % Device::device_count();
+        params.device_index = rank % Platform::device_count();
         params.input_size = input_size;
         params.hidden_dim = hidden_dim;
         _exit(run_allgather_base_test_child(params));
@@ -439,6 +496,78 @@ class AllGatherBaseMultiDeviceTest : public ::testing::Test {
   int64_t input_size_ = 0;
   int64_t hidden_dim_ = 0;
 };
+class BroadcastMultiDeviceTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    world_size_ = 2;
+    port_ = 29551;
+    host_ = "127.0.0.1";
+    numel_ = 16;
+  }
+
+  void RunMultiProcessTest(int32_t root_rank) {
+    std::vector<pid_t> child_pids;
+    std::vector<int32_t> child_statuses(world_size_);
+
+    for (int32_t rank = 0; rank < world_size_; ++rank) {
+      pid_t pid = fork();
+      if (pid == 0) {
+        BroadcastTestParams params;
+        params.rank = rank;
+        params.world_size = world_size_;
+        params.port = port_;
+        params.host = host_;
+        params.device_index = rank % Device::device_count();
+        params.numel = numel_;
+        params.root_rank = root_rank;
+        _exit(run_broadcast_test_child(params));
+      } else if (pid > 0) {
+        child_pids.push_back(pid);
+      } else {
+        LOG(FATAL) << "Failed to fork child process for rank " << rank;
+      }
+    }
+
+    bool all_passed = true;
+    for (size_t i = 0; i < child_pids.size(); ++i) {
+      int status;
+      pid_t waited_pid = waitpid(child_pids[i], &status, 0);
+      if (waited_pid == child_pids[i]) {
+        if (WIFEXITED(status)) {
+          child_statuses[i] = WEXITSTATUS(status);
+          if (child_statuses[i] != 0) {
+            all_passed = false;
+            LOG(ERROR) << "Child process for rank " << i << " exited with code "
+                       << child_statuses[i];
+          }
+        } else {
+          all_passed = false;
+          LOG(ERROR) << "Child process for rank " << i
+                     << " did not exit normally";
+        }
+      } else {
+        all_passed = false;
+        LOG(ERROR) << "Failed to wait for child process for rank " << i;
+      }
+    }
+
+    CHECK(all_passed) << "One or more child processes failed";
+  }
+
+  int32_t world_size_ = 0;
+  int32_t port_ = 0;
+  std::string host_;
+  int64_t numel_ = 0;
+};
+
+TEST_F(BroadcastMultiDeviceTest, BroadcastFromRoot0) {
+  RunMultiProcessTest(/*root_rank=*/0);
+}
+
+TEST_F(BroadcastMultiDeviceTest, BroadcastFromNonZeroRoot) {
+  RunMultiProcessTest(/*root_rank=*/1);
+}
+
 TEST_F(ReduceScatterMultiDeviceTest, BasicTest) {
   // Test with input size divisible by world_size
   RunMultiProcessTest(8, false);
