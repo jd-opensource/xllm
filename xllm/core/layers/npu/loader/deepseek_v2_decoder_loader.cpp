@@ -56,6 +56,8 @@ DeekseekV2DecoderLoader::DeekseekV2DecoderLoader(
   auto model_args = context.get_model_args();
   auto options = context.get_tensor_options();
   enable_kimi_k25_moe_scale_dtype_fix_ = model_args.model_type() == "kimi_k25";
+  norm_has_bias_ = model_args.model_type() == "kimi_k2" ||
+                   model_args.model_type() == "kimi_k25";
 
   rank_ = parallel_args_.rank();
   first_k_dense_replace_ = model_args.first_k_dense_replace();
@@ -340,7 +342,8 @@ void DeekseekV2DecoderLoader::process_general_weights(
 
   correct_tensor_dtype(tmp_tensor, name);
   working_tensors()[index] = tmp_tensor;
-  if (layer_id_ != n_layers_ && absl::StrContains(name, "layernorm.weight")) {
+  if (norm_has_bias_ && layer_id_ != n_layers_ &&
+      absl::StrContains(name, "layernorm.weight")) {
     working_tensors()[index + 1] = torch::zeros_like(tmp_tensor);
   }
 }
