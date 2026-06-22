@@ -87,7 +87,7 @@ void SleepableRegion::map() {
     vmm::create_phy_mem_handle(handle, device_id_, chunk_bytes_);
     VirPtr addr = add_vir_ptr_offset(vaddr_, i * chunk_bytes_);
     vmm::map(addr, handle, chunk_bytes_, device_id_);
-    handles_.push_back(handle);
+    handles_.emplace_back(handle);
   }
   mapped_ = true;
 }
