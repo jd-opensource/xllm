@@ -22,7 +22,7 @@ limitations under the License.
 #include <cstdint>
 #include <optional>
 
-#include "kernels/dcu/dcu_ops_api.h"
+#include "core/kernels/dcu/dcu_ops_api.h"
 
 namespace xllm::kernel::dcu {
 namespace {

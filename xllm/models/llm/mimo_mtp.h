@@ -175,7 +175,9 @@ class MiMoMtpModelImpl final : public torch::nn::Module {
 
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < mtp_layers_.size(); i++) {
+#if defined(USE_CUDA)
       attn_metadata.plan_info->layer_id = static_cast<int32_t>(i);
+#endif
       auto& layer = mtp_layers_[i];
       hidden_states = layer(hidden_states,
                             residual,
