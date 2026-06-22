@@ -460,7 +460,7 @@ int run() {
   if (options.node_rank() != 0) {
     if (model_config.backend() == "dit") {
       master = std::make_unique<DiTAssistantMaster>(options);
-    } else if (FLAGS_backend == "vlm") {
+    } else if (model_config.backend() == "vlm") {
       master = std::make_unique<VLMAssistantMaster>(options);
     } else {
       master = std::make_unique<LLMAssistantMaster>(options);
@@ -470,7 +470,6 @@ int run() {
     master = create_master(model_config.backend(), options);
   }
   master->run();
-
   // supported models
   std::vector<std::string> model_names = {model_config.model_id()};
   std::string model_version = default_model_name;

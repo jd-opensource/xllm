@@ -42,6 +42,9 @@ class VLMWorkerImpl : public WorkerImpl {
   bool init_model(ModelContext& context) override;
 
   std::optional<ForwardOutput> step(const ForwardInput& input) override;
+  std::optional<ForwardOutput> execute_no_sync_on_stream(
+      const ForwardInput& input,
+      Stream& compute_stream) override;
 };
 
 }  // namespace xllm
