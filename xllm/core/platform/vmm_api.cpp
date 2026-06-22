@@ -183,7 +183,7 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle,
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device_id;
 
-  ret = hipMemCreate(&phy_mem_handle, size, &prop, 0);
+  ret = hipMemCreate(&phy_mem_handle, size, &prop, /*flags=*/0);
 #else
   (void)device_id;
   (void)size;
