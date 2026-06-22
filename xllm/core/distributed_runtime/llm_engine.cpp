@@ -40,7 +40,8 @@ limitations under the License.
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/service_config.h"
 #include "framework/block/block_utils.h"
-#include "framework/block/hierarchy_block_manager_pool.h"
+// hierarchy temporarily disabled during the block-manager refactor
+// #include "framework/block/hierarchy_block_manager_pool.h"
 #include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
@@ -509,7 +510,6 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
               ? false
               : options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_cache_upload(options_.enable_cache_upload())
       .enable_kvcache_store(options_.enable_kvcache_store())
       .enable_xtensor(::xllm::KVCacheConfig::get_instance().enable_xtensor())
       .num_layers(args_.n_layers())
@@ -561,11 +561,18 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   }
 
   if (options_.host_blocks_factor() > 1.0 || options_.enable_kvcache_store()) {
-    kv_cache_manager_ =
-        std::make_unique<HierarchyBlockManagerPool>(options, this, dp_size_);
-  } else {
-    kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
+    // hierarchy temporarily disabled during the block-manager refactor.
+    // host-offload / kvcache-store routes the device + host dual
+    // KVCacheState through HierarchyBlockManagerPool, which is parked while
+    // the composite block-manager refactor lands in smaller pieces. Until
+    // then this path fails loudly rather than silently degrading to a
+    // device-only pool.
+    LOG(FATAL) << "host-offload / kvcache-store is temporarily disabled during "
+                  "the block-manager refactor (hierarchy rebuild in progress). "
+                  "Please disable --host_blocks_factor and "
+                  "--enable_kvcache_store for now.";
   }
+  kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
 
   // init kv cache for each worker in parallel
   std::vector<folly::SemiFuture<bool>> futures;

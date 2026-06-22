@@ -21,7 +21,6 @@ limitations under the License.
 
 #include "block_manager_impl.h"
 #include "framework/block/block_utils.h"
-#include "framework/kv_cache/kv_cache_event.h"
 #include "sliding_window_block_manager.h"
 
 namespace xllm {
@@ -290,13 +289,6 @@ void CompositeBlockManager::cache(const Slice<int32_t>& /*token_ids*/,
 
 void CompositeBlockManager::cache(const std::vector<Block>& /*blocks*/) {
   // Prefix cache is not supported for CompositeBlockManager yet.
-}
-
-void CompositeBlockManager::get_merged_kvcache_event(
-    KvCacheEvent* event) const {
-  for (const auto& mgr : sub_managers_) {
-    mgr->get_merged_kvcache_event(event);
-  }
 }
 
 size_t CompositeBlockManager::num_blocks_in_prefix_cache() const {

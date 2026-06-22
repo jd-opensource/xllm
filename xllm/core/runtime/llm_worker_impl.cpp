@@ -176,9 +176,10 @@ LLMWorkerImpl::step_async_no_sync(const ForwardInput& input) {
   threadpool_.schedule([this,
                         input = std::move(input_on_device),
                         promise = std::move(promise)]() mutable {
-    if (hierarchy_kv_cache_transfer_ != nullptr) {
-      hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
-    }
+    // hierarchy temporarily disabled during the block-manager refactor
+    // if (hierarchy_kv_cache_transfer_ != nullptr) {
+    //   hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
+    // }
 
     const auto output = this->step_no_sync(input);
     promise.setValue(output);

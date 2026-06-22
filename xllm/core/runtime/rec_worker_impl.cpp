@@ -3168,10 +3168,11 @@ folly::SemiFuture<std::optional<ForwardOutput>> RecWorkerImpl::step_async(
         work_pipelines_[index]->prepare_work_before_execute(input,
                                                             input_on_device);
 
-        if (hierarchy_kv_cache_transfer_ != nullptr) {
-          hierarchy_kv_cache_transfer_->set_layer_synchronizer(
-              input_on_device.input_params);
-        }
+        // hierarchy temporarily disabled during the block-manager refactor
+        // if (hierarchy_kv_cache_transfer_ != nullptr) {
+        //   hierarchy_kv_cache_transfer_->set_layer_synchronizer(
+        //       input_on_device.input_params);
+        // }
 
         const auto output = work_pipelines_[index]->step(input_on_device);
         promise.setValue(output);

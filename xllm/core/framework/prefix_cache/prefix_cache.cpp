@@ -108,36 +108,6 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
                            size_t existed_shared_blocks_num,
                            const MMData& mm_data,
                            const Slice<XXH3Key>& block_hashes) {
-  std::vector<XXH3Key> insert_keys;
-  return insert(token_ids,
-                blocks,
-                existed_shared_blocks_num,
-                mm_data,
-                block_hashes,
-                &insert_keys);
-}
-
-size_t PrefixCache::insert(const std::vector<Block>& blocks) {
-  Slice<Block> slice(blocks);
-  return insert(slice);
-}
-
-size_t PrefixCache::insert(Slice<Block>& blocks) {
-  std::vector<XXH3Key> insert_keys;
-  return insert(blocks, &insert_keys);
-}
-
-size_t PrefixCache::evict(size_t n_blocks) {
-  std::vector<XXH3Key> evict_keys;
-  return evict(n_blocks, &evict_keys);
-}
-
-size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
-                           std::vector<Block>& blocks,
-                           size_t existed_shared_blocks_num,
-                           const MMData& mm_data,
-                           const Slice<XXH3Key>& block_hashes,
-                           std::vector<XXH3Key>* insert_keys) {
   const int64_t now = absl::ToUnixMicros(absl::Now());
   // allign tokens to block boundary
   const size_t n_blocks =
@@ -175,7 +145,6 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
         token_ids, i, i + block_size_, pre_hash_value, token_hash_key);
   };
 
-  insert_keys->reserve(n_blocks);
   for (size_t block_idx = existed_shared_blocks_num; block_idx < n_blocks;
        ++block_idx) {
     fill_block_hash(block_idx);
@@ -198,8 +167,6 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
       cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
 
       num_blocks_++;
-
-      insert_keys->emplace_back(token_hash_key.data);
     }
   }
 
@@ -212,13 +179,16 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
   return n_tokens;
 }
 
-size_t PrefixCache::insert(Slice<Block>& blocks,
-                           std::vector<XXH3Key>* insert_keys) {
+size_t PrefixCache::insert(const std::vector<Block>& blocks) {
+  Slice<Block> slice(blocks);
+  return insert(slice);
+}
+
+size_t PrefixCache::insert(Slice<Block>& blocks) {
   const int64_t now = absl::ToUnixMicros(absl::Now());
   DNodeList node_list;
   XXH3Key token_hash_key;
 
-  insert_keys->reserve(blocks.size());
   for (size_t i = 0; i < blocks.size(); i++) {
     if (!blocks[i].is_valid()) {
       continue;
@@ -242,8 +212,6 @@ size_t PrefixCache::insert(Slice<Block>& blocks,
       cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
 
       num_blocks_++;
-
-      insert_keys->emplace_back(token_hash_key.data);
     }
   }
 
@@ -255,14 +223,13 @@ size_t PrefixCache::insert(Slice<Block>& blocks,
   return blocks.size() * block_size_;
 }
 
-size_t PrefixCache::evict(size_t n_blocks, std::vector<XXH3Key>* evict_keys) {
+size_t PrefixCache::evict(size_t n_blocks) {
   if (num_blocks_ == 0 || lru_lst_.is_empty()) {
     return 0;
   }
 
   size_t evict_count = 0;
   Node* iter_node = lru_lst_.get_first();
-  evict_keys->reserve(n_blocks);
   while (evict_count < n_blocks) {
     if (lru_lst_.is_last(iter_node)) {
       break;
@@ -285,8 +252,6 @@ size_t PrefixCache::evict(size_t n_blocks, std::vector<XXH3Key>* evict_keys) {
     delete del_node;
     ++evict_count;
     --num_blocks_;
-
-    evict_keys->emplace_back(std::move(token_hash_key));
   }
 
   return evict_count;

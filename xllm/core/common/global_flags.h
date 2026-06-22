@@ -225,8 +225,6 @@ DECLARE_double(host_blocks_factor);
 
 DECLARE_bool(enable_kvcache_store);
 
-DECLARE_bool(enable_cache_upload);
-
 DECLARE_string(store_protocol);
 
 DECLARE_string(store_master_server_address);

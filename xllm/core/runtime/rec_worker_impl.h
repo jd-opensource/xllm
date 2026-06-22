@@ -24,6 +24,7 @@ limitations under the License.
 #include <vector>
 
 #include "runtime/llm_worker_impl.h"
+#include "util/blockingconcurrentqueue.h"
 #include "util/rec_model_utils.h"
 #include "util/threadpool.h"
 

@@ -35,11 +35,6 @@ DEFINE_double(host_blocks_factor,
 
 DEFINE_bool(enable_kvcache_store, false, "Whether to use kvcache store.");
 
-DEFINE_bool(enable_cache_upload,
-            false,
-            "Whether to upload cache info to service. This feature is only "
-            "available when service routing is enabled.");
-
 DEFINE_string(store_protocol,
               "tcp",
               "KV cache store protocol(e.g. tcp, rdma).");
@@ -68,7 +63,6 @@ void KVCacheStoreConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(layers_wise_copy_batchs);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(host_blocks_factor);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_kvcache_store);
-  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_cache_upload);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(store_protocol);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(store_master_server_address);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(store_metadata_server);
@@ -82,7 +76,6 @@ void KVCacheStoreConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(layers_wise_copy_batchs);
   XLLM_CONFIG_ASSIGN_FROM_JSON(host_blocks_factor);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_kvcache_store);
-  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_cache_upload);
   XLLM_CONFIG_ASSIGN_FROM_JSON(store_protocol);
   XLLM_CONFIG_ASSIGN_FROM_JSON(store_master_server_address);
   XLLM_CONFIG_ASSIGN_FROM_JSON(store_metadata_server);
@@ -103,8 +96,6 @@ void KVCacheStoreConfig::append_config_json(
       config_json, default_config, host_blocks_factor);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_kvcache_store);
-  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
-      config_json, default_config, enable_cache_upload);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, store_protocol);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

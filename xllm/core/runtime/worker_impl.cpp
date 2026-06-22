@@ -352,7 +352,8 @@ bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
     return false;
   }
 
-  init_hierarchy_kv_cache_transfer();
+  // hierarchy temporarily disabled during the block-manager refactor
+  // init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
   return true;
 }
@@ -382,7 +383,8 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       context_.get_model_args().model_type(),
       options_.model_id());
 
-  init_hierarchy_kv_cache_transfer();
+  // hierarchy temporarily disabled during the block-manager refactor
+  // init_hierarchy_kv_cache_transfer();
 
   status_ = Status::READY;
   return true;
@@ -414,7 +416,8 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
 #endif
 
-  init_hierarchy_kv_cache_transfer();
+  // hierarchy temporarily disabled during the block-manager refactor
+  // init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
   return true;
 }
@@ -1024,9 +1027,10 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
   threadpool_.schedule([this,
                         input = std::move(input_on_device),
                         promise = std::move(promise)]() mutable {
-    if (hierarchy_kv_cache_transfer_ != nullptr) {
-      hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
-    }
+    // hierarchy temporarily disabled during the block-manager refactor
+    // if (hierarchy_kv_cache_transfer_ != nullptr) {
+    //   hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
+    // }
 
     // run the model on the given input in working thread
     if (!enable_schedule_overlap()) {
@@ -1507,17 +1511,21 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
 }
 
 uint32_t WorkerImpl::transfer_kv_blocks(
-    const uint64_t batch_id,
-    const std::vector<BlockTransferInfo>& block_transfer_info) {
-  return hierarchy_kv_cache_transfer_->transfer_kv_blocks(
-      batch_id, std::move(block_transfer_info));
+    const uint64_t /*batch_id*/,
+    const std::vector<BlockTransferInfo>& /*block_transfer_info*/) {
+  // hierarchy temporarily disabled during the block-manager refactor.
+  LOG(FATAL) << "hierarchy kv cache transfer is disabled during the "
+                "block-manager refactor.";
+  return 0;
 }
 
 uint32_t WorkerImpl::transfer_kv_blocks(
-    const uint64_t batch_id,
-    Slice<BlockTransferInfo>& block_transfer_info) {
-  return hierarchy_kv_cache_transfer_->transfer_kv_blocks(batch_id,
-                                                          block_transfer_info);
+    const uint64_t /*batch_id*/,
+    Slice<BlockTransferInfo>& /*block_transfer_info*/) {
+  // hierarchy temporarily disabled during the block-manager refactor.
+  LOG(FATAL) << "hierarchy kv cache transfer is disabled during the "
+                "block-manager refactor.";
+  return 0;
 }
 
 int64_t WorkerImpl::get_active_activation_memory() {
@@ -1526,25 +1534,27 @@ int64_t WorkerImpl::get_active_activation_memory() {
       .active_activation_memory;
 }
 
-void WorkerImpl::init_hierarchy_kv_cache_transfer() {
-  if (options_.host_blocks_factor() > 1 || options_.enable_kvcache_store()) {
-    HierarchyKVCacheTransfer::Options transfer_options;
-    transfer_options
-        .tp_rank(options_.dp_size() > 1
-                     ? options_.node_rank() % options_.dp_size()
-                     : options_.node_rank())
-        .layers(context_.get_model_args().n_layers())
-        .host_blocks_factor(options_.host_blocks_factor())
-        .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
-        .enable_kvcache_store(options_.enable_kvcache_store())
-        .store_protocol(options_.store_protocol())
-        .store_master_server_address(options_.store_master_server_address())
-        .store_metadata_server(options_.store_metadata_server())
-        .store_local_hostname(options_.store_local_hostname());
-    hierarchy_kv_cache_transfer_ = std::make_unique<HierarchyKVCacheTransfer>(
-        transfer_options, device_, &kv_caches_);
-  }
-}
+// hierarchy temporarily disabled during the block-manager refactor
+// void WorkerImpl::init_hierarchy_kv_cache_transfer() {
+//   if (options_.host_blocks_factor() > 1 || options_.enable_kvcache_store()) {
+//     HierarchyKVCacheTransfer::Options transfer_options;
+//     transfer_options
+//         .tp_rank(options_.dp_size() > 1
+//                      ? options_.node_rank() % options_.dp_size()
+//                      : options_.node_rank())
+//         .layers(context_.get_model_args().n_layers())
+//         .host_blocks_factor(options_.host_blocks_factor())
+//         .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
+//         .enable_kvcache_store(options_.enable_kvcache_store())
+//         .store_protocol(options_.store_protocol())
+//         .store_master_server_address(options_.store_master_server_address())
+//         .store_metadata_server(options_.store_metadata_server())
+//         .store_local_hostname(options_.store_local_hostname());
+//     hierarchy_kv_cache_transfer_ =
+//     std::make_unique<HierarchyKVCacheTransfer>(
+//         transfer_options, device_, &kv_caches_);
+//   }
+// }
 void WorkerImpl::prepare_mla_prefixcache_inputs(
     ModelInputParams& input_params) {
   int32_t sum_prefix =

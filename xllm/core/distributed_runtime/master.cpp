@@ -227,9 +227,6 @@ Master::Master(const Options& options, EngineType type)
   }
 
   if (type == EngineType::VLM) {
-    CHECK(!(options.enable_prefix_cache() && options.enable_cache_upload()))
-        << "VLM prefix cache does not support cache upload yet.";
-
     runtime::Options eng_options;
     eng_options.model_path(options_.model_path())
         .devices(devices)
@@ -326,7 +323,6 @@ Master::Master(const Options& options, EngineType type)
         .enable_disagg_pd(options_.enable_disagg_pd())
         .enable_service_routing(options_.enable_service_routing())
         .enable_schedule_overlap(options_.enable_schedule_overlap())
-        .enable_cache_upload(options_.enable_cache_upload())
         .enable_offline_inference(options_.enable_offline_inference())
         .disable_log_stats(options_.disable_log_stats())
         .spawn_worker_path(options_.spawn_worker_path())
@@ -381,7 +377,6 @@ Master::Master(const Options& options, EngineType type)
         .enable_disagg_pd(options_.enable_disagg_pd())
         .enable_service_routing(options_.enable_service_routing())
         .enable_schedule_overlap(options_.enable_schedule_overlap())
-        .enable_cache_upload(options_.enable_cache_upload())
         .host_blocks_factor(options_.host_blocks_factor())
         .enable_kvcache_store(options_.enable_kvcache_store())
         .store_protocol(options_.store_protocol())

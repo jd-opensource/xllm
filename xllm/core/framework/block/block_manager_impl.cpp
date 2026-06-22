@@ -53,7 +53,6 @@ BlockManagerImpl::BlockManagerImpl(const Options& options)
   if (options_.enable_prefix_cache()) {
     PrefixCache::Options prefix_cache_options;
     prefix_cache_options.block_size(options.block_size())
-        .enable_cache_upload(options.enable_cache_upload())
         .hasher_type(options.hasher_type());
     prefix_cache_ = create_prefix_cache(prefix_cache_options);
     CHECK(prefix_cache_) << "Failed to create prefix cache!";
@@ -202,15 +201,6 @@ void BlockManagerImpl::cache(const std::vector<Block>& blocks) {
     AUTO_COUNTER(prefix_cache_latency_seconds_insert);
     // Add the kv cache to the prefix cache
     prefix_cache_->insert(blocks);
-  }
-}
-
-void BlockManagerImpl::get_merged_kvcache_event(KvCacheEvent* event) const {
-  auto events = prefix_cache_->get_upload_kvcache_events();
-  if (events != nullptr) {
-    event->removed_cache.merge(events->removed_cache);
-    event->stored_cache.merge(events->stored_cache);
-    events->clear();
   }
 }
 

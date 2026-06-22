@@ -31,7 +31,6 @@ limitations under the License.
 #include "common/types.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "framework/block/block.h"
-#include "framework/kv_cache/kv_cache_event.h"
 #include "util/hash_util.h"
 #include "util/slice.h"
 #include "util/threadpool.h"
@@ -46,7 +45,6 @@ class PrefixCache {
  public:
   struct Options {
     PROPERTY(int32_t, block_size) = 128;
-    PROPERTY(bool, enable_cache_upload) = false;
     PROPERTY(BlockHasherType, hasher_type) = BlockHasherType::TEXT;
   };
 
@@ -107,24 +105,11 @@ class PrefixCache {
     }
   }
 
-  virtual KvCacheEvent* get_upload_kvcache_events() { return nullptr; }
-
   static uint32_t compute_hash_keys(const Slice<int32_t>& token_ids,
                                     std::vector<Block>& blocks,
                                     const size_t cached_blocks = 0);
 
  protected:
-  virtual size_t insert(const Slice<int32_t>& token_ids,
-                        std::vector<Block>& blocks,
-                        size_t existed_shared_blocks_num,
-                        const MMData& mm_data,
-                        const Slice<XXH3Key>& block_hashes,
-                        std::vector<XXH3Key>* insert_keys);
-
-  size_t insert(Slice<Block>& blocks, std::vector<XXH3Key>* insert_keys);
-
-  size_t evict(size_t n_blocks, std::vector<XXH3Key>* evict_keys);
-
   struct Node {
     Block block;
     // the last access time of the node, used to evict blocks

@@ -28,7 +28,6 @@ BlockManager::Options make_single_block_options(uint32_t num_blocks) {
   options.block_size(/*unused=*/1);
   options.enable_prefix_cache(false);
   options.enable_disagg_pd(false);
-  options.enable_cache_upload(false);
   return options;
 }
 
@@ -155,11 +154,6 @@ void SingleBlockManager::cache(const Slice<int32_t>& /*token_ids*/,
 }
 
 void SingleBlockManager::cache(const std::vector<Block>& /*blocks*/) {
-  // Prefix cache is disabled in this manager: no-op.
-}
-
-void SingleBlockManager::get_merged_kvcache_event(
-    KvCacheEvent* /*event*/) const {
   // Prefix cache is disabled in this manager: no-op.
 }
 
