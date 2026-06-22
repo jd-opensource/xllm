@@ -17,7 +17,9 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <functional>
 #include <map>
+#include <numeric>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -39,6 +41,7 @@ limitations under the License.
 #include "framework/kv_cache/quantized_kv_cache_impl.h"
 #include "framework/xtensor/xtensor_allocator.h"
 #include "platform/sleepable_allocator.h"
+#include "util/tensor_helper.h"
 #include "util/utils.h"
 
 namespace xllm {
@@ -90,45 +93,6 @@ std::string int32_vector_string(const std::vector<int32_t>& values) {
   return oss.str();
 }
 
-size_t numel_of(const std::vector<int64_t>& shape) {
-  size_t n = 1;
-  for (int64_t d : shape) {
-    n *= static_cast<size_t>(d);
-  }
-  return n;
-}
-
-// Wrap a raw device address (inside a SleepableAllocator region) as a
-// torch::Tensor with the given shape/dtype, without owning the memory. Mirrors
-// XTensor's NPU storage construction; falls back to from_blob elsewhere.
-torch::Tensor make_region_tensor(void* addr,
-                                 const std::vector<int64_t>& dims,
-                                 torch::ScalarType dtype,
-                                 const torch::Device& device) {
-#if defined(USE_NPU)
-  c10::DeviceType device_type = c10::DeviceType::PrivateUse1;
-  torch::TensorOptions option =
-      torch::TensorOptions().dtype(dtype).device(device_type);
-  auto tensor = torch::empty({0}, option);
-  torch::DataPtr c10_data_ptr(addr, addr, [](void*) {}, tensor.device());
-  size_t nbytes = at::detail::computeStorageNbytesContiguous(
-      dims, tensor.dtype().itemsize());
-  auto fptr = c10::GetStorageImplCreate(device_type);
-  auto allocator = c10::GetAllocator(device_type);
-  torch::Storage storage = fptr(c10::StorageImpl::use_byte_size_t(),
-                                c10::SymInt(static_cast<int64_t>(nbytes)),
-                                std::move(c10_data_ptr),
-                                allocator,
-                                true);
-  tensor.set_(storage, 0, dims);
-  return tensor;
-#else
-  auto options =
-      torch::TensorOptions().dtype(dtype).device(device).requires_grad(false);
-  return torch::from_blob(addr, dims, options);
-#endif
-}
-
 // Allocate standard key/value KV cache for all layers on a single VMM-backed
 // SleepableAllocator region (RL deep-sleep mode). Each layer's K/V tensor is a
 // view into the region at aligned offsets, so sleep()/wake_up() release and
@@ -155,6 +119,10 @@ void allocate_sleepable_kv_caches(std::vector<KVCache>& kv_caches,
   const std::vector<int64_t>& v_shape = kv_cache_shape.value_cache_shape();
   const size_t elt_size = torch::elementSize(create_options.dtype());
 
+  auto numel_of = [](const std::vector<int64_t>& shape) {
+    return std::accumulate(
+        shape.begin(), shape.end(), int64_t{1}, std::multiplies<int64_t>());
+  };
   constexpr size_t kTensorAlign = 512;
   auto align_up = [](size_t v, size_t a) { return (v + a - 1) / a * a; };
   const size_t k_stride = align_up(numel_of(k_shape) * elt_size, kTensorAlign);
@@ -162,20 +130,20 @@ void allocate_sleepable_kv_caches(std::vector<KVCache>& kv_caches,
   const size_t total_bytes =
       (k_stride + v_stride) * static_cast<size_t>(num_layers);
 
+  // Map the (large) KV region in 1 GiB physical chunks rather than a single
+  // huge handle: a single multi-GiB aclrtMallocPhysical is more failure-prone
+  // under HBM fragmentation than several smaller chunks.
+  constexpr size_t kKvChunkBytes = 1ULL << 30;  // 1 GiB
   void* base = SleepableAllocator::get_instance().reserve_and_map(
-      MemTag::KV_CACHE, create_options.device(), total_bytes);
+      MemTag::KV_CACHE, create_options.device(), total_bytes, kKvChunkBytes);
 
   uintptr_t addr = reinterpret_cast<uintptr_t>(base);
   for (int64_t layer_idx = 0; layer_idx < num_layers; ++layer_idx) {
-    torch::Tensor k_tensor = make_region_tensor(reinterpret_cast<void*>(addr),
-                                                k_shape,
-                                                create_options.dtype(),
-                                                create_options.device());
+    torch::Tensor k_tensor = get_tensor_from_blob(
+        k_shape, create_options.dtype(), reinterpret_cast<void*>(addr));
     addr += k_stride;
-    torch::Tensor v_tensor = make_region_tensor(reinterpret_cast<void*>(addr),
-                                                v_shape,
-                                                create_options.dtype(),
-                                                create_options.device());
+    torch::Tensor v_tensor = get_tensor_from_blob(
+        v_shape, create_options.dtype(), reinterpret_cast<void*>(addr));
     addr += v_stride;
 #if defined(USE_NPU)
     k_tensor = at_npu::native::npu_format_cast(k_tensor, ACL_FORMAT_ND);

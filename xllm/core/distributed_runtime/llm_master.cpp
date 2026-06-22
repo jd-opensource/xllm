@@ -544,7 +544,14 @@ bool LLMMaster::sleep() { return engine_->sleep(master_status_); }
 bool LLMMaster::wakeup() {
   WakeupOptions options;
   options.master_status = master_status_;
-  return engine_->wakeup(options);
+  const bool ok = engine_->wakeup(options);
+  // RL deep sleep discards the KV cache; on wake the physical memory is
+  // re-mapped but its contents are garbage. Drop all prefix-cache entries so a
+  // subsequent request never reuses a stale (now-garbage) cached prefix.
+  if (ok && options_.enable_sleep_mode() && scheduler_ != nullptr) {
+    scheduler_->reset_prefix_cache();
+  }
+  return ok;
 }
 
 bool LLMMaster::wakeup(const WakeupOptions& options) {

@@ -211,6 +211,8 @@ class ContinuousScheduler : public Scheduler {
   };
 
   // Pause the scheduler. See PauseMode for in-flight request handling.
+  void reset_prefix_cache() override;
+
   void pause(PauseMode mode = PauseMode::KEEP);
 
   // Block until the scheduler has fully transitioned to PAUSED (i.e. running

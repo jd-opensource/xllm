@@ -91,6 +91,7 @@ class BlockManagerPool : public KVCacheManager {
 
   virtual uint32_t num_blocks() const override;
   virtual int32_t block_size() const override;
+  void reset_prefix_cache() override;
   virtual std::vector<size_t> num_blocks_in_prefix_cache() const override;
   virtual std::vector<size_t> num_free_blocks() const override;
   virtual std::vector<size_t> num_used_blocks() const override;

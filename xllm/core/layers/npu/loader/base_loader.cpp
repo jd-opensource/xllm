@@ -423,12 +423,21 @@ void BaseLoader::allocate_device_storage() {
   // it.
   if (SleepableAllocator::get_instance().weights_enabled()) {
     if (device_storage_ != nullptr) {
+      // Reload (update_weights) reuses the region re-mapped by wake_up(). The
+      // new weight layout must fit the originally reserved region, otherwise
+      // copy_weights_to_device would overflow it.
+      CHECK_LE(storage_size_, sleep_region_size_)
+          << "update_weights weight layout (" << storage_size_
+          << " B) exceeds the reserved sleep region (" << sleep_region_size_
+          << " B); reloading a larger/different model is not supported in "
+             "sleep mode.";
       return;
     }
     device_storage_ = SleepableAllocator::get_instance().reserve_and_map(
         MemTag::WEIGHTS, device_, static_cast<size_t>(storage_size_));
     CHECK(device_storage_ != nullptr)
         << "SleepableAllocator::reserve_and_map failed, size=" << storage_size_;
+    sleep_region_size_ = storage_size_;
     return;
   }
   if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {

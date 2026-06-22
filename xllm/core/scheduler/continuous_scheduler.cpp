@@ -1616,6 +1616,12 @@ bool ContinuousScheduler::try_complete_pause() {
 }
 
 // ============== Async RL training support: Pause/Resume ==============
+void ContinuousScheduler::reset_prefix_cache() {
+  if (kv_cache_manager_ != nullptr) {
+    kv_cache_manager_->reset_prefix_cache();
+  }
+}
+
 void ContinuousScheduler::pause(PauseMode mode) {
   const char* mode_str = mode == PauseMode::KEEP    ? "KEEP"
                          : mode == PauseMode::ABORT ? "ABORT"

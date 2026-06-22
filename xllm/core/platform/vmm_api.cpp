@@ -86,56 +86,12 @@ size_t get_recommended_granularity(int32_t device_id) {
 }
 
 void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
-  int ret = 0;
+  // Allocate a single granularity-sized (e.g. 2MB) physical page. This is the
+  // xtensor page-allocator path: it delegates the actual allocation to the
+  // size-aware overload and additionally records the granularity in the global
+  // KV cache config (used by the per-page map()/unmap() of that path).
   const size_t granularity_size = get_recommended_granularity(device_id);
-#if defined(USE_NPU)
-  aclrtPhysicalMemProp prop = {};
-  prop.handleType = ACL_MEM_HANDLE_TYPE_NONE;
-  prop.allocationType = ACL_MEM_ALLOCATION_TYPE_PINNED;
-  prop.memAttr = ACL_HBM_MEM_HUGE;  // 2MB
-  prop.location.type = ACL_MEM_LOCATION_TYPE_DEVICE;
-  prop.location.id = device_id;
-  prop.reserve = 0;
-
-  ret = aclrtMallocPhysical(&phy_mem_handle, granularity_size, &prop, 0);
-#elif defined(USE_MLU)
-  CNmemAllocationProp prop = {};
-  // The memory allocation type requested, which must be
-  // CN_MEM_ALLOCATION_TYPE_DEFAULT currently according to cndrv developer
-  // guide.
-  prop.type =
-      CN_MEM_ALLOCATION_TYPE_DEFAULT;  //  same as CU_MEM_ALLOCATION_TYPE_PINNED
-                                       //  in CUDA
-  prop.location.type = CN_MEM_LOCATION_TYPE_DEVICE;
-  prop.location.id = device_id;
-  prop.requestedHandleTypes = CN_MEM_HANDLE_TYPE_NONE;
-  prop.allocFlags.compressionType = CN_MEM_ALLOCATION_COMP_NONE;
-
-  ret = cnMemCreate(&phy_mem_handle, granularity_size, &prop, 0);
-
-  CNmemAccessDesc accessDesc = {};
-  accessDesc.location.type = CN_MEM_LOCATION_TYPE_DEVICE;
-  accessDesc.location.id = device_id;
-  accessDesc.accessFlags = CN_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  ret = cnMemSetAccess(phy_mem_handle, granularity_size, &accessDesc, 1);
-#elif defined(USE_CUDA) || defined(USE_ILU)
-  CUmemAllocationProp prop = {};
-  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-  prop.location.id = device_id;
-
-  // Now create physical memory with the correct granularity size
-  ret = cuMemCreate(&phy_mem_handle, granularity_size, &prop, 0);
-  // Note: cuMemSetAccess is called in map() after cuMemMap, not here
-#elif defined(USE_DCU)
-  hipMemAllocationProp prop = {};
-  prop.type = hipMemAllocationTypePinned;
-  prop.location.type = hipMemLocationTypeDevice;
-  prop.location.id = device_id;
-
-  ret = hipMemCreate(&phy_mem_handle, granularity_size, &prop, 0);
-#endif
-  CHECK_EQ(ret, 0) << "Failed to create physical memory handle";
+  create_phy_mem_handle(phy_mem_handle, device_id, granularity_size);
   ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size(
       granularity_size);
 }
