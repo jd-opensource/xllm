@@ -567,7 +567,7 @@ struct AttentionInput {
         continue;
       }
       const void* ptr = device_base + entry.offset;
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_DCU)
       if (target_device.type() == torch::kCUDA) {
         *entry.target = get_tensor_from_blob(
             entry.sizes, entry.dtype, ptr, attention_device_buffer);

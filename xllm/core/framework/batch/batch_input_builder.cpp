@@ -856,7 +856,8 @@ void BatchInputBuilder::padding_decode_batch_size(
 #if defined(USE_NPU) || defined(USE_MUSA)
         state_.seq_lens.push_back(num_decoding_tokens);
         state_.q_seq_lens.push_back(num_decoding_tokens);
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
+    defined(USE_DCU)
         state_.seq_lens.push_back(state_.seq_lens.back() + num_decoding_tokens);
         state_.q_seq_lens.push_back(state_.q_seq_lens.back() +
                                     num_decoding_tokens);

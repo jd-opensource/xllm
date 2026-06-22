@@ -149,7 +149,7 @@ struct ForwardInputBufferPlan {
         continue;
       }
       const void* ptr = base + entry.offset;
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_DCU)
       if (device.type() == torch::kCUDA) {
         *entry.target = get_tensor_from_blob(entry.host_tensor.sizes().vec(),
                                              entry.host_tensor.scalar_type(),
