@@ -100,11 +100,18 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle,
                            int32_t device_id,
                            size_t size) {
   // `size` is the total bytes of one physical handle (e.g. a 1GiB region
-  // chunk), not a single page. The caller must pass a size that is a multiple
-  // of the device allocation granularity (SleepableRegion aligns to
-  // get_recommended_granularity()); on NPU the driver additionally rounds up to
-  // the page granularity implied by memAttr.
+  // chunk), not a single page. It must be a multiple of the device allocation
+  // granularity (SleepableRegion aligns to get_recommended_granularity()); on
+  // NPU the driver additionally rounds up to the page granularity implied by
+  // memAttr.
   CHECK_GT(size, 0u) << "physical memory handle size must be > 0";
+  const size_t granularity = get_recommended_granularity(device_id);
+  if (granularity > 0) {
+    CHECK_EQ(size % granularity, 0u)
+        << "physical memory handle size " << size
+        << " must be aligned (rounded up) to the device allocation granularity "
+        << granularity;
+  }
   int32_t ret = 0;
 #if defined(USE_NPU)
   aclrtPhysicalMemProp prop = {};
