@@ -168,7 +168,7 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle,
   accessDesc.location.type = CN_MEM_LOCATION_TYPE_DEVICE;
   accessDesc.location.id = device_id;
   accessDesc.accessFlags = CN_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  ret = cnMemSetAccess(phy_mem_handle, size, &accessDesc, 1);
+  ret = cnMemSetAccess(phy_mem_handle, size, &accessDesc, /*count=*/1);
 #elif defined(USE_CUDA) || defined(USE_ILU)
   CUmemAllocationProp prop = {};
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
