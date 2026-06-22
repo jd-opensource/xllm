@@ -107,7 +107,10 @@ void ModelContext::derive_optimization_config() {
   optimization_config_.enable_spec_token_broadcast = false;
 
   // determine whether to enable fused kernel based on backend
-  if (Platform::is_mlu()) {
+  if (Platform::is_dcu()) {
+    // DCU currently uses the unfused speculative sampling path.
+    optimization_config_.enable_fused_spec_kernel = false;
+  } else if (Platform::is_mlu()) {
     // TODO: enable fused spec kernel for mlu backend
     // The current implementation of fused spec kernel is not stable.
     optimization_config_.enable_fused_spec_kernel = false;

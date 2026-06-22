@@ -793,6 +793,16 @@ torch::Tensor rejection_sample(RejectionSampleParams& params) {
                                params.uniform_rand,
                                params.uniform_probs,
                                params.max_spec_len);
+#elif defined(USE_DCU)
+  return dcu::rejection_sample(params.draft_token_ids,
+                               params.num_draft_tokens,
+                               params.cu_num_draft_tokens,
+                               params.draft_probs,
+                               params.target_probs,
+                               params.bonus_token_ids,
+                               params.uniform_rand,
+                               params.uniform_probs,
+                               params.max_spec_len);
 #else
   NOT_IMPLEMENTED();
 #endif
