@@ -99,12 +99,22 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
 void create_phy_mem_handle(PhyMemHandle& phy_mem_handle,
                            int32_t device_id,
                            size_t size) {
+  // `size` is the total bytes of one physical handle (e.g. a 1GiB region
+  // chunk), not a single page. The caller must pass a size that is a multiple
+  // of the device allocation granularity (SleepableRegion aligns to
+  // get_recommended_granularity()); on NPU the driver additionally rounds up to
+  // the page granularity implied by memAttr.
+  CHECK_GT(size, 0u) << "physical memory handle size must be > 0";
   int32_t ret = 0;
 #if defined(USE_NPU)
   aclrtPhysicalMemProp prop = {};
   prop.handleType = ACL_MEM_HANDLE_TYPE_NONE;
   prop.allocationType = ACL_MEM_ALLOCATION_TYPE_PINNED;
-  prop.memAttr = ACL_HBM_MEM_HUGE;  // 2MB
+  // 2MB-granularity huge pages. This backs an arbitrary-size allocation (a
+  // multi-GiB chunk uses multiple 2MB pages). ACL_HBM_MEM_HUGE1G (1GiB pages,
+  // fewer page-table entries / better TLB) is only available on A2/A3, so we
+  // keep the portable 2MB option, consistent with the xtensor KV path.
+  prop.memAttr = ACL_HBM_MEM_HUGE;
   prop.location.type = ACL_MEM_LOCATION_TYPE_DEVICE;
   prop.location.id = device_id;
   prop.reserve = 0;
@@ -277,29 +287,26 @@ void unmap(VirPtr& vir_ptr, size_t aligned_size) {
   int ret = 0;
   ret = hipMemUnmap(vir_ptr, aligned_size);
   CHECK_EQ(ret, 0) << "Failed to unmap virtual memory from physical memory";
+#elif defined(USE_MUSA)
+  int ret = 0;
+  ret = muMemUnmap(vir_ptr, aligned_size);
+  CHECK_EQ(ret, 0) << "Failed to unmap virtual memory from physical memory";
 #endif
 }
 
 void unmap_chunk(VirPtr& vir_ptr, size_t size) {
-  int32_t ret = 0;
 #if defined(USE_NPU)
-  // The chunk was mapped by a single aclrtMapMem covering `size`, so a single
-  // aclrtUnmapMem at the base address unmaps the whole chunk.
+  // NPU: the chunk was mapped by a single aclrtMapMem covering `size`, so one
+  // aclrtUnmapMem at the base address unmaps the whole chunk (unlike unmap(),
+  // which unmaps per 2MB page as mapped by the xtensor path).
   (void)size;
-  ret = aclrtUnmapMem(reinterpret_cast<void*>(vir_ptr));
-#elif defined(USE_MLU)
-  ret = cnMemUnmap(vir_ptr, size);
-#elif defined(USE_CUDA) || defined(USE_ILU)
-  ret = cuMemUnmap(vir_ptr, size);
-#elif defined(USE_DCU)
-  ret = hipMemUnmap(vir_ptr, size);
-#elif defined(USE_MUSA)
-  ret = muMemUnmap(vir_ptr, size);
-#else
-  (void)vir_ptr;
-  (void)size;
-#endif
+  int32_t ret = aclrtUnmapMem(reinterpret_cast<void*>(vir_ptr));
   CHECK_EQ(ret, 0) << "Failed to unmap virtual memory chunk";
+#else
+  // Other backends unmap the whole [vir_ptr, vir_ptr + size) range in a single
+  // driver call, identical to unmap(); reuse it.
+  unmap(vir_ptr, size);
+#endif
 }
 
 }  // namespace vmm
