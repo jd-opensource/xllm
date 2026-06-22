@@ -225,6 +225,20 @@ class WorkerImpl {
 
   bool wakeup_local(const WakeupOptions& options);
 
+  // ---- RL deep-sleep path (SleepableAllocator), isolated from the xtensor
+  // ---- (PageAllocator) sleep/wakeup path. ----
+  // True when this worker uses the RL SleepableAllocator path rather than the
+  // xtensor PageAllocator path.
+  bool rl_sleep_mode() const;
+  // Enable manual-loader weight routing into the SleepableAllocator. Called
+  // once during init_model before the layers are constructed.
+  void setup_rl_sleep_weights();
+  // Deep sleep / wake the SleepableAllocator regions (weights + KV).
+  bool rl_sleep();
+  bool rl_wakeup();
+  // Original xtensor (PageAllocator) sleep path.
+  bool xtensor_sleep(MasterStatus master_status);
+
 #if defined(USE_CUDA) || defined(USE_DCU)
   void refresh_cuda_block_copy_runtime_state();
   bool can_use_cuda_block_copy_kernel(

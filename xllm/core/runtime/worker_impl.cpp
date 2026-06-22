@@ -1114,20 +1114,43 @@ folly::SemiFuture<bool> WorkerImpl::init_model_async(
   return future;
 }
 
-bool WorkerImpl::sleep(MasterStatus master_status) {
-  // RL sleep mode: deep sleep only -- release physical HBM (weights + KV) via
-  // the VMM-backed SleepableAllocator. Contents are discarded; weights are
-  // re-loaded and KV is re-prefilled after wakeup.
-  if (options_.enable_sleep_mode() &&
-      !::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
-    SleepableAllocator::get_instance().sleep();
-    // Also release the default caching allocator's reserved (but free) blocks,
-    // e.g. memory left cached from profiling/warmup activation tensors, so the
-    // sleep actually returns the maximum amount of HBM to the driver.
-    Device::empty_cache(device_.index());
-    return true;
-  }
+bool WorkerImpl::rl_sleep_mode() const {
+  return options_.enable_sleep_mode() &&
+         !::xllm::KVCacheConfig::get_instance().enable_xtensor();
+}
 
+void WorkerImpl::setup_rl_sleep_weights() {
+  // Route each decoder layer's contiguous weight buffer (manual loader) into a
+  // VMM-backed SleepableAllocator region so rl_sleep() can release the weight
+  // HBM. Must run before the layers are constructed (loader mode is chosen in
+  // the layer ctor) and before weights are loaded.
+  if (!rl_sleep_mode()) {
+    return;
+  }
+  ::xllm::LoadConfig::get_instance().enable_manual_loader(/*enable=*/true);
+  SleepableAllocator::get_instance().set_weights_enabled(/*enabled=*/true);
+}
+
+bool WorkerImpl::rl_sleep() {
+  // Deep sleep only: release physical HBM (weights + KV) via the VMM-backed
+  // SleepableAllocator. Contents are discarded; weights are re-loaded and KV is
+  // re-prefilled after wakeup.
+  SleepableAllocator::get_instance().sleep();
+  // Also release the default caching allocator's reserved (but free) blocks,
+  // e.g. memory left cached from profiling/warmup activation tensors, so the
+  // sleep actually returns the maximum amount of HBM to the driver.
+  Device::empty_cache(device_.index());
+  return true;
+}
+
+bool WorkerImpl::rl_wakeup() {
+  // Re-acquire physical HBM via the SleepableAllocator. v1 does a full wake
+  // (weights + kv_cache); tag-based partial wake is a follow-up.
+  SleepableAllocator::get_instance().wake_up(/*tags=*/{});
+  return true;
+}
+
+bool WorkerImpl::xtensor_sleep(MasterStatus master_status) {
   // The memory for kvcache and model weights from hbm is released by xtensor;
   if (master_status == MasterStatus::LIGHT_SLEEP) {
     // only load model weights to host memory.
@@ -1137,8 +1160,14 @@ bool WorkerImpl::sleep(MasterStatus master_status) {
     // only release model weights from host memory.
     model_->free_model_weights();
   }
-
   return true;
+}
+
+bool WorkerImpl::sleep(MasterStatus master_status) {
+  if (rl_sleep_mode()) {
+    return rl_sleep();
+  }
+  return xtensor_sleep(master_status);
 }
 
 bool WorkerImpl::update_weights(const std::string& weights_path) {
@@ -1202,12 +1231,8 @@ bool WorkerImpl::stop_profile() {
 }
 
 bool WorkerImpl::wakeup(const WakeupOptions& options) {
-  // RL sleep mode: re-acquire physical HBM via the SleepableAllocator. v1 does
-  // a full wake (weights + kv_cache); tag-based partial wake is a follow-up.
-  if (options_.enable_sleep_mode() &&
-      !::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
-    SleepableAllocator::get_instance().wake_up(/*tags=*/{});
-    return true;
+  if (rl_sleep_mode()) {
+    return rl_wakeup();
   }
 
   if (!options.remote_addrs.empty()) {
@@ -1397,17 +1422,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   }
 #endif
 
-  // RL deep-sleep mode: route each decoder layer's contiguous weight buffer
-  // (manual loader) into a VMM-backed SleepableAllocator region so sleep() can
-  // release the weight HBM. Must be enabled before the layers are constructed
-  // (loader mode is chosen in the layer ctor) and before weights are loaded.
-  const bool sleep_weights =
-      options_.enable_sleep_mode() &&
-      !::xllm::KVCacheConfig::get_instance().enable_xtensor();
-  if (sleep_weights) {
-    ::xllm::LoadConfig::get_instance().enable_manual_loader(true);
-    SleepableAllocator::get_instance().set_weights_enabled(true);
-  }
+  setup_rl_sleep_weights();
 
   // create model context
   dtype_ = dtype;
@@ -1435,9 +1450,10 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   scoped_load_threads =
       std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
 
-  // In RL sleep mode (sleep_weights), the manual loader allocates each layer's
-  // weight buffer from the SleepableAllocator (see base_loader.cpp), so the
-  // weights become sleepable here without any extra capture step.
+  // In RL sleep mode (see setup_rl_sleep_weights()), the manual loader
+  // allocates each layer's weight buffer from the SleepableAllocator (see
+  // base_loader.cpp), so the weights become sleepable here without any extra
+  // capture step.
   if (master_status == MasterStatus::WAKEUP) {
     this->load_model(std::move(model_loader));
   } else if (master_status == MasterStatus::LIGHT_SLEEP) {

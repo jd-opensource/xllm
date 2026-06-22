@@ -139,6 +139,17 @@ class LLMEngine : public Engine {
 
  private:
   friend class SpeculativeEngine;
+
+  // ---- RL deep-sleep path (SleepableAllocator), isolated from the xtensor
+  // ---- (PageAllocator) sleep/wakeup path. ----
+  // True when the engine uses the RL SleepableAllocator path (enable_sleep_mode
+  // with xtensor disabled) rather than the xtensor PageAllocator path.
+  bool rl_sleep_mode() const;
+  bool rl_sleep(MasterStatus master_status);
+  bool rl_wakeup(const WakeupOptions& options);
+  bool xtensor_sleep(MasterStatus master_status);
+  bool xtensor_wakeup(const WakeupOptions& options);
+
   // setup workers internal
   void setup_workers(const runtime::Options& options);
   bool init_model(MasterStatus master_status = MasterStatus::WAKEUP);
