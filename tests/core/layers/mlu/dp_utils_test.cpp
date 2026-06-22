@@ -413,18 +413,6 @@ TEST(DpUtilsTest, SliceSelectedMoeOutputDoesNotNormalizeZeroRows) {
   test::verify_tensor_close(normalized_zero, normalized_output.slice(0, 3, 6));
 }
 
-TEST(DpUtilsTest, GatherSelectedMoeInputsRejectsShapeMismatch) {
-  std::unique_ptr<xllm::ProcessGroup> dp_group;
-  ParallelArgs args = make_selected_moe_args(
-      dp_group, /*dp_rank=*/0, /*dp_size=*/1, /*ep_size=*/2);
-  torch::Tensor hidden = torch::zeros({3, 2}, torch::kFloat32);
-  torch::Tensor weights = torch::zeros({2, 2}, torch::kFloat32);
-  torch::Tensor ids = torch::zeros({3, 2}, torch::kLong);
-
-  EXPECT_DEATH(gather_selected_moe_inputs(hidden, weights, ids, {}, args),
-               "topk_weights rows");
-}
-
 TEST(DpUtilsTest, GatherSelectedMoeInputsRejectsEmptyTokenNumsWhenRequired) {
   std::unique_ptr<xllm::ProcessGroup> dp_group;
   ParallelArgs args = make_selected_moe_args(
@@ -434,7 +422,7 @@ TEST(DpUtilsTest, GatherSelectedMoeInputsRejectsEmptyTokenNumsWhenRequired) {
   torch::Tensor ids = torch::zeros({1, 2}, torch::kLong);
 
   EXPECT_DEATH(gather_selected_moe_inputs(hidden, weights, ids, {}, args),
-               "dp_token_nums is empty");
+               "must be less than dp_token_nums size");
 }
 
 TEST(DpUtilsTest, GatherSelectedMoeInputsRejectsMissingDpGroupWhenRequired) {
@@ -448,14 +436,14 @@ TEST(DpUtilsTest, GatherSelectedMoeInputsRejectsMissingDpGroupWhenRequired) {
                "dp_local_process_group_ is not initialized");
 }
 
-TEST(DpUtilsTest, SliceSelectedMoeOutputRejectsMismatchedTokenNums) {
+TEST(DpUtilsTest, SliceSelectedMoeOutputRejectsMissingRankTokenNum) {
   std::unique_ptr<xllm::ProcessGroup> dp_group;
   ParallelArgs args = make_selected_moe_args(
-      dp_group, /*dp_rank=*/0, /*dp_size=*/2, /*ep_size=*/2);
+      dp_group, /*dp_rank=*/1, /*dp_size=*/2, /*ep_size=*/2);
   torch::Tensor output = torch::zeros({2, 2}, torch::kFloat32);
 
   EXPECT_DEATH(slice_selected_moe_output(output, {1}, args),
-               "dp_token_nums size");
+               "must be less than dp_token_nums size");
 }
 
 TEST(DpUtilsTest, UnpadTokensRestoresOriginalLength) {

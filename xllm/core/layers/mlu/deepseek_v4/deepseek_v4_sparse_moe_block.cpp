@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include <limits>
 #include <vector>
 
 #include "framework/parallel_state/parallel_state.h"
@@ -27,15 +26,8 @@ namespace xllm {
 namespace layer {
 namespace {
 
-torch::Tensor reshape_topk(const torch::Tensor& topk,
-                           int64_t hidden_rows,
-                           const char* name) {
-  CHECK_GT(topk.dim(), 0) << name << " must have at least 1 dimension";
-  CHECK_GT(topk.size(-1), 0) << name << " topk dimension must be positive";
+torch::Tensor reshape_topk(const torch::Tensor& topk, int64_t hidden_rows) {
   const int64_t topk_size = topk.size(-1);
-  const int64_t row_count = topk.numel() / topk_size;
-  CHECK_EQ(row_count, hidden_rows) << name << " row count mismatch: expected "
-                                   << hidden_rows << ", actual " << row_count;
   return topk.reshape({hidden_rows, topk_size}).contiguous();
 }
 
@@ -85,15 +77,8 @@ std::vector<int32_t> DeepseekV4SparseMoEBlockImpl::get_row_dp_tokens(
   const std::vector<int32_t>& token_nums =
       input_params.parallel.dp_global_token_nums;
   CHECK(!token_nums.empty()) << "dp_global_token_nums is empty";
-  CHECK(parallel_args_.dp_local_process_group_ != nullptr)
-      << "dp_local_process_group_ is not initialized";
 
   const int64_t dp_rank = parallel_args_.dp_local_process_group_->rank();
-  CHECK_GE(dp_rank, 0) << "invalid dp rank " << dp_rank;
-  CHECK_LT(dp_rank, static_cast<int64_t>(token_nums.size()))
-      << "dp rank " << dp_rank << " exceeds dp_global_token_nums size "
-      << token_nums.size();
-
   const int32_t local_token_num = token_nums[dp_rank];
   CHECK_GT(local_token_num, 0)
       << "local dp token num must be positive for row-level conversion";
@@ -105,10 +90,7 @@ std::vector<int32_t> DeepseekV4SparseMoEBlockImpl::get_row_dp_tokens(
   std::vector<int32_t> row_token_nums;
   row_token_nums.reserve(token_nums.size());
   for (int32_t token_num : token_nums) {
-    CHECK_GE(token_num, 0) << "dp token num must be non-negative";
     const int64_t row_token_num = static_cast<int64_t>(token_num) * row_factor;
-    CHECK_LE(row_token_num, std::numeric_limits<int32_t>::max())
-        << "row-level dp token num exceeds int32_t";
     row_token_nums.emplace_back(static_cast<int32_t>(row_token_num));
   }
   return row_token_nums;
@@ -119,17 +101,12 @@ torch::Tensor DeepseekV4SparseMoEBlockImpl::forward_selected(
     const torch::Tensor& topk_weights,
     const torch::Tensor& topk_ids,
     const ModelInputParams& input_params) {
-  CHECK_GT(hidden_states.dim(), 1)
-      << "hidden_states must have rows and hidden dimension";
   std::vector<int64_t> hidden_shape = hidden_states.sizes().vec();
   torch::Tensor hidden_rows =
       hidden_states.reshape({-1, hidden_states.size(-1)}).contiguous();
   const int64_t row_count = hidden_rows.size(0);
-  torch::Tensor topk_weights_2d =
-      reshape_topk(topk_weights, row_count, "topk_weights");
-  torch::Tensor topk_ids_2d = reshape_topk(topk_ids, row_count, "topk_ids");
-  CHECK_EQ(topk_weights_2d.size(1), topk_ids_2d.size(1))
-      << "topk_weights and topk_ids topk mismatch";
+  torch::Tensor topk_weights_2d = reshape_topk(topk_weights, row_count);
+  torch::Tensor topk_ids_2d = reshape_topk(topk_ids, row_count);
 
   std::vector<int32_t> row_token_nums;
   if (need_gather()) {

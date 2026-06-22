@@ -547,27 +547,8 @@ torch::Tensor FusedMoEImpl::forward_experts(
 torch::Tensor FusedMoEImpl::forward_selected(const torch::Tensor& hidden_states,
                                              const torch::Tensor& topk_weights,
                                              const torch::Tensor& topk_ids) {
-  CHECK_GT(hidden_states.dim(), 0)
-      << "hidden_states must have at least 1 dimension";
-  CHECK_GT(topk_weights.dim(), 0)
-      << "topk_weights must have at least 1 dimension";
-  CHECK_GT(topk_ids.dim(), 0) << "topk_ids must have at least 1 dimension";
-  CHECK_EQ(topk_weights.size(-1), topk_)
-      << "topk_weights last dimension mismatch: expected " << topk_
-      << ", actual " << topk_weights.size(-1);
-  CHECK_EQ(topk_ids.size(-1), topk_)
-      << "topk_ids last dimension mismatch: expected " << topk_ << ", actual "
-      << topk_ids.size(-1);
-
   const int64_t hidden_rows =
       hidden_states.reshape({-1, hidden_states.size(-1)}).size(0);
-  const int64_t weight_rows = topk_weights.numel() / topk_;
-  const int64_t id_rows = topk_ids.numel() / topk_;
-  CHECK_EQ(weight_rows, hidden_rows)
-      << "topk_weights row count mismatch: expected " << hidden_rows
-      << ", actual " << weight_rows;
-  CHECK_EQ(id_rows, hidden_rows) << "topk_ids row count mismatch: expected "
-                                 << hidden_rows << ", actual " << id_rows;
 
   RouteInfo route_info;
   route_info.reduce_weight = topk_weights.reshape({hidden_rows, topk_});

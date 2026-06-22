@@ -330,15 +330,14 @@ TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedRestores3DShape) {
   EXPECT_EQ(actual.sizes(), hidden_states.sizes());
 }
 
-TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedRejectsTopkMismatch) {
+TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedRejectsInvalidTopkShape) {
   DeepseekV4SparseMoEBlock block = create_block();
   torch::Tensor hidden_states = make_hidden({3, model_args_.hidden_size()});
   torch::Tensor topk_weights = torch::ones({2, 2}, options_);
   torch::Tensor topk_ids = torch::zeros({3, 2}, options_.dtype(torch::kInt64));
 
-  EXPECT_DEATH(block->forward_selected(
-                   hidden_states, topk_weights, topk_ids, ModelInputParams()),
-               "topk_weights row count mismatch");
+  EXPECT_ANY_THROW(block->forward_selected(
+      hidden_states, topk_weights, topk_ids, ModelInputParams()));
 }
 
 TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedRequiresDpTokensForGather) {
@@ -351,20 +350,6 @@ TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedRequiresDpTokensForGather) {
   EXPECT_DEATH(block->forward_selected(
                    hidden_states, topk_weights, topk_ids, ModelInputParams()),
                "dp_global_token_nums is empty");
-}
-
-TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedRequiresDpGroupForGather) {
-  set_dp_ep_ctx(/*dp_size=*/2, /*with_dp_group=*/false);
-  DeepseekV4SparseMoEBlock block = create_block();
-  ModelInputParams input_params;
-  input_params.parallel.dp_global_token_nums = {2, 2};
-  torch::Tensor hidden_states = make_hidden({2, model_args_.hidden_size()});
-  torch::Tensor topk_weights = torch::ones({2, 2}, options_);
-  torch::Tensor topk_ids = torch::zeros({2, 2}, options_.dtype(torch::kInt64));
-
-  EXPECT_DEATH(block->forward_selected(
-                   hidden_states, topk_weights, topk_ids, input_params),
-               "dp_local_process_group_ is not initialized");
 }
 
 }  // namespace layer

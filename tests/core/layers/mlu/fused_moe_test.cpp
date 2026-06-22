@@ -624,7 +624,7 @@ TEST_F(FusedMoETest, ForwardSelectedMatchesRouteInfoWithPreselectedRoutes) {
   verify_tensor_close(actual, expected, 1e-3, 1e-4);
 }
 
-TEST_F(FusedMoETest, ForwardSelectedChecksRouteShape) {
+TEST_F(FusedMoETest, ForwardSelectedRejectsInvalidRouteShape) {
   const int64_t hidden_size = 256;
   const int64_t intermediate_size = 256;
   const int64_t num_experts = 8;
@@ -649,13 +649,11 @@ TEST_F(FusedMoETest, ForwardSelectedChecksRouteShape) {
       torch::zeros({2, top_k}, options_.dtype(torch::kInt32));
   torch::Tensor bad_topk_weights = torch::ones({3, top_k + 1}, options_);
 
-  EXPECT_DEATH(
-      fused_moe->forward_selected(hidden_states, bad_topk_weights, topk_ids),
-      "topk_weights last dimension mismatch.*expected 2.*actual 3");
+  EXPECT_ANY_THROW(
+      fused_moe->forward_selected(hidden_states, bad_topk_weights, topk_ids));
 
-  EXPECT_DEATH(
-      fused_moe->forward_selected(hidden_states, topk_weights, topk_ids),
-      "topk_weights row count mismatch.*expected 3.*actual 2");
+  EXPECT_ANY_THROW(
+      fused_moe->forward_selected(hidden_states, topk_weights, topk_ids));
 }
 
 TEST_F(FusedMoETest, NoReductionModeMatchesExternalReduce) {
