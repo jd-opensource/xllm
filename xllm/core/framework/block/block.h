@@ -41,7 +41,7 @@ enum class BlockType : int8_t {
   SWA = 1,     // DSV4 sliding window, exported to multi_block_tables[0]
   C4 = 2,      // DSV4 compressed, exported to multi_block_tables[1]
   C128 = 3,    // DSV4 compressed, exported to multi_block_tables[2]
-  Single = 4,  // per-sequence linear-state / embedding resource block, exported
+  SINGLE = 4,  // per-sequence linear-state / embedding resource block, exported
                // via get_single_block_id() (linear_state_ids / embedding_ids),
                // not to block_tables / multi_block_tables
 };

@@ -50,7 +50,7 @@ namespace {
 size_t estimate_decode_extra_blocks(Sequence* sequence,
                                     size_t updated_num_tokens,
                                     size_t block_size) {
-  const size_t num_blocks = sequence->kv_state().num_kv_blocks();
+  const size_t num_blocks = sequence->kv_state().num_blocks(BlockType::KV);
   const size_t num_blocks_needed =
       (updated_num_tokens + block_size - 1) / block_size;
   if (num_blocks_needed > num_blocks) {
@@ -334,13 +334,14 @@ bool ContinuousScheduler::check_if_enough_to_evict(
     num_request_to_evict++;
     // count the number of blocks belong to the request
     for (const auto& seq : request_to_preempt->sequences()) {
-      // num_blocks_can_evict += seq->kv_state().num_kv_blocks();
-      size_t shared_kv_blocks_num = seq->kv_state().shared_kv_blocks_num();
-      size_t num_kv_blocks = seq->kv_state().num_kv_blocks();
+      // num_blocks_can_evict += seq->kv_state().num_blocks(BlockType::KV);
+      size_t shared_kv_blocks_num =
+          seq->kv_state().shared_blocks_num(BlockType::KV);
+      size_t num_kv_blocks = seq->kv_state().num_blocks(BlockType::KV);
       CHECK_GE(num_kv_blocks, shared_kv_blocks_num);
       for (size_t i = 0; i < shared_kv_blocks_num; i++) {
         // if ==2, prefix cache block will be evicted when allocate
-        const auto& block = seq->kv_state().kv_blocks()[i];
+        const auto& block = seq->kv_state().blocks(BlockType::KV)[i];
         if (block.ref_count() <= 2) {
           num_blocks_can_evict += 1;
         }

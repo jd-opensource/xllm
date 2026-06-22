@@ -312,8 +312,8 @@ Sequence::Sequence(const Sequence& other)
   // is private: drop the copied Single block so this sequence allocates its own
   // on the next allocate. Preserves the pre-map behavior where single_block_
   // was never copied by this constructor.
-  kv_state_.reset_single_block();
-  host_kv_state_.reset_single_block();
+  kv_state_.erase_blocks(BlockType::SINGLE);
+  host_kv_state_.erase_blocks(BlockType::SINGLE);
 }
 
 // The first token will be only used in disagg pd mode.
@@ -390,7 +390,7 @@ void Sequence::update_last_step_token(const Token& token, size_t token_offset) {
     // This happens when the sequence was preempted during schedule_request(),
     // causing its KV cache to be deallocated (reset), but it's still in
     // last_batch_ being processed by update_last_step_result().
-    if (kv_state_.num_kv_blocks() == 0) {
+    if (kv_state_.num_blocks(BlockType::KV) == 0) {
       return;
     }
     kv_state_.incr_kv_cache_tokens_num(1);
@@ -705,17 +705,18 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
   return output;
 }
 
-void Sequence::add_kv_blocks(const std::vector<Block>& blocks) {
-  kv_state_.add_kv_blocks(blocks);
+void Sequence::add_blocks(BlockType type, const std::vector<Block>& blocks) {
+  kv_state_.add_blocks(type, blocks);
 }
 
-void Sequence::add_host_kv_blocks(const std::vector<Block>& blocks) {
-  host_kv_state_.add_kv_blocks(blocks);
+void Sequence::add_host_blocks(BlockType type,
+                               const std::vector<Block>& blocks) {
+  host_kv_state_.add_blocks(type, blocks);
 }
 
 size_t Sequence::num_prefix_cache_tokens() const {
-  size_t cached_tokens = std::max(kv_state_.shared_kv_tokens_num(),
-                                  host_kv_state_.shared_kv_tokens_num());
+  size_t cached_tokens = std::max(kv_state_.shared_tokens_num(),
+                                  host_kv_state_.shared_tokens_num());
   DCHECK_LE(cached_tokens, num_prompt_tokens_);
   return cached_tokens;
 }
@@ -729,12 +730,13 @@ void Sequence::reset() {
   volatile_num_prompt_tokens_ = num_tokens_;
 }
 
-void Sequence::add_shared_kv_blocks(std::vector<Block>&& blocks) {
-  kv_state_.add_shared_kv_blocks(std::move(blocks), num_tokens_);
+void Sequence::add_shared_blocks(BlockType type, std::vector<Block>&& blocks) {
+  kv_state_.add_shared_blocks(type, std::move(blocks), num_tokens_);
 }
 
-void Sequence::add_shared_host_kv_blocks(std::vector<Block>&& blocks) {
-  host_kv_state_.add_shared_kv_blocks(std::move(blocks), num_tokens_);
+void Sequence::add_shared_host_blocks(BlockType type,
+                                      std::vector<Block>&& blocks) {
+  host_kv_state_.add_shared_blocks(type, std::move(blocks), num_tokens_);
 }
 
 void Sequence::update_block_hashes(uint32_t block_size,
@@ -867,14 +869,14 @@ bool Sequence::update_prefetch_result(uint32_t timeout, uint32_t& success_cnt) {
   }
 
   termination_flag_->store(0, std::memory_order_release);
-  success_cnt = host_kv_state_.kv_blocks().size();
+  success_cnt = host_kv_state_.blocks(BlockType::KV).size();
   for (auto& cnt : prefetch_results_) {
     success_cnt = std::min(success_cnt, cnt->load());
   }
   if (success_cnt > 0) {
     host_kv_state_.incr_kv_cache_tokens_num(
-        success_cnt * host_kv_state_.kv_blocks()[0].size());
-    host_kv_state_.incr_shared_kv_blocks_num(success_cnt);
+        success_cnt * host_kv_state_.blocks(BlockType::KV)[0].size());
+    host_kv_state_.incr_shared_blocks_num(BlockType::KV, success_cnt);
   }
   prefetch_results_.clear();
   return true;

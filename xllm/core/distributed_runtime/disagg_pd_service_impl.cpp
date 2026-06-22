@@ -177,8 +177,8 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
       resp->set_dp_rank(dp_rank);
       resp->set_linear_state_id(sequence->get_single_block_id());
 
-      size_t shared_num = sequence->kv_state().shared_kv_blocks_num();
-      auto blocks = sequence->kv_state().kv_blocks();
+      size_t shared_num = sequence->kv_state().shared_blocks_num(BlockType::KV);
+      auto blocks = sequence->kv_state().blocks(BlockType::KV);
 
       // Collect block IDs
       std::vector<int32_t> block_ids;

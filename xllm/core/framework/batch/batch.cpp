@@ -803,7 +803,7 @@ void Batch::process_beam_search_output(const RawForwardOutput& raw_output,
         seq_idx_set.insert(src_seq_idx);
       }
 
-      auto src_blocks = src_seq->kv_state().kv_blocks();
+      auto src_blocks = src_seq->kv_state().blocks(BlockType::KV);
       base_seq->kv_state().set_src_blocks(src_blocks, need_swap);
     }
   };

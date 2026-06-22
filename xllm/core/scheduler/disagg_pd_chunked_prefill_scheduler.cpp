@@ -70,7 +70,7 @@ void DisaggPDChunkedPrefillScheduler::match_prefix_blocks(Sequence* sequence) {
     return;
   }
 
-  if (sequence->kv_state().num_kv_blocks() == 0) {
+  if (sequence->kv_state().num_blocks(BlockType::KV) == 0) {
     kv_cache_manager_->allocate_shared(sequence);
     return;
   }

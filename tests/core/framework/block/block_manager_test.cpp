@@ -60,9 +60,7 @@ struct HasSequenceSingleBlockApi : std::false_type {};
 template <typename T>
 struct HasSequenceSingleBlockApi<
     T,
-    std::void_t<decltype(std::declval<const T&>().has_single_block_id()),
-                decltype(std::declval<const T&>().get_single_block_id()),
-                decltype(std::declval<T&>().reset_single_block())>>
+    std::void_t<decltype(std::declval<const T&>().get_single_block_id())>>
     : std::true_type {};
 
 template <typename OptionsT>
@@ -79,7 +77,7 @@ bool EnableLinearStateOrFail(OptionsT& options) {
 template <typename SeqT>
 bool HasSingleBlockIdOrFail(const SeqT& seq) {
   if constexpr (HasSequenceSingleBlockApi<SeqT>::value) {
-    return seq.has_single_block_id();
+    return seq.get_single_block_id() >= 0;
   }
   ADD_FAILURE() << "Missing APIs: Sequence single-block handle";
   return false;

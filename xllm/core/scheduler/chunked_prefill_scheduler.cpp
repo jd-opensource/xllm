@@ -865,7 +865,7 @@ bool ChunkedPrefillScheduler::allocate_blocks_for(
 }
 
 void ChunkedPrefillScheduler::allocate_shared_blocks_for(Sequence* sequence) {
-  if (sequence->kv_state().num_kv_blocks() == 0) {
+  if (sequence->kv_state().num_blocks(BlockType::KV) == 0) {
     // allocate shared blocks
     kv_cache_manager_->allocate_shared(sequence);
     return;

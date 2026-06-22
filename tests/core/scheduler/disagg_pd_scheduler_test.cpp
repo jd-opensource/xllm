@@ -229,14 +229,14 @@ TEST(DisaggPDSchedulerTest, CachesPrefillBlocksBeforeRelease) {
   EXPECT_EQ(first_cache_size(*block_manager), 2u);
 
   block_manager->deallocate(request.get());
-  EXPECT_EQ(sequence->kv_state().num_kv_blocks(), 0u);
+  EXPECT_EQ(sequence->kv_state().num_blocks(BlockType::KV), 0u);
   EXPECT_EQ(first_cache_size(*block_manager), 2u);
 
   std::shared_ptr<Request> matched_request = make_request({1, 2, 3, 4, 5});
   Sequence* matched_sequence = matched_request->sequences()[0].get();
   block_manager->allocate_shared(matched_sequence);
 
-  EXPECT_EQ(matched_sequence->kv_state().shared_kv_blocks_num(), 2u);
+  EXPECT_EQ(matched_sequence->kv_state().shared_blocks_num(BlockType::KV), 2u);
   block_manager->deallocate(matched_sequence);
   release_prefix_cache(block_manager);
 }
@@ -257,7 +257,7 @@ TEST(DisaggPDSchedulerTest, CacheSkipsExistingSharedBlocks) {
   std::shared_ptr<Request> extended_request = make_request({1, 2, 3, 4, 5, 6});
   Sequence* extended_sequence = extended_request->sequences()[0].get();
   block_manager->allocate_shared(extended_sequence);
-  ASSERT_EQ(extended_sequence->kv_state().shared_kv_blocks_num(), 2u);
+  ASSERT_EQ(extended_sequence->kv_state().shared_blocks_num(BlockType::KV), 2u);
   ASSERT_TRUE(block_manager->allocate(extended_sequence,
                                       extended_sequence->num_prompt_tokens()));
   finish_prefill(extended_sequence);

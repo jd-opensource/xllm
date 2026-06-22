@@ -749,7 +749,7 @@ void BatchInputBuilder::setup_kv_cache_info(
 
   sequence->kv_state().incr_kv_cache_tokens_num(/*size=*/q_seq_len);
 
-  const auto blocks = sequence->kv_state().kv_blocks();
+  const auto blocks = sequence->kv_state().blocks(BlockType::KV);
   if (sequence->kv_state().has_multi_block_export()) {
     const auto export_view = sequence->kv_state().multi_block_export_view();
     if (state.multi_block_tables.empty()) {
@@ -779,8 +779,8 @@ void BatchInputBuilder::setup_kv_cache_info(
     }
   }
 
-  const auto slot_ids =
-      sequence->kv_state().kv_cache_slots(n_kv_cache_tokens, seq_len);
+  const auto slot_ids = sequence->kv_state().cache_slots(
+      BlockType::KV, n_kv_cache_tokens, seq_len);
   state.new_token_slot_ids.insert(
       state.new_token_slot_ids.end(), slot_ids.begin(), slot_ids.end());
 

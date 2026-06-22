@@ -103,6 +103,22 @@ Sequence MakeTestSequence(size_t index,
                   seq_params);
 }
 
+// Blocks are keyed by BlockType in the sequence KVCacheState, not by
+// sub-manager index. These helpers read the three DSV4 groups by type so the
+// tests stay independent of compress_ratios ordering.
+std::vector<Block> SwaBlocks(Sequence& seq) {
+  const Slice<Block> s = seq.kv_state().blocks(BlockType::SWA);
+  return std::vector<Block>(s.begin(), s.end());
+}
+std::vector<Block> C4Blocks(Sequence& seq) {
+  const Slice<Block> s = seq.kv_state().blocks(BlockType::C4);
+  return std::vector<Block>(s.begin(), s.end());
+}
+std::vector<Block> C128Blocks(Sequence& seq) {
+  const Slice<Block> s = seq.kv_state().blocks(BlockType::C128);
+  return std::vector<Block>(s.begin(), s.end());
+}
+
 }  // namespace
 
 TEST(CompositeBlockManagerTest, AllocateForSequence_SingleSeq) {
@@ -123,30 +139,29 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_SingleSeq) {
 
   EXPECT_TRUE(manager.allocate_for_sequence(&seq, num_tokens));
 
-  const std::vector<std::vector<Block>>& composite =
-      seq.kv_state().composite_blocks();
-  ASSERT_EQ(composite.size(), 3u);
+  const std::vector<Block> swa = SwaBlocks(seq);
+  const std::vector<Block> c4 = C4Blocks(seq);
+  const std::vector<Block> c128 = C128Blocks(seq);
 
-  // Sub-manager 0: SlidingWindow, logical block count follows sequence length.
-  EXPECT_EQ(composite[0].size(), ExpectedSwaLogicalBlocks(num_tokens));
-  for (const auto& b : composite[0]) {
+  // SlidingWindow group: logical block count follows sequence length.
+  EXPECT_EQ(swa.size(), ExpectedSwaLogicalBlocks(num_tokens));
+  for (const auto& b : swa) {
     EXPECT_TRUE(b.is_valid());
     EXPECT_EQ(b.size(), base_block_size);
   }
 
-  // Sub-manager 1: BlockManagerImpl compress_ratio 4, block_size=128*4=512.
+  // BlockManagerImpl compress_ratio 4, block_size=128*4=512.
   const size_t expected_blocks_1 = CeilBlocks(num_tokens, kBlockSizeRatio4);
-  EXPECT_EQ(composite[1].size(), expected_blocks_1);
-  for (const auto& b : composite[1]) {
+  EXPECT_EQ(c4.size(), expected_blocks_1);
+  for (const auto& b : c4) {
     EXPECT_TRUE(b.is_valid());
     EXPECT_EQ(b.size(), kBlockSizeRatio4);
   }
 
-  // Sub-manager 2: BlockManagerImpl compress_ratio 128,
-  // block_size=128*128=16384.
+  // BlockManagerImpl compress_ratio 128, block_size=128*128=16384.
   const size_t expected_blocks_2 = CeilBlocks(num_tokens, kBlockSizeRatio128);
-  EXPECT_EQ(composite[2].size(), expected_blocks_2);
-  for (const auto& b : composite[2]) {
+  EXPECT_EQ(c128.size(), expected_blocks_2);
+  for (const auto& b : c128) {
     EXPECT_TRUE(b.is_valid());
     EXPECT_EQ(b.size(), kBlockSizeRatio128);
   }
@@ -169,31 +184,33 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_DifferentBatchSeqs) {
   // ceil(1024/16384)=1.
   Sequence seq1 = MakeTestSequence(0, std::vector<int32_t>(1024, 1));
   EXPECT_TRUE(manager.allocate_for_sequence(&seq1, 1024));
-  const auto& c1 = seq1.kv_state().composite_blocks();
-  ASSERT_EQ(c1.size(), 3u);
-  EXPECT_EQ(c1[0].size(), ExpectedSwaLogicalBlocks(1024));
-  EXPECT_EQ(c1[1].size(), CeilBlocks(1024, kBlockSizeRatio4));
-  EXPECT_EQ(c1[2].size(), CeilBlocks(1024, kBlockSizeRatio128));
+  const std::vector<Block> s1_swa = SwaBlocks(seq1);
+  const std::vector<Block> s1_c4 = C4Blocks(seq1);
+  const std::vector<Block> s1_c128 = C128Blocks(seq1);
+  EXPECT_EQ(s1_swa.size(), ExpectedSwaLogicalBlocks(1024));
+  EXPECT_EQ(s1_c4.size(), CeilBlocks(1024, kBlockSizeRatio4));
+  EXPECT_EQ(s1_c128.size(), CeilBlocks(1024, kBlockSizeRatio128));
 
   // Seq2: 1400 tokens. Ratio 4: ceil(1400/512)=3; ratio 128:
   // ceil(1400/16384)=1. Keep total SWA logical blocks within the dynamic
   // pool budget derived from max_tokens_per_batch.
   Sequence seq2 = MakeTestSequence(1, std::vector<int32_t>(1400, 1));
   EXPECT_TRUE(manager.allocate_for_sequence(&seq2, 1400));
-  const auto& c2 = seq2.kv_state().composite_blocks();
-  ASSERT_EQ(c2.size(), 3u);
-  EXPECT_EQ(c2[0].size(), ExpectedSwaLogicalBlocks(1400));
-  EXPECT_EQ(c2[1].size(), CeilBlocks(1400, kBlockSizeRatio4));
-  EXPECT_EQ(c2[2].size(), CeilBlocks(1400, kBlockSizeRatio128));
+  const std::vector<Block> s2_swa = SwaBlocks(seq2);
+  const std::vector<Block> s2_c4 = C4Blocks(seq2);
+  const std::vector<Block> s2_c128 = C128Blocks(seq2);
+  EXPECT_EQ(s2_swa.size(), ExpectedSwaLogicalBlocks(1400));
+  EXPECT_EQ(s2_c4.size(), CeilBlocks(1400, kBlockSizeRatio4));
+  EXPECT_EQ(s2_c128.size(), CeilBlocks(1400, kBlockSizeRatio128));
 
   // Blocks allocated to different seqs must not overlap (distinct block ids).
   std::set<int32_t> ids1_0, ids1_1, ids1_2, ids2_0, ids2_1, ids2_2;
-  for (const auto& b : c1[0]) ids1_0.insert(b.id());
-  for (const auto& b : c1[1]) ids1_1.insert(b.id());
-  for (const auto& b : c1[2]) ids1_2.insert(b.id());
-  for (const auto& b : c2[0]) ids2_0.insert(b.id());
-  for (const auto& b : c2[1]) ids2_1.insert(b.id());
-  for (const auto& b : c2[2]) ids2_2.insert(b.id());
+  for (const auto& b : s1_swa) ids1_0.insert(b.id());
+  for (const auto& b : s1_c4) ids1_1.insert(b.id());
+  for (const auto& b : s1_c128) ids1_2.insert(b.id());
+  for (const auto& b : s2_swa) ids2_0.insert(b.id());
+  for (const auto& b : s2_c4) ids2_1.insert(b.id());
+  for (const auto& b : s2_c128) ids2_2.insert(b.id());
   for (int32_t id : ids1_0) EXPECT_EQ(ids2_0.count(id), 0u);
   for (int32_t id : ids1_1) EXPECT_EQ(ids2_1.count(id), 0u);
   for (int32_t id : ids1_2) EXPECT_EQ(ids2_2.count(id), 0u);
@@ -219,24 +236,20 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_GrowSameSeq) {
   Sequence seq = MakeTestSequence(0, {1, 2, 3});
   // 600 tokens: ratio 4 needs ceil(600/512)=2 blocks, ratio 128 needs 1 block.
   EXPECT_TRUE(manager.allocate_for_sequence(&seq, 600));
-  const std::vector<std::vector<Block>>& c0 = seq.kv_state().composite_blocks();
-  ASSERT_EQ(c0.size(), 3u);
-  EXPECT_EQ(c0[0].size(), ExpectedSwaLogicalBlocks(600));
-  EXPECT_EQ(c0[1].size(), CeilBlocks(600, kBlockSizeRatio4));
-  EXPECT_EQ(c0[2].size(), CeilBlocks(600, kBlockSizeRatio128));
+  EXPECT_EQ(SwaBlocks(seq).size(), ExpectedSwaLogicalBlocks(600));
+  EXPECT_EQ(C4Blocks(seq).size(), CeilBlocks(600, kBlockSizeRatio4));
+  EXPECT_EQ(C128Blocks(seq).size(), CeilBlocks(600, kBlockSizeRatio128));
 
   // Grow to 1200 tokens: ratio 4 needs 3 blocks, ratio 128 still 1 block.
   EXPECT_TRUE(manager.allocate_for_sequence(&seq, 1200));
-  const std::vector<std::vector<Block>>& c1 = seq.kv_state().composite_blocks();
-  EXPECT_EQ(c1[0].size(), ExpectedSwaLogicalBlocks(1200));
-  EXPECT_EQ(c1[1].size(), CeilBlocks(1200, kBlockSizeRatio4));
-  EXPECT_EQ(c1[2].size(), CeilBlocks(1200, kBlockSizeRatio128));
+  EXPECT_EQ(SwaBlocks(seq).size(), ExpectedSwaLogicalBlocks(1200));
+  EXPECT_EQ(C4Blocks(seq).size(), CeilBlocks(1200, kBlockSizeRatio4));
+  EXPECT_EQ(C128Blocks(seq).size(), CeilBlocks(1200, kBlockSizeRatio128));
 
   // No growth: still 1200 tokens, block counts unchanged.
   EXPECT_TRUE(manager.allocate_for_sequence(&seq, 1200));
-  const std::vector<std::vector<Block>>& c2 = seq.kv_state().composite_blocks();
-  EXPECT_EQ(c2[1].size(), CeilBlocks(1200, kBlockSizeRatio4));
-  EXPECT_EQ(c2[2].size(), CeilBlocks(1200, kBlockSizeRatio128));
+  EXPECT_EQ(C4Blocks(seq).size(), CeilBlocks(1200, kBlockSizeRatio4));
+  EXPECT_EQ(C128Blocks(seq).size(), CeilBlocks(1200, kBlockSizeRatio128));
 
   manager.deallocate_sequence(&seq);
 }
@@ -249,15 +262,12 @@ TEST(CompositeBlockManagerTest, AllocateContinuesAfterSatisfiedTokenManager) {
 
   Sequence seq = MakeTestSequence(0, {1});
   EXPECT_TRUE(manager.allocate_for_sequence(&seq, 1024));
-  const auto& c0 = seq.kv_state().composite_blocks();
-  ASSERT_EQ(c0.size(), 3u);
-  EXPECT_EQ(c0[1].size(), CeilBlocks(1024, kBlockSizeRatio128));
-  EXPECT_EQ(c0[2].size(), CeilBlocks(1024, kBlockSizeRatio4));
+  EXPECT_EQ(C128Blocks(seq).size(), CeilBlocks(1024, kBlockSizeRatio128));
+  EXPECT_EQ(C4Blocks(seq).size(), CeilBlocks(1024, kBlockSizeRatio4));
 
   EXPECT_TRUE(manager.allocate_for_sequence(&seq, 1500));
-  const auto& c1 = seq.kv_state().composite_blocks();
-  EXPECT_EQ(c1[1].size(), CeilBlocks(1500, kBlockSizeRatio128));
-  EXPECT_EQ(c1[2].size(), CeilBlocks(1500, kBlockSizeRatio4));
+  EXPECT_EQ(C128Blocks(seq).size(), CeilBlocks(1500, kBlockSizeRatio128));
+  EXPECT_EQ(C4Blocks(seq).size(), CeilBlocks(1500, kBlockSizeRatio4));
 
   manager.deallocate_sequence(&seq);
 }
@@ -279,14 +289,13 @@ TEST(CompositeBlockManagerTest, FailedGrowthRollsBackNewBlocks) {
   Sequence seq = MakeTestSequence(0, {1});
   ASSERT_TRUE(manager.allocate_for_sequence(&seq, 1024));
   const size_t used_before = manager.num_used_blocks();
-  const auto& before = seq.kv_state().composite_blocks();
-  ASSERT_EQ(before.size(), 3u);
-  const size_t swa_blocks_before = before[0].size();
-  const size_t c4_blocks_before = before[1].size();
-  const size_t c128_blocks_before = before[2].size();
+  const std::vector<Block> before_swa = SwaBlocks(seq);
+  const size_t swa_blocks_before = before_swa.size();
+  const size_t c4_blocks_before = C4Blocks(seq).size();
+  const size_t c128_blocks_before = C128Blocks(seq).size();
   std::vector<int32_t> swa_ids_before;
-  swa_ids_before.reserve(before[0].size());
-  for (const auto& block : before[0]) {
+  swa_ids_before.reserve(before_swa.size());
+  for (const auto& block : before_swa) {
     ASSERT_TRUE(block.is_valid());
     swa_ids_before.push_back(block.id());
   }
@@ -295,15 +304,14 @@ TEST(CompositeBlockManagerTest, FailedGrowthRollsBackNewBlocks) {
   EXPECT_FALSE(manager.allocate_for_sequence(&seq, 4096));
   EXPECT_EQ(manager.num_used_blocks(), used_before);
 
-  const auto& after = seq.kv_state().composite_blocks();
-  ASSERT_EQ(after.size(), 3u);
-  EXPECT_EQ(after[0].size(), swa_blocks_before);
-  EXPECT_EQ(after[1].size(), c4_blocks_before);
-  EXPECT_EQ(after[2].size(), c128_blocks_before);
-  ASSERT_EQ(after[0].size(), swa_ids_before.size());
-  for (size_t i = 0; i < after[0].size(); ++i) {
-    EXPECT_TRUE(after[0][i].is_valid());
-    EXPECT_EQ(after[0][i].id(), swa_ids_before[i]);
+  const std::vector<Block> after_swa = SwaBlocks(seq);
+  EXPECT_EQ(after_swa.size(), swa_blocks_before);
+  EXPECT_EQ(C4Blocks(seq).size(), c4_blocks_before);
+  EXPECT_EQ(C128Blocks(seq).size(), c128_blocks_before);
+  ASSERT_EQ(after_swa.size(), swa_ids_before.size());
+  for (size_t i = 0; i < after_swa.size(); ++i) {
+    EXPECT_TRUE(after_swa[i].is_valid());
+    EXPECT_EQ(after_swa[i].id(), swa_ids_before[i]);
   }
 
   manager.deallocate_sequence(&seq);
@@ -320,7 +328,7 @@ TEST(CompositeBlockManagerTest, DeallocateToleratesRolledBackEmptySequence) {
 
   EXPECT_FALSE(manager.allocate_for_sequence(&seq, 4096));
   EXPECT_NO_FATAL_FAILURE(manager.deallocate_sequence(&seq));
-  EXPECT_TRUE(seq.kv_state().composite_blocks().empty());
+  EXPECT_FALSE(seq.kv_state().has_multi_block_export());
   EXPECT_EQ(manager.num_used_blocks(), 0u);
 }
 
@@ -344,22 +352,21 @@ TEST(CompositeBlockManagerTest, TokenIncrease_AddsBlocksIncrementally) {
   for (size_t num_tokens : token_steps) {
     EXPECT_TRUE(manager.allocate_for_sequence(&seq, num_tokens));
 
-    const std::vector<std::vector<Block>>& composite =
-        seq.kv_state().composite_blocks();
-    ASSERT_EQ(composite.size(), 3u);
+    const std::vector<Block> c4 = C4Blocks(seq);
+    const std::vector<Block> c128 = C128Blocks(seq);
 
     const size_t expect_1 = CeilBlocks(num_tokens, kBlockSizeRatio4);
     const size_t expect_2 = CeilBlocks(num_tokens, kBlockSizeRatio128);
-    EXPECT_EQ(composite[1].size(), expect_1)
-        << "num_tokens=" << num_tokens << " layer1 block count";
-    EXPECT_EQ(composite[2].size(), expect_2)
-        << "num_tokens=" << num_tokens << " layer2 block count";
+    EXPECT_EQ(c4.size(), expect_1)
+        << "num_tokens=" << num_tokens << " C4 block count";
+    EXPECT_EQ(c128.size(), expect_2)
+        << "num_tokens=" << num_tokens << " C128 block count";
 
     // Check that previously allocated block ids are still present (only
     // append).
     std::set<int32_t> ids_1, ids_2;
-    for (const auto& b : composite[1]) ids_1.insert(b.id());
-    for (const auto& b : composite[2]) ids_2.insert(b.id());
+    for (const auto& b : c4) ids_1.insert(b.id());
+    for (const auto& b : c128) ids_2.insert(b.id());
     for (const auto& prev : prev_ids_1) {
       for (int32_t id : prev) EXPECT_GT(ids_1.count(id), 0u);
     }
@@ -389,39 +396,38 @@ TEST(CompositeBlockManagerTest, SlidingWindowReleasesSkippedPhysicalBlocks) {
       static_cast<size_t>(sliding_window_blocks_per_sequence) * kBaseBlockSize;
 
   EXPECT_TRUE(manager.allocate_for_sequence(&seq, window_tokens));
-  const auto& initial = seq.kv_state().composite_blocks();
-  ASSERT_EQ(initial.size(), 3u);
-  ASSERT_EQ(initial[0].size(), sliding_window_blocks_per_sequence);
+  const std::vector<Block> initial = SwaBlocks(seq);
+  ASSERT_EQ(initial.size(), sliding_window_blocks_per_sequence);
   seq.kv_state().incr_kv_cache_tokens_num(window_tokens);
 
   std::vector<int32_t> initial_ids;
-  initial_ids.reserve(initial[0].size());
-  for (const auto& block : initial[0]) {
+  initial_ids.reserve(initial.size());
+  for (const auto& block : initial) {
     initial_ids.push_back(block.id());
   }
 
   EXPECT_TRUE(
       manager.allocate_for_sequence(&seq, window_tokens + 2 * kBaseBlockSize));
-  const auto& boundary = seq.kv_state().composite_blocks();
-  ASSERT_EQ(boundary[0].size(), sliding_window_blocks_per_sequence + 2);
+  const std::vector<Block> boundary = SwaBlocks(seq);
+  ASSERT_EQ(boundary.size(), sliding_window_blocks_per_sequence + 2);
   for (size_t i = 0; i < initial_ids.size(); ++i) {
-    EXPECT_EQ(boundary[0][i].id(), initial_ids[i]);
+    EXPECT_EQ(boundary[i].id(), initial_ids[i]);
   }
   seq.kv_state().incr_kv_cache_tokens_num(2 * kBaseBlockSize);
 
   EXPECT_TRUE(
       manager.allocate_for_sequence(&seq, window_tokens + 3 * kBaseBlockSize));
-  const auto& exceeded = seq.kv_state().composite_blocks();
-  ASSERT_EQ(exceeded[0].size(), sliding_window_blocks_per_sequence + 3);
-  EXPECT_FALSE(exceeded[0][0].is_valid());
-  EXPECT_FALSE(exceeded[0][1].is_valid());
-  EXPECT_EQ(exceeded[0][0].id(), -1);
-  EXPECT_EQ(exceeded[0][1].id(), -1);
+  const std::vector<Block> exceeded = SwaBlocks(seq);
+  ASSERT_EQ(exceeded.size(), sliding_window_blocks_per_sequence + 3);
+  EXPECT_FALSE(exceeded[0].is_valid());
+  EXPECT_FALSE(exceeded[1].is_valid());
+  EXPECT_EQ(exceeded[0].id(), -1);
+  EXPECT_EQ(exceeded[1].id(), -1);
   for (size_t i = 2; i < initial_ids.size(); ++i) {
-    EXPECT_EQ(exceeded[0][i].id(), initial_ids[i]);
+    EXPECT_EQ(exceeded[i].id(), initial_ids[i]);
   }
-  for (size_t i = initial_ids.size(); i < exceeded[0].size(); ++i) {
-    EXPECT_TRUE(exceeded[0][i].is_valid());
+  for (size_t i = initial_ids.size(); i < exceeded.size(); ++i) {
+    EXPECT_TRUE(exceeded[i].is_valid());
   }
 
   manager.deallocate_sequence(&seq);
@@ -438,7 +444,9 @@ TEST(CompositeBlockManagerTest, DeallocateSliceDispatchesToOwnerManagers) {
   EXPECT_GT(manager.num_used_blocks(), 0u);
 
   std::vector<Block> flat_blocks;
-  for (const auto& manager_blocks : seq.kv_state().composite_blocks()) {
+  for (const BlockType type :
+       {BlockType::SWA, BlockType::C4, BlockType::C128}) {
+    const Slice<Block> manager_blocks = seq.kv_state().blocks(type);
     flat_blocks.insert(
         flat_blocks.end(), manager_blocks.begin(), manager_blocks.end());
   }
@@ -460,7 +468,9 @@ TEST(CompositeBlockManagerTest,
   EXPECT_GT(manager.num_used_blocks(), 0u);
 
   std::vector<const Block*> flat_blocks;
-  for (const auto& manager_blocks : seq.kv_state().composite_blocks()) {
+  for (const BlockType type :
+       {BlockType::SWA, BlockType::C4, BlockType::C128}) {
+    const Slice<Block> manager_blocks = seq.kv_state().blocks(type);
     for (const auto& block : manager_blocks) {
       flat_blocks.push_back(&block);
     }

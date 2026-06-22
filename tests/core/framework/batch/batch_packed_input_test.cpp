@@ -72,7 +72,7 @@ TEST(BatchPackedInputTest, PackedProtoLazyUnpackRestoresSampleIdxes) {
                std::move(decoder),
                seq_params);
 
-  seq.add_kv_blocks(manager.allocate(1));
+  seq.add_blocks(BlockType::KV, manager.allocate(1));
 
   std::vector<Sequence*> sequences = {&seq};
   std::vector<uint32_t> budgets = {4};

@@ -249,7 +249,7 @@ TEST(SampleSlotTest, RequestOutputSplitsSampleResultsBySampleId) {
 
   Request request("sample-req", "", "", request_state);
   auto* seq = request.sequences()[0].get();
-  seq->add_kv_blocks(manager.allocate(1));
+  seq->add_blocks(BlockType::KV, manager.allocate(1));
   seq->kv_state().set_kv_cache_tokens_num(seq->num_prompt_tokens());
 
   std::vector<int64_t> top_tokens = {'X', 'Y'};
@@ -334,7 +334,7 @@ TEST(SampleSlotTest, RequestOutputStableSortsOutOfOrderSampleIds) {
 
   Request request("sample-req", "", "", request_state);
   auto* seq = request.sequences()[0].get();
-  seq->add_kv_blocks(manager.allocate(1));
+  seq->add_blocks(BlockType::KV, manager.allocate(1));
   seq->kv_state().set_kv_cache_tokens_num(seq->num_prompt_tokens());
 
   Token slot2_token('C');

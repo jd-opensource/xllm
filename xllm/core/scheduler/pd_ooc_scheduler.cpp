@@ -970,7 +970,8 @@ void PDOOCScheduler::prefill_send_first_generation() {
                             instance_info_.cluster_ids);
         ADD_VECTOR_TO_PROTO(gen->mutable_addrs(), instance_info_.addrs);
 
-        const auto blocks = request->sequences()[0]->kv_state().kv_blocks();
+        const auto blocks =
+            request->sequences()[0]->kv_state().blocks(BlockType::KV);
         std::vector<uint64_t> block_ids;
         block_ids.reserve(blocks.size());
         for (const auto& block : blocks) {
@@ -1112,7 +1113,8 @@ bool PDOOCScheduler::decode_recv_multi_generations(
 
   // pull kv cache (only needed once for the entire request)
   if (kv_cache_transfer_mode == "PULL") {
-    const auto blocks = request->sequences()[0]->kv_state().kv_blocks();
+    const auto blocks =
+        request->sequences()[0]->kv_state().blocks(BlockType::KV);
     std::vector<uint64_t> dst_block_ids;
     dst_block_ids.reserve(blocks.size());
     for (const auto& block : blocks) {
@@ -1421,7 +1423,7 @@ void PDOOCScheduler::prefill_send_multi_generations() {
           multi_req->add_addrs(addr);
         }
 
-        const auto blocks = sequence->kv_state().kv_blocks();
+        const auto blocks = sequence->kv_state().blocks(BlockType::KV);
         for (const auto& block : blocks) {
           multi_req->mutable_block_ids()->Add(block.id());
         }

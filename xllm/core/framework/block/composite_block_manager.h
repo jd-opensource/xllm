@@ -60,10 +60,6 @@ class CompositeBlockManager : public BlockManager {
 
  private:
   std::vector<std::unique_ptr<BlockManager>> sub_managers_;
-  // BlockType each sub-manager fills in the sequence's KVCacheState, parallel
-  // to sub_managers_. Derived at construction from manager_types /
-  // compress_ratios (SWA manager -> SWA; compress ratio 4 -> C4, 128 -> C128).
-  std::vector<BlockType> sub_manager_types_;
 };
 
 }  // namespace xllm

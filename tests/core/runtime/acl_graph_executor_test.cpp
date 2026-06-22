@@ -363,7 +363,7 @@ class AclGraphExecutorTest : public ::testing::Test {
 
   void reset() {
     for (auto& sequence : sequences_) {
-      auto blocks = sequence.kv_state().kv_blocks();
+      auto blocks = sequence.kv_state().blocks(BlockType::KV);
       if (!blocks.empty()) {
         block_manager_->deallocate(blocks);
       }
@@ -381,7 +381,7 @@ class AclGraphExecutorTest : public ::testing::Test {
     auto& sequence = sequences_.back();
 
     // Allocate blocks and configure sequence
-    sequence.add_kv_blocks(block_manager_->allocate(3));
+    sequence.add_blocks(BlockType::KV, block_manager_->allocate(3));
     // Set kv_cache_tokens_num to be >= num_prompt_tokens to move to decode
     // stage
     sequence.kv_state().incr_kv_cache_tokens_num(
@@ -527,7 +527,7 @@ TEST_F(AclGraphExecutorTest, DifferentBatchSizes) {
                               fake_decoder_,
                               seq_params_);
       auto& sequence = sequences_.back();
-      sequence.add_kv_blocks(block_manager_->allocate(2));
+      sequence.add_blocks(BlockType::KV, block_manager_->allocate(2));
       std::cout << "batch_size: " << batch_size << " i: " << i
                 << " sequence.kv_state().current_max_tokens_capacity(): "
                 << sequence.kv_state().current_max_tokens_capacity()
@@ -583,7 +583,7 @@ TEST_F(AclGraphExecutorTest, DecodeBatchSizeThresholdFallsBackToEager) {
                             fake_decoder_,
                             seq_params_);
     auto& sequence = sequences_.back();
-    sequence.add_kv_blocks(block_manager_->allocate(2));
+    sequence.add_blocks(BlockType::KV, block_manager_->allocate(2));
     sequence.kv_state().incr_kv_cache_tokens_num(/*size=*/4);
     sequence.append_token(100 + i);
     batch->add(&sequence);
@@ -735,7 +735,7 @@ TEST_F(AclGraphExecutorTest, BatchInputCarriesLinearStateIds) {
   auto linear_state_block = block_manager_->allocate(1);
   ASSERT_EQ(linear_state_block.size(), 1);
   const int32_t expected_linear_state_id = linear_state_block[0].id();
-  seq.set_single_block(std::move(linear_state_block[0]));
+  seq.add_blocks(BlockType::SINGLE, linear_state_block);
 
   auto forward_input = batch->prepare_forward_input(
       options_.num_decoding_tokens(), 0, model_args_);

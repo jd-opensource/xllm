@@ -305,8 +305,8 @@ TEST(DisaggPDChunkedPrefillSchedulerTest,
   EXPECT_EQ(scheduler.get_running_sequences_budgets()[0], 2u);
   EXPECT_EQ(batches[0].get_allowed_max_tokens(), std::vector<uint32_t>({2}));
   EXPECT_EQ(sequence->kv_state().kv_cache_tokens_num(), 8u);
-  EXPECT_EQ(sequence->kv_state().shared_kv_blocks_num(), 4u);
-  EXPECT_EQ(sequence->kv_state().num_kv_blocks(), 5u);
+  EXPECT_EQ(sequence->kv_state().shared_blocks_num(BlockType::KV), 4u);
+  EXPECT_EQ(sequence->kv_state().num_blocks(BlockType::KV), 5u);
 
   block_manager->deallocate(request.get());
   release_prefix_cache(block_manager);
@@ -336,8 +336,8 @@ TEST(DisaggPDChunkedPrefillSchedulerTest, FullPrefixHitStillSchedulesStep) {
   EXPECT_EQ(scheduler.get_running_sequences_budgets()[0], 2u);
   EXPECT_EQ(batches[0].get_allowed_max_tokens(), std::vector<uint32_t>({2}));
   EXPECT_EQ(sequence->kv_state().kv_cache_tokens_num(), 6u);
-  EXPECT_EQ(sequence->kv_state().shared_kv_blocks_num(), 3u);
-  EXPECT_EQ(sequence->kv_state().num_kv_blocks(), 4u);
+  EXPECT_EQ(sequence->kv_state().shared_blocks_num(BlockType::KV), 3u);
+  EXPECT_EQ(sequence->kv_state().num_blocks(BlockType::KV), 4u);
 
   block_manager->deallocate(request.get());
   release_prefix_cache(block_manager);

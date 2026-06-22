@@ -21,6 +21,9 @@ SlidingWindowBlockManager::SlidingWindowBlockManager(const Options& options)
     : BlockManagerImpl(options) {
   CHECK_GT(options_.swa_blocks_per_seq(), 0u)
       << "swa_blocks_per_seq must be positive";
+  // SWA blocks always land in the SWA slot of the sequence KVCacheState,
+  // regardless of what the caller passed.
+  options_.block_type(BlockType::SWA);
 }
 
 std::vector<Block> SlidingWindowBlockManager::allocate(size_t num_blocks) {

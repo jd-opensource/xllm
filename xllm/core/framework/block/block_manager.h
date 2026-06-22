@@ -58,10 +58,17 @@ class BlockManager {
     PROPERTY(uint32_t, max_seqs_per_batch) = 0;
     // Hasher type bound to the engine (TEXT for LLM, MM for VLM).
     PROPERTY(BlockHasherType, hasher_type) = BlockHasherType::TEXT;
+    // Which KVCacheState slot this manager's blocks land in. The non-composite
+    // device pool uses KV; CompositeBlockManager passes SWA / C4 / C128 to each
+    // sub-manager; SingleBlockManager forces Single in its ctor.
+    PROPERTY(BlockType, block_type) = BlockType::KV;
   };
 
   explicit BlockManager(Options options) : options_(options) {}
   virtual ~BlockManager() = default;
+
+  // The KVCacheState slot this manager fills. Sequence state is keyed by this.
+  BlockType block_type() const { return options_.block_type(); }
 
   virtual void deallocate(const Slice<Block>& blocks) = 0;
 

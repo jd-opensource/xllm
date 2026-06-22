@@ -312,7 +312,7 @@ void RecMultiRoundBatchInputBuilder::setup_kv_cache_info(
 #if defined(USE_NPU)
   (void)write_block_ids_ptr;
   BuilderState& state = *state_ptr;
-  const auto blocks = sequence->kv_state().kv_blocks();
+  const auto blocks = sequence->kv_state().blocks(BlockType::KV);
   std::vector<int32_t> block_ids;
   block_ids.reserve(blocks.size());
   for (const auto& block : blocks) {

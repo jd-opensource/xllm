@@ -133,7 +133,8 @@ uint32_t BlockCapacityGuard::get_needed_block_num_for_prefill() {
 
   uint32_t total_num_prefix_cache_block = 0;
   for (auto* sequence : candidate_sequences_) {
-    uint32_t num_prefix_cache_block = sequence->kv_state().num_kv_blocks();
+    uint32_t num_prefix_cache_block =
+        sequence->kv_state().num_blocks(BlockType::KV);
     total_num_prefix_cache_block += num_prefix_cache_block;
   }
   CHECK_GE(num_reserved_block_for_prefill_, total_num_prefix_cache_block);
@@ -173,10 +174,10 @@ uint32_t BlockCapacityGuard::num_block_need_to_use_for(
 uint32_t BlockCapacityGuard::num_release_block_for(Sequence* sequence) {
   uint32_t num_tokens_block = ceiling_div(sequence->num_tokens(), block_size());
   uint32_t num_release_block =
-      num_tokens_block - sequence->kv_state().num_kv_blocks();
+      num_tokens_block - sequence->kv_state().num_blocks(BlockType::KV);
   CHECK_GE(num_release_block, 0);
 
-  Slice<Block> blocks = sequence->kv_state().kv_blocks();
+  Slice<Block> blocks = sequence->kv_state().blocks(BlockType::KV);
 
   for (std::size_t i = 0; i < blocks.size(); ++i) {
     uint32_t ref_count = blocks[i].ref_count();

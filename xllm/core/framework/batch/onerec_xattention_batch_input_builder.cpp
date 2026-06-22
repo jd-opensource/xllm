@@ -80,7 +80,7 @@ ForwardInput OneRecXAttentionBatchInputBuilder::build_rec_forward_input(
           sequence_ptr->num_tokens() + sequence_ptr->num_decoder_embeddings());
       const int32_t n_kv_cache_tokens =
           static_cast<int32_t>(sequence_ptr->kv_state().kv_cache_tokens_num());
-      const auto blocks = sequence_ptr->kv_state().kv_blocks();
+      const auto blocks = sequence_ptr->kv_state().blocks(BlockType::KV);
       std::vector<int32_t> block_ids;
       block_ids.reserve(blocks.size());
       for (const auto& block : blocks) {
@@ -88,8 +88,8 @@ ForwardInput OneRecXAttentionBatchInputBuilder::build_rec_forward_input(
       }
       block_tables_vec.emplace_back(std::move(block_ids));
       if (total_seq_len > n_kv_cache_tokens) {
-        auto slot_ids = sequence_ptr->kv_state().kv_cache_slots(
-            n_kv_cache_tokens, total_seq_len);
+        auto slot_ids = sequence_ptr->kv_state().cache_slots(
+            BlockType::KV, n_kv_cache_tokens, total_seq_len);
         new_cache_slots_vec.insert(
             new_cache_slots_vec.end(), slot_ids.begin(), slot_ids.end());
       }

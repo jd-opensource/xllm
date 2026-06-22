@@ -28,6 +28,7 @@ BlockManager::Options make_single_block_options(uint32_t num_blocks) {
   options.block_size(/*unused=*/1);
   options.enable_prefix_cache(false);
   options.enable_disagg_pd(false);
+  options.block_type(BlockType::SINGLE);
   return options;
 }
 

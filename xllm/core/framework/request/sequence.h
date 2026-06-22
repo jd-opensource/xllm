@@ -200,20 +200,18 @@ class Sequence final {
   void clear_mtp_bootstrap_embedding() {
     mtp_bootstrap_embedding_ = torch::Tensor();
   }
-  bool has_single_block_id() const { return kv_state_.has_single_block(); }
-  int32_t get_single_block_id() const { return kv_state_.single_block_id(); }
-  void set_single_block(Block&& single_block) {
-    kv_state_.set_single_block(std::move(single_block));
+  // Single per-sequence resource block id (linear-state / embedding), or -1.
+  int32_t get_single_block_id() const {
+    return kv_state_.get_single_block_id();
   }
-  Block reset_single_block() { return kv_state_.reset_single_block(); }
   const std::string& request_id() const { return request_id_; }
   // get input embedding
   torch::Tensor get_input_embedding() const { return input_embedding_; }
 
-  void add_kv_blocks(const std::vector<Block>& blocks);
-  void add_host_kv_blocks(const std::vector<Block>& blocks);
-  void add_shared_kv_blocks(std::vector<Block>&& blocks);
-  void add_shared_host_kv_blocks(std::vector<Block>&& blocks);
+  void add_blocks(BlockType type, const std::vector<Block>& blocks);
+  void add_host_blocks(BlockType type, const std::vector<Block>& blocks);
+  void add_shared_blocks(BlockType type, std::vector<Block>&& blocks);
+  void add_shared_host_blocks(BlockType type, std::vector<Block>&& blocks);
 
   // Precomputed chained block hashes used by the prefix cache. Covers all full
   // blocks of the current tokens; reused by match()/insert() so the hash is
