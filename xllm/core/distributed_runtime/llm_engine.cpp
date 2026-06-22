@@ -1218,7 +1218,7 @@ bool LLMEngine::update_weights(const std::string& weights_path) {
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
-    futures.push_back(worker->update_weights_async(weights_path));
+    futures.emplace_back(worker->update_weights_async(weights_path));
   }
 
   auto results = folly::collectAll(futures).get();
