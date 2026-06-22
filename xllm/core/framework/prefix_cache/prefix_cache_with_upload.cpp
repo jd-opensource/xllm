@@ -26,7 +26,7 @@ PrefixCacheWithUpload::~PrefixCacheWithUpload() {
     delete back;
   }
 
-  auto front = db_kvcache_events_.get_back_value();
+  auto front = db_kvcache_events_.get_front_value();
   if (front) {
     delete front;
   }
