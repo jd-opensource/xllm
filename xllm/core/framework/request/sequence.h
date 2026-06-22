@@ -200,14 +200,12 @@ class Sequence final {
   void clear_mtp_bootstrap_embedding() {
     mtp_bootstrap_embedding_ = torch::Tensor();
   }
-  bool has_single_block_id() const { return single_block_.is_valid(); }
-  int32_t get_single_block_id() const {
-    return has_single_block_id() ? single_block_.id() : -1;
-  }
+  bool has_single_block_id() const { return kv_state_.has_single_block(); }
+  int32_t get_single_block_id() const { return kv_state_.single_block_id(); }
   void set_single_block(Block&& single_block) {
-    single_block_ = std::move(single_block);
+    kv_state_.set_single_block(std::move(single_block));
   }
-  Block reset_single_block() { return std::move(single_block_); }
+  Block reset_single_block() { return kv_state_.reset_single_block(); }
   const std::string& request_id() const { return request_id_; }
   // get input embedding
   torch::Tensor get_input_embedding() const { return input_embedding_; }
@@ -525,10 +523,6 @@ class Sequence final {
   // but the generated tokens are retained for the next execution.
   // In the next execution, we should treat these generated tokens as prompts.
   size_t volatile_num_prompt_tokens_ = 0;
-
-  // Scheduler-side logical single-block handle. Transport expands this into
-  // embedding_ids / linear_state_ids as needed by worker-side physical caches.
-  Block single_block_;
 
   // is the sequence finished
   mutable bool finished_ = false;

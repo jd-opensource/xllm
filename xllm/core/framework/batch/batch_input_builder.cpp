@@ -750,17 +750,17 @@ void BatchInputBuilder::setup_kv_cache_info(
   sequence->kv_state().incr_kv_cache_tokens_num(/*size=*/q_seq_len);
 
   const auto blocks = sequence->kv_state().kv_blocks();
-  const auto composite_blocks = sequence->kv_state().composite_blocks();
-  if (!composite_blocks.empty()) {
+  if (sequence->kv_state().has_multi_block_export()) {
+    const auto export_view = sequence->kv_state().multi_block_export_view();
     if (state.multi_block_tables.empty()) {
-      state.multi_block_tables.resize(composite_blocks.size());
+      state.multi_block_tables.resize(export_view.size());
     }
-    CHECK_EQ(state.multi_block_tables.size(), composite_blocks.size())
+    CHECK_EQ(state.multi_block_tables.size(), export_view.size())
         << "composite block manager count mismatch. existing_manager_num="
         << state.multi_block_tables.size()
-        << ", current_manager_num=" << composite_blocks.size();
-    for (size_t m = 0; m < composite_blocks.size(); ++m) {
-      const auto& composite_block = composite_blocks[m];
+        << ", current_manager_num=" << export_view.size();
+    for (size_t m = 0; m < export_view.size(); ++m) {
+      const auto& composite_block = *export_view[m].second;
       std::vector<int32_t> block_ids;
       block_ids.reserve(composite_block.size());
       for (const auto& block : composite_block) {

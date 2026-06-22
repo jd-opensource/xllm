@@ -19,6 +19,7 @@ limitations under the License.
 #include <openssl/sha.h>
 #include <string.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -28,6 +29,30 @@ limitations under the License.
 namespace xllm {
 
 class BlockManager;
+
+// Identity of a KV block's cache role inside a sequence's KVCacheState. Used as
+// the key of the per-sequence block map: the legacy flat attention KV lives
+// under KV, DSV4's three groups under SWA/C4/C128, and the per-sequence
+// linear/embedding resource block (formerly Sequence::single_block_) under
+// Single. A block carries no type identity itself; the owning BlockManager
+// decides which key to store it under when it fills the sequence state.
+enum class BlockType : int8_t {
+  KV = 0,      // normal/Qwen flat attention KV, exported to block_tables
+  SWA = 1,     // DSV4 sliding window, exported to multi_block_tables[0]
+  C4 = 2,      // DSV4 compressed, exported to multi_block_tables[1]
+  C128 = 3,    // DSV4 compressed, exported to multi_block_tables[2]
+  Single = 4,  // per-sequence linear-state / embedding resource block, exported
+               // via get_single_block_id() (linear_state_ids / embedding_ids),
+               // not to block_tables / multi_block_tables
+};
+
+// Fixed column order of worker multi_block_tables. The exported tables must
+// follow this order so they line up with the worker-side DSA group_infos; it
+// must never depend on std::map iteration order or config traversal order.
+inline constexpr std::array<BlockType, 3> kMultiBlockExportOrder = {
+    BlockType::SWA,
+    BlockType::C4,
+    BlockType::C128};
 
 class Block final {
  public:

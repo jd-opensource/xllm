@@ -307,6 +307,13 @@ Sequence::Sequence(const Sequence& other)
       updated_since_last_beam_search_(other.updated_since_last_beam_search_),
       termination_flag_(std::make_shared<std::atomic<int32_t>>(INT32_MAX)) {
   logprob_state_ = std::make_unique<LogprobState>(*other.logprob_state_);
+  // A forked sequence (beam / best_of) shares the prompt KV prefix by
+  // ref-counting those blocks, but its linear-state / embedding resource block
+  // is private: drop the copied Single block so this sequence allocates its own
+  // on the next allocate. Preserves the pre-map behavior where single_block_
+  // was never copied by this constructor.
+  kv_state_.reset_single_block();
+  host_kv_state_.reset_single_block();
 }
 
 // The first token will be only used in disagg pd mode.
@@ -720,7 +727,6 @@ void Sequence::reset() {
   timer_.reset();
   is_timeout_set_ = false;
   volatile_num_prompt_tokens_ = num_tokens_;
-  single_block_ = Block();
 }
 
 void Sequence::add_shared_kv_blocks(std::vector<Block>&& blocks) {
