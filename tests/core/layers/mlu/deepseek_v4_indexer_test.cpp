@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ limitations under the License.
 #include "layers/mlu/deepseek_v4_ref_utils.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 #include "util/linalg.h"
 
 namespace xllm {
@@ -443,7 +444,7 @@ class DeepseekV4IndexerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     FLAGS_block_size = 1;
-    torch::Device torch_device(Device::type_torch(), 0);
+    torch::Device torch_device(Platform::type_torch(), 0);
     Device device(torch_device);
     device.set_seed();
     device_ = torch_device;

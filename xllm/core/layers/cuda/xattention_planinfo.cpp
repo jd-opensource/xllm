@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/platform/device.h"
+#include "core/platform/platform.h"
 #include "core/util/utils.h"
 #include "flashinfer_workspace.h"
 #include "kernels/cuda/utils.h"
@@ -144,7 +145,7 @@ void update_xattention_plan_info(std::shared_ptr<PlanInfo> plan_info,
     // fixed_split_size / disable_split_kv / num_colocated_ctas.
     // FA2 still expects the full argument list.
     const bool use_sm90_short_plan_args =
-        Device::is_support_sm90a() && backend == "fa3";
+        Platform::is_support_sm90a() && backend == "fa3";
     ffi::Array<int64_t> plan_result =
         use_sm90_short_plan_args
             ? plan_func(ffi_float_workspace_buffer,

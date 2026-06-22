@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ limitations under the License.
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/platform/device.h"
+#include "core/platform/platform.h"
 #if defined(USE_CUDA) || defined(USE_MLU) || defined(USE_DCU)
 #include "core/platform/numa_utils.h"
 #endif
@@ -123,9 +124,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   KVCacheConfig::get_instance().block_size(block_size);
   EPLBConfig::get_instance().rank_tablefile(rank_tablefile);
 
-  const std::string device_type = xllm::Device::type_str();
-  const std::string device_str = device_type + ":" + std::to_string(device_idx);
-  xllm::Device device{torch::Device(device_str)};
+  xllm::Device device{device_idx};
   device.set_device();
 
 #if defined(USE_NPU)

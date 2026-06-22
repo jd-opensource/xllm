@@ -25,11 +25,13 @@ MTP technology provides a novel efficiency optimization solution for LLM inferen
     - DeepSeek-R1 (input model_type: deepseek_v3, exported MTP model_type: deepseek_v3_mtp)
     - GLM4 MoE (e.g., GLM-4.5-Air, exported MTP model_type: glm4_moe_mtp)
     - Qwen3.5 (for example [Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B), input model_type: qwen3_5 or qwen3_5_text, exported MTP model_type: qwen3_5_mtp)
+    - MiMo (for example [XiaomiMiMo/MiMo-7B-Base](https://huggingface.co/XiaomiMiMo/MiMo-7B-Base), input model_type: mimo, exported MTP model_type: mimo_mtp)
     
     Note:
     - DeepSeek V3 and R1 both have input model_type "deepseek_v3", and the exported MTP model will have model_type "deepseek_v3_mtp"
     - DeepSeek V3.2 has input model_type "deepseek_v3" (but can be auto-detected by index_head_dim fields), and the exported MTP model will have model_type "deepseek_v32_mtp"
     - Qwen3.5 official checkpoints include native MTP weights. Export them into a standalone draft model before serving with xLLM.
+    - MiMo official checkpoints include native MTP weights (stored under `model.mtp_layers.*`). Currently only CUDA devices are supported. Export into a standalone draft model before serving with xLLM.
 
 ## Usage Example
 
@@ -74,13 +76,22 @@ python3 tools/export_mtp.py \
 
 Qwen3.5 export reads the native `mtp.*` or `model.mtp.*` weights from the input checkpoint, keeps the shared embedding and `lm_head` weights required by the draft model, and writes `mtp_layer_parameters.safetensors` plus an MTP config with `model_type=qwen3_5_mtp`.
 
+#### MiMo
+```bash
+python3 tools/export_mtp.py \
+    --input-dir /path/to/MiMo-7B-Base \
+    --output-dir /path/to/MiMo-7B-Base-mtp
+```
+
+MiMo export reads `model.mtp_layers.0.*` weights from the input checkpoint and writes them to `mtp_layer_parameters.safetensors` under the same `model.mtp_layers.0.*` keys without remapping. The exported config sets `num_hidden_layers` to the MTP layer count (1), consistent with other MTP models. `embed_tokens` and `lm_head` are not included in the export and are shared from the target model at runtime.
+
 #### Manually Specify Model Type
 If auto-detection fails, you can manually specify the model type:
 ```bash
 python3 tools/export_mtp.py \
     --input-dir /path/to/model \
     --output-dir /path/to/model-mtp \
-    --model-type deepseek_v3  # Options: deepseek_v3 (for V3/R1), deepseek_v32 (for V3.2), glm4_moe, qwen3_5, qwen3_5_moe
+    --model-type deepseek_v3  # Options: deepseek_v3 (for V3/R1), deepseek_v32 (for V3.2), glm4_moe, mimo, qwen3_5, qwen3_5_moe
 ```
 
 Example input checkpoints with native MTP weights:
@@ -89,6 +100,7 @@ Example input checkpoints with native MTP weights:
 - [DeepSeek-R1](https://huggingface.co/deepseek-ai/DeepSeek-R1)
 - [GLM-4.5-Air](https://huggingface.co/zai-org/GLM-4.5-Air)
 - [Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B)
+- [MiMo-7B-Base](https://huggingface.co/XiaomiMiMo/MiMo-7B-Base)
 
 ### Launch Script
 
@@ -136,6 +148,20 @@ done
 MODEL_PATH="/models/GLM-4.5-Air"
 DRAFT_MODEL_PATH="/models/GLM-4.5-Air-mtp"
 # ... same other configurations
+```
+
+#### MiMo Launch Example (CUDA)
+```bash
+MODEL_PATH="/models/MiMo-7B-Base"
+DRAFT_MODEL_PATH="/models/MiMo-7B-Base-mtp"
+
+./xllm \
+    --model $MODEL_PATH \
+    --devices="cuda:0" \
+    --port 13222 \
+    --draft_model $DRAFT_MODEL_PATH \
+    --draft_devices="cuda:0" \
+    --num_speculative_tokens 1
 ```
 
 # Performance Data

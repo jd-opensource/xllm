@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "kernels/ops_api.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -102,7 +103,7 @@ torch::Tensor DenseMLPImpl::forward(const torch::Tensor& hidden_states) {
     return down_proj_->forward(gate_up);
   } else {
     torch::Tensor output;
-    if (Device::type_str() != "npu") {
+    if (!Platform::is_npu()) {
       int64_t batch_size = gate_up.sizes()[0];
       output = torch::empty(
           {batch_size, intermediate_size_ / process_group_->world_size()},

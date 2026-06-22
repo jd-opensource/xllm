@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -224,8 +224,6 @@ DECLARE_uint32(layers_wise_copy_batchs);
 DECLARE_double(host_blocks_factor);
 
 DECLARE_bool(enable_kvcache_store);
-
-DECLARE_bool(enable_cache_upload);
 
 DECLARE_string(store_protocol);
 

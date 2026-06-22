@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -94,6 +94,7 @@ limitations under the License.
 #include "dit/pipelines/pipeline_longcat_image.h"       // IWYU pragma: keep
 #include "dit/pipelines/pipeline_longcat_image_edit.h"  // IWYU pragma: keep
 #include "llm/mimo.h"                                   // IWYU pragma: keep
+#include "llm/mimo_mtp.h"                               // IWYU pragma: keep
 #include "llm/qwen2.h"                                  // IWYU pragma: keep
 #include "llm/qwen3.h"                                  // IWYU pragma: keep
 #include "llm/qwen3_moe.h"                              // IWYU pragma: keep

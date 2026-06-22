@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 
@@ -27,7 +28,7 @@ TEST(EplbPolicyTest, Build) {
   // use init device to trigger the loading of torch backend for different
   // devices
   //  since the allocation of pinnned memory on cpu is still backend-dependent.
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   std::string rank_table_file;
   EplbPolicy eplb_policy(5, 4, 1);
   std::vector<torch::Tensor> tensors;

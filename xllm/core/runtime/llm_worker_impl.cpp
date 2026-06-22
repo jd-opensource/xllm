@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -79,6 +79,21 @@ LLMWorkerImpl::LLMWorkerImpl(const ParallelArgs& parallel_args,
 
 bool LLMWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
+
+#if defined(USE_CUDA)
+  // Ensure FlashinferWorkspace is initialized on the calling thread before
+  // constructing model layers. When called synchronously from
+  // SpeculativeWorkerImpl (e.g. MTP target/draft setup), init_model runs on
+  // the MTP worker's thread (T_MTP) rather than on the LLMWorkerImpl's own
+  // threadpool thread (T_worker) where the scheduled initialize() runs.
+  // FlashinferWorkspace is thread_local, so T_MTP's instance must be
+  // explicitly initialized here; otherwise FlashInferAttentionImpl captures
+  // an undefined int_workspace_buffer_ and crashes at prefill time.
+  auto& ws = ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance();
+  if (!ws.get_int_workspace_buffer().defined()) {
+    ws.initialize(device_);
+  }
+#endif
 
   // Try to create a causal LM model
   model_ = create_llm_model(context);
@@ -176,9 +191,10 @@ LLMWorkerImpl::step_async_no_sync(const ForwardInput& input) {
   threadpool_.schedule([this,
                         input = std::move(input_on_device),
                         promise = std::move(promise)]() mutable {
-    if (hierarchy_kv_cache_transfer_ != nullptr) {
-      hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
-    }
+    // hierarchy temporarily disabled during the block-manager refactor
+    // if (hierarchy_kv_cache_transfer_ != nullptr) {
+    //   hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
+    // }
 
     const auto output = this->step_no_sync(input);
     promise.setValue(output);
