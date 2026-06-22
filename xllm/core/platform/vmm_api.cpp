@@ -175,7 +175,7 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle,
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   prop.location.id = device_id;
 
-  ret = cuMemCreate(&phy_mem_handle, size, &prop, 0);
+  ret = cuMemCreate(&phy_mem_handle, size, &prop, /*flags=*/0);
   // Note: cuMemSetAccess is called in map() after cuMemMap, not here
 #elif defined(USE_DCU)
   hipMemAllocationProp prop = {};
