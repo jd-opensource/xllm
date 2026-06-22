@@ -122,7 +122,7 @@ void* SleepableAllocator::reserve_and_map(MemTag tag,
       std::make_unique<SleepableRegion>(tag, device, bytes, chunk_bytes);
   region->map();
   void* base = region->base();
-  regions_.push_back(std::move(region));
+  regions_.emplace_back(std::move(region));
   return base;
 }
 
