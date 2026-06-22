@@ -27,6 +27,7 @@ limitations under the License.
 #include "layers/common/linear.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -43,7 +44,7 @@ class DenseMLPTest : public ::testing::Test {
     // Initialize tensor options
     options_ = torch::TensorOptions()
                    .dtype(torch::kBFloat16)
-                   .device(Device::type_torch(), 0)
+                   .device(Platform::type_torch(), 0)
                    .requires_grad(false);
 
     // Create mock ProcessGroup and initialize ParallelArgs

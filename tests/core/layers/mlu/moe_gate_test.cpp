@@ -25,6 +25,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -36,7 +37,7 @@ class MoEGateTest : public ::testing::Test {
     quant_args_ = QuantArgs();  // use empty quant
     options_ = torch::TensorOptions()
                    .dtype(torch::kBFloat16)
-                   .device(Device::type_torch(), 0)
+                   .device(Platform::type_torch(), 0)
                    .requires_grad(false);
     parallel_args_ = test::create_default_parallel_args(mock_process_group_);
   }

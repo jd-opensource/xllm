@@ -93,6 +93,11 @@ class ProcessGroup {
   virtual void reduce_scatter(const torch::Tensor& input,
                               torch::Tensor& output);
 
+  // broadcast: in-place overwrite the input tensor on every process with the
+  // copy held by root_rank. Used to unify per-rank sampling results to a single
+  // source of truth across the consensus group.
+  virtual void broadcast(torch::Tensor& input, int32_t root_rank = 0);
+
   virtual void all_to_all_single(
       torch::Tensor output,
       torch::Tensor input,

@@ -46,6 +46,7 @@ limitations under the License.
 #include "core/framework/tokenizer/tiktoken_tokenizer.h"
 #include "core/framework/tokenizer/tokenizer_factory.h"
 #include "core/platform/device.h"
+#include "core/platform/platform.h"
 #include "core/util/blocking_counter.h"
 #include "core/util/json_reader.h"
 #include "core/util/model_config_utils.h"
@@ -133,7 +134,7 @@ bool try_load_compressed_tensors_quant_cfg(const JsonReader& reader,
     if (!is_compressed_tensors_fp8_scheme(*weights_it) ||
         !is_compressed_tensors_fp8_scheme(*input_activations_it)) {
       // Check for INT8 W8A8 (compressed-tensors int quantized)
-      if (Device::type_str() == "dcu" &&
+      if (Platform::is_dcu() &&
           is_compressed_tensors_int8_scheme(*weights_it,
                                             /*expected_dynamic=*/false) &&
           is_compressed_tensors_int8_scheme(*input_activations_it,
@@ -392,7 +393,7 @@ bool load_quant_cfg(const JsonReader& reader, QuantArgs& quant_args) {
   // Only CUDA and DCU currently adapts this compressed-tensors JSON layout.
   // For other backends, skip this special parsing path and continue with the
   // generic quantization config parsing path.
-  if ((Device::type_str() == "cuda" || Device::type_str() == "dcu") &&
+  if ((Platform::is_cuda() || Platform::is_dcu()) &&
       try_load_compressed_tensors_quant_cfg(reader, quant_args)) {
     return true;
   }

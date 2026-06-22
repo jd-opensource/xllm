@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "kernels/ops_api.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -48,7 +49,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> RMSNormImpl::forward(
   input = input.reshape({-1, norm_dim_});
 
   torch::Tensor output;
-  if (Device::type_str() != "npu") {
+  if (!Platform::is_npu()) {
     if (inplace_output.has_value()) {
       output = inplace_output.value();
       output = output.reshape({-1, norm_dim_});
@@ -60,7 +61,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> RMSNormImpl::forward(
   std::optional<torch::Tensor> residual_out;
   if (residual.has_value()) {
     residual.value() = residual.value().reshape({-1, norm_dim_});
-    if (Device::type_str() == "mlu" || Device::type_str() == "ilu") {
+    if (Platform::is_mlu() || Platform::is_ilu()) {
       residual_out = residual.value();
     }
   }
@@ -95,8 +96,7 @@ RMSNormImpl::forward_fp8(torch::Tensor& input,
                          const torch::Tensor& fp8_scale,
                          std::optional<torch::Tensor> residual) {
   // Only supported on CUDA for now
-  CHECK(Device::type_str() == "cuda")
-      << "forward_fp8 is only supported on CUDA";
+  CHECK(Platform::is_cuda()) << "forward_fp8 is only supported on CUDA";
   CHECK(mode_ == kRmsNormMode)
       << "forward_fp8 only supports RMSNorm mode, not LayerNorm";
 

@@ -22,6 +22,7 @@ limitations under the License.
 #include "core/framework/config/execution_config.h"
 #include "core/framework/multimodal/mm_visitor.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 
@@ -40,7 +41,7 @@ VlmExecutorImpl::VlmExecutorImpl(CausalLM* model,
 
   if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     llm_executor_ = ExecutorImplFactory::get_instance().create_executor_impl(
-        model, args, device, options, Device::type_str());
+        model, args, device, options, Platform::type_str());
   }
 }
 

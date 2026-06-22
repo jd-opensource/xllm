@@ -23,6 +23,7 @@ limitations under the License.
 
 #include "core/framework/model/rec_causal_lm.h"
 #include "core/platform/device.h"
+#include "core/platform/platform.h"
 #include "core/util/model_config_utils.h"
 #include "models/model_registry.h"
 
@@ -164,7 +165,7 @@ TEST(HFModelLoaderTest, LoadCompressedTensorsFp8StaticConfig) {
   )json"));
 
   QuantArgs quant_args;
-  if (Device::type_str() == "cuda") {
+  if (Platform::is_cuda()) {
     ASSERT_TRUE(load_quant_cfg(reader, quant_args));
     EXPECT_EQ(quant_args.quant_method(), kQuantMethodFp8);
     EXPECT_EQ(quant_args.bits(), 8);
@@ -283,6 +284,66 @@ TEST(HFModelLoaderTest, Qwen35MtpModelArgsFromMoeConfig) {
   EXPECT_EQ(args.layer_types()[1], "full_attention");
 }
 #endif
+
+#if defined(USE_CUDA)
+TEST(HFModelLoaderTest, MiMoMtpModelArgsFromExportedConfig) {
+  // export_mtp.py sets num_hidden_layers = mtp_layer_count (1) in the exported
+  // config, matching mtp_layers.0.* weight layout loaded by MiMoMtpModelImpl.
+  auto loader = ModelRegistry::get_model_args_loader("mimo_mtp");
+  ASSERT_NE(loader, nullptr);
+
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json(
+    {
+      "model_type": "mimo_mtp",
+      "num_hidden_layers": 1,
+      "num_attention_heads": 32,
+      "num_key_value_heads": 8,
+      "hidden_size": 4096,
+      "intermediate_size": 11008,
+      "rope_theta": 640000.0,
+      "num_nextn_predict_layers": 1
+    }
+  )json"));
+
+  ModelArgs args;
+  ASSERT_TRUE(loader(reader, &args));
+  EXPECT_EQ(args.model_type(), "mimo_mtp");
+  EXPECT_EQ(args.n_layers(), 1);
+  EXPECT_EQ(args.n_heads(), 32);
+  EXPECT_EQ(args.n_kv_heads(), std::optional<int64_t>(8));
+  EXPECT_EQ(args.hidden_size(), 4096);
+  EXPECT_EQ(args.intermediate_size(), 11008);
+  EXPECT_FLOAT_EQ(args.rope_theta(), 640000.0f);
+  EXPECT_EQ(args.num_nextn_predict_layers(), 1);
+  // head_dim is derived from hidden_size / n_heads when absent from config
+  EXPECT_EQ(args.head_dim(), 128);
+  EXPECT_EQ(args.stop_token_ids(),
+            std::unordered_set<int32_t>({args.eos_token_id()}));
+}
+
+TEST(HFModelLoaderTest, MiMoMtpModelArgsDefaults) {
+  // Verify REGISTER_MODEL_ARGS defaults match MiMo-7B-Base architecture.
+  auto loader = ModelRegistry::get_model_args_loader("mimo_mtp");
+  ASSERT_NE(loader, nullptr);
+
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json({ "model_type": "mimo_mtp" })json"));
+
+  ModelArgs args;
+  ASSERT_TRUE(loader(reader, &args));
+  EXPECT_EQ(args.model_type(), "mimo_mtp");
+  EXPECT_EQ(args.n_layers(), 36);
+  EXPECT_EQ(args.n_heads(), 32);
+  EXPECT_EQ(args.hidden_size(), 4096);
+  EXPECT_EQ(args.vocab_size(), 151680);
+  EXPECT_FLOAT_EQ(args.rope_theta(), 640000.0f);
+  EXPECT_EQ(args.num_nextn_predict_layers(), 1);
+  EXPECT_EQ(args.head_dim(), 128);
+  EXPECT_EQ(args.eos_token_id(), 151643);
+  EXPECT_EQ(args.stop_token_ids(), std::unordered_set<int32_t>({151643}));
+}
+#endif  // USE_CUDA
 
 #if defined(USE_DCU)
 TEST(HFModelLoaderTest, LoadCompressedTensorsInt8Scheme) {
