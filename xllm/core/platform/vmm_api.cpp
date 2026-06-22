@@ -162,7 +162,7 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle,
   prop.requestedHandleTypes = CN_MEM_HANDLE_TYPE_NONE;
   prop.allocFlags.compressionType = CN_MEM_ALLOCATION_COMP_NONE;
 
-  ret = cnMemCreate(&phy_mem_handle, size, &prop, 0);
+  ret = cnMemCreate(&phy_mem_handle, size, &prop, /*flags=*/0);
 
   CNmemAccessDesc accessDesc = {};
   accessDesc.location.type = CN_MEM_LOCATION_TYPE_DEVICE;
