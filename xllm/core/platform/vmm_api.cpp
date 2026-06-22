@@ -153,7 +153,7 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle,
   prop.location.id = device_id;
   prop.reserve = 0;
 
-  ret = aclrtMallocPhysical(&phy_mem_handle, size, &prop, 0);
+  ret = aclrtMallocPhysical(&phy_mem_handle, size, &prop, /*flags=*/0);
 #elif defined(USE_MLU)
   CNmemAllocationProp prop = {};
   prop.type = CN_MEM_ALLOCATION_TYPE_DEFAULT;
