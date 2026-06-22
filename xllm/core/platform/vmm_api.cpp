@@ -143,7 +143,7 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
 void create_phy_mem_handle(PhyMemHandle& phy_mem_handle,
                            int32_t device_id,
                            size_t size) {
-  int ret = 0;
+  int32_t ret = 0;
 #if defined(USE_NPU)
   aclrtPhysicalMemProp prop = {};
   prop.handleType = ACL_MEM_HANDLE_TYPE_NONE;
