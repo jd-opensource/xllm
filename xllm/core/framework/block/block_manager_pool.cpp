@@ -150,8 +150,7 @@ bool BlockManagerPool::allocate_single_block(Sequence* sequence,
                << ", configured_single_blocks=" << options_.num_single_blocks();
     return false;
   }
-  sequence->add_blocks(single_block_managers_[dp_rank]->block_type(),
-                       single_blocks);
+  sequence->add_blocks(BlockType::SINGLE, single_blocks);
   return true;
 }
 
@@ -160,13 +159,12 @@ void BlockManagerPool::deallocate_single_block(Sequence* sequence,
   DCHECK(sequence != nullptr);
   CHECK_GE(dp_rank, 0);
   CHECK_LT(static_cast<size_t>(dp_rank), single_block_managers_.size());
-  const BlockType type = single_block_managers_[dp_rank]->block_type();
-  const Slice<Block> single = sequence->kv_state().blocks(type);
+  const Slice<Block> single = sequence->kv_state().blocks(BlockType::SINGLE);
   if (single.empty()) {
     return;
   }
   single_block_managers_[dp_rank]->deallocate(single);
-  sequence->kv_state().erase_blocks(type);
+  sequence->kv_state().erase_blocks(BlockType::SINGLE);
 }
 
 void BlockManagerPool::deallocate(Request* request) {

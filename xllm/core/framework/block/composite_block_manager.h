@@ -60,6 +60,10 @@ class CompositeBlockManager : public BlockManager {
 
  private:
   std::vector<std::unique_ptr<BlockManager>> sub_managers_;
+  // The KVCacheState slot each sub-manager fills, parallel to sub_managers_.
+  // The composite owns this mapping; the sub-managers themselves are unaware of
+  // which block type they serve.
+  std::vector<BlockType> sub_manager_types_;
 };
 
 }  // namespace xllm
