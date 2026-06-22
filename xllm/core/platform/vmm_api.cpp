@@ -325,7 +325,7 @@ void unmap(VirPtr& vir_ptr, size_t aligned_size) {
 }
 
 void unmap_chunk(VirPtr& vir_ptr, size_t size) {
-  int ret = 0;
+  int32_t ret = 0;
 #if defined(USE_NPU)
   // The chunk was mapped by a single aclrtMapMem covering `size`, so a single
   // aclrtUnmapMem at the base address unmaps the whole chunk.
