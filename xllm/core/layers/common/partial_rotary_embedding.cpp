@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "kernels/ops_api.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 namespace xllm {
 namespace layer {
 
@@ -32,7 +33,7 @@ PartialRotaryEmbeddingImpl::PartialRotaryEmbeddingImpl(
       rotary_dim_(rotary_dim),
       is_neox_style_(is_neox_style),
       interleaved_(interleaved) {
-  auto dev_options = torch::TensorOptions().device(Device::type_torch());
+  auto dev_options = torch::TensorOptions().device(Platform::type_torch());
 
   auto inv_freq_t = torch::arange(/*start=*/0,
                                   /*end=*/rotary_dim_,

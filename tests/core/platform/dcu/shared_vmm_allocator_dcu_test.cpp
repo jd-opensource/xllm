@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/platform/device.h"
+#include "core/platform/platform.h"
 #include "core/platform/shared_vmm_allocator.h"
 #include "core/platform/vmm_api.h"
 
@@ -45,7 +46,7 @@ class SharedVMMAllocatorTestEnvironment final : public ::testing::Environment {
 constexpr int kDeviceId = 0;
 constexpr std::size_t kProbeBytes = 256;
 
-bool HasDevice() { return xllm::Device::device_count() > 0; }
+bool HasDevice() { return xllm::Platform::device_count() > 0; }
 
 void InitDevice() {
   xllm::Device device(kDeviceId);

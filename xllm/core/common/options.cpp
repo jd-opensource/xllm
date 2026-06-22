@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -68,7 +68,6 @@ std::string Options::to_string() const {
      << ", etcd_addr: " << etcd_addr().value_or("null")
      << ", etcd_namespace: " << etcd_namespace().value_or("null")
      << ", enable_service_routing: " << enable_service_routing()
-     << ", enable_cache_upload: " << enable_cache_upload()
      << ", enable_kvcache_store: " << enable_kvcache_store()
      << ", prefetch_timeout: " << prefetch_timeout()
      << ", prefetch_batch_size: " << prefetch_batch_size()

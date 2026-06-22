@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -104,6 +104,10 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
   void prepare_prefill_inputs(const ForwardInput& inputs,
                               ForwardInput& prefill_inputs);
   bool use_qwen3_5_spec_verify_path() const;
+  bool use_mimo_spec_verify_path() const;
+  // Returns true when validation must use chunked-prefill to avoid the
+  // FlashInfer batch-decode read-before-write race on the bonus token.
+  bool use_chunked_prefill_spec_verify_path() const;
 
   // Prepare target validate input from cached target context.
   void prepare_validate_inputs(const ForwardInput& inputs,

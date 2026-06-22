@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,12 +25,12 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "core/platform/device.h"
+#include "core/platform/platform.h"
 
 namespace xllm {
 
 std::string DeviceNameUtils::to_device_string(int32_t device_id) {
-  return Device::type_str() + ":" + std::to_string(device_id);
+  return Platform::type_str() + ":" + std::to_string(device_id);
 }
 
 std::vector<torch::Device> DeviceNameUtils::parse_devices(
@@ -38,15 +38,14 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
   std::vector<torch::Device> devices;
   if (device_str == "auto" || device_str.empty()) {
     // use all available devices if any
-    const int32_t num_devices = static_cast<int32_t>(Device::device_count());
+    const int32_t num_devices = static_cast<int32_t>(Platform::device_count());
     if (num_devices == 0) {
       LOG(INFO) << "no devices found, using cpu.";
       return {torch::kCPU};
     }
     devices.reserve(num_devices);
     for (int32_t i = 0; i < num_devices; ++i) {
-      std::string device_name = to_device_string(i);
-      devices.emplace_back(torch::Device(device_name));
+      devices.emplace_back(Platform::type_torch(), i);
     }
     return devices;
   }
@@ -58,14 +57,14 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
   for (const auto& device_str : device_strs) {
     std::vector<std::string> parts = absl::StrSplit(device_str, ':');
     CHECK(parts.size() == 2) << "Invalid device string format: " << device_str;
-    CHECK(parts[0] == Device::type_str())
+    CHECK(parts[0] == Platform::type_str())
         << "Unsupported device type: " << parts[0];
 
     int32_t device_index = 0;
     CHECK(absl::SimpleAtoi(parts[1], &device_index))
         << "Invalid device index: " << parts[1];
 
-    devices.emplace_back(Device::type_torch(), device_index);
+    devices.emplace_back(Platform::type_torch(), device_index);
     device_types.insert(devices.back().type());
   }
   CHECK(!devices.empty()) << "No devices specified.";

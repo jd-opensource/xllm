@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ limitations under the License.
 #include "framework/request/stopping_checker.h"
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 
@@ -78,7 +79,7 @@ inline size_t ExpectedSwaLogicalBlocks(size_t num_tokens) {
 // Creates a minimal Sequence for testing (same pattern as batch_test.cpp).
 Sequence MakeTestSequence(size_t index,
                           const std::vector<int32_t>& prompt_token_ids) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   RequestSamplingParam sampling_param;
   StoppingChecker stopping_checker;
   stopping_checker.set_max_generated_tokens(256);

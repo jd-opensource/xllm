@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -168,8 +168,6 @@ class Options {
   PROPERTY(double, host_blocks_factor) = 0.0;
 
   PROPERTY(bool, enable_kvcache_store) = false;
-
-  PROPERTY(bool, enable_cache_upload) = false;
 
   PROPERTY(std::string, store_protocol) = "tcp";
 

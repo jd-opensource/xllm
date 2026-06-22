@@ -10,6 +10,7 @@ cc_library(
   HDRS
     stream.h
     device.h
+    platform.h
     device_name_utils.h
     vmm_api.h
     shared_vmm_allocator.h
@@ -26,6 +27,7 @@ cc_library(
   SRCS
     stream.cpp
     device.cpp
+    platform.cpp
     device_name_utils.cpp
     vmm_api.cpp
     shared_vmm_allocator.cpp

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -223,8 +223,7 @@ bool RecEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .host_num_blocks(0)
       .block_size(block_size)
       .enable_prefix_cache(options_.enable_prefix_cache())
-      .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_cache_upload(options_.enable_cache_upload());
+      .enable_disagg_pd(options_.enable_disagg_pd());
   kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
 
   return pipeline_->allocate_kv_cache(kv_cache_shape);

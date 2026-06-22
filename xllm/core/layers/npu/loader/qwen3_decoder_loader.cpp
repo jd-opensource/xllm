@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -115,13 +115,19 @@ void Qwen3DecoderLoader::merge_host_at_weights() {
     t[IN_ATTENTION_OUT_OFFSET] = t[IN_ATTENTION_OUT_OFFSET].to(torch::kInt8);
     t[IN_MLP_W2_OFFSET] = t[IN_MLP_W2_OFFSET].to(torch::kInt8);
 
+    if (t[IN_MLP_CPROJ_BIAS].numel() > 1) {
+      t[IN_MLP_CPROJ_BIAS] = t[IN_MLP_CPROJ_BIAS].to(torch::kInt32);
+      t[IN_MLP_CPROJ_DEQSCALE] = t[IN_MLP_CPROJ_DEQSCALE].to(torch::kFloat32);
+      t[IN_MLP_CPROJ_OFFSET] = t[IN_MLP_CPROJ_OFFSET].to(torch::kInt8);
+      t[IN_MLP_CPROJ_SCALE] = t[IN_MLP_CPROJ_SCALE].to(dtype_);
+      down_proj_quantized_ = true;
+    }
+
     if (rank_id_ != 0) {
-      const auto& original = t[IN_ATTENTION_OUT_BIAS];
-      auto shape = original.sizes();
-      auto dtype = original.dtype();
-      auto device = original.device();
-      t[IN_ATTENTION_OUT_BIAS] = torch::zeros(
-          shape, torch::TensorOptions().dtype(dtype).device(device));
+      t[IN_ATTENTION_OUT_BIAS] = torch::zeros_like(t[IN_ATTENTION_OUT_BIAS]);
+      if (down_proj_quantized_) {
+        t[IN_MLP_CPROJ_BIAS] = torch::zeros_like(t[IN_MLP_CPROJ_BIAS]);
+      }
     }
   }
 
@@ -148,16 +154,15 @@ void Qwen3DecoderLoader::merge_host_at_weights() {
   if (enableAddNorm_) {
     if (quantize_type_.compare("w8a8") == 0) {
       torch::ScalarType weight_fill_dtype = torch::kBFloat16;
-      int64_t weight_attn_shape = t[IN_Q_WEIGHT].size(-1);
-      int64_t weight_mlp_shape = t[IN_MLP_W2_WEIGHT].size(-1);
+      int64_t hidden_size = t[IN_NORM_WEIGHT].size(0);
       t[IN_QKV_SCALE_FILL] =
-          t[IN_Q_SCALE].repeat(weight_attn_shape).to(weight_fill_dtype);
+          t[IN_Q_SCALE].repeat(hidden_size).to(weight_fill_dtype);
       t[IN_MLP_SCALE_FILL] =
-          t[IN_MLP_W2_SCALE].repeat(weight_mlp_shape).to(weight_fill_dtype);
+          t[IN_MLP_W2_SCALE].repeat(hidden_size).to(weight_fill_dtype);
       t[IN_QKV_OFFSET_FILL] =
-          t[IN_Q_OFFSET].repeat(weight_attn_shape).to(weight_fill_dtype);
+          t[IN_Q_OFFSET].repeat(hidden_size).to(weight_fill_dtype);
       t[IN_MLP_OFFSET_FILL] =
-          t[IN_MLP_W2_OFFSET].repeat(weight_mlp_shape).to(weight_fill_dtype);
+          t[IN_MLP_W2_OFFSET].repeat(hidden_size).to(weight_fill_dtype);
     } else {
       for (auto idx : {IN_QKV_SCALE_FILL,
                        IN_QKV_OFFSET_FILL,

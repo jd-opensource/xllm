@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -164,6 +164,20 @@ void ProcessGroup::reduce_scatter(const torch::Tensor& input,
   opts.reduceOp = c10d::ReduceOp::SUM;
   pg_->reduce_scatter_tensor_coalesced(output_tensors, input_tensors, opts)
       ->wait();
+}
+
+void ProcessGroup::broadcast(torch::Tensor& input, int32_t root_rank) {
+  CHECK(pg_ != nullptr) << "Process group is not initialized.";
+  // single-rank group: nothing to unify, the local tensor is already the
+  // source of truth.
+  if (world_size() <= 1) {
+    return;
+  }
+  CHECK(input.is_contiguous()) << "input is not contiguous.";
+  std::vector<torch::Tensor> tensors = {input};
+  c10d::BroadcastOptions opts;
+  opts.rootRank = root_rank;
+  pg_->broadcast(tensors, opts)->wait();
 }
 
 void ProcessGroup::all_to_all_single(

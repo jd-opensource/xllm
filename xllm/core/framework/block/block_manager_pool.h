@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,7 +33,6 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(bool, enable_linear_state) = false;
     PROPERTY(bool, enable_prefix_cache) = true;
     PROPERTY(bool, enable_disagg_pd) = false;
-    PROPERTY(bool, enable_cache_upload) = false;
     PROPERTY(bool, enable_kvcache_store) = false;
     PROPERTY(bool, enable_xtensor) = false;
     PROPERTY(int64_t, num_layers) = 0;  // Required when enable_xtensor is true
@@ -86,7 +85,6 @@ class BlockManagerPool : public KVCacheManager {
   virtual std::vector<std::vector<BlockTransferInfo>>*
   get_swap_block_transfer_infos() override;
 
-  virtual void get_merged_kvcache_event(KvCacheEvent* event) const;
   virtual float get_gpu_cache_usage_perc() const;
 
   virtual uint32_t num_blocks() const override;

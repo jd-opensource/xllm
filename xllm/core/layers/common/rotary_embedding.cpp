@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "kernels/ops_api.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -43,8 +44,8 @@ RotaryEmbeddingImpl::RotaryEmbeddingImpl(int64_t rotary_dim,
   sin_ = cos_sin_vec[1].view({-1, rotary_dim});
 
   // Pre-compute [cos_half, sin_half] format used by the CUDA/ILU/MUSA kernels.
-  const auto dev = Device::type_str();
-  if (dev == "cuda" || dev == "ilu" || dev == "musa" || dev == "dcu") {
+  if (Platform::is_cuda() || Platform::is_ilu() || Platform::is_musa() ||
+      Platform::is_dcu()) {
     auto chunks = cos_sin_cache_.chunk(4, -1);
     precomputed_cos_sin_cache_ =
         torch::cat({chunks[0], chunks[2]}, -1).contiguous();
@@ -61,9 +62,8 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& q,
   std::optional<torch::Tensor> position_ids;
   if (is_prompt) {
     discrete = false;
-    if (Device::type_str() == "cuda" || Device::type_str() == "npu" ||
-        Device::type_str() == "ilu" || Device::type_str() == "musa" ||
-        Device::type_str() == "dcu") {
+    if (Platform::is_cuda() || Platform::is_npu() || Platform::is_ilu() ||
+        Platform::is_musa() || Platform::is_dcu()) {
       position_ids = positions;
     }
   } else {
@@ -99,8 +99,8 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& input,
   std::optional<torch::Tensor> position_ids;
   if (is_prompt) {
     discrete = false;
-    if (Device::type_str() == "cuda" || Device::type_str() == "npu" ||
-        Device::type_str() == "ilu" || Device::type_str() == "dcu") {
+    if (Platform::is_cuda() || Platform::is_npu() || Platform::is_ilu() ||
+        Platform::is_dcu()) {
       position_ids = positions;
     }
   } else {
@@ -251,8 +251,8 @@ DeepseekScalingRotaryEmbeddingImpl::DeepseekScalingRotaryEmbeddingImpl(
   sin_ = cos_sin_vec[1].view({-1, rotary_dim});
 
   // Pre-compute [cos_half, sin_half] format used by the CUDA/ILU/MUSA kernels.
-  const auto dev = Device::type_str();
-  if (dev == "cuda" || dev == "ilu" || dev == "musa" || dev == "dcu") {
+  if (Platform::is_cuda() || Platform::is_ilu() || Platform::is_musa() ||
+      Platform::is_dcu()) {
     auto chunks = cos_sin_cache_.chunk(4, -1);
     precomputed_cos_sin_cache_ =
         torch::cat({chunks[0], chunks[2]}, -1).contiguous();

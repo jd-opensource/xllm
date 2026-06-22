@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -48,7 +48,6 @@ class CompositeBlockManager : public BlockManager {
              const MMData& mm_data = MMData(),
              const Slice<XXH3Key>& block_hashes = {}) override;
   void cache(const std::vector<Block>& blocks) override;
-  void get_merged_kvcache_event(KvCacheEvent* event) const override;
   size_t num_blocks_in_prefix_cache() const override;
   size_t num_free_blocks() const override;
   size_t num_used_blocks() const override;

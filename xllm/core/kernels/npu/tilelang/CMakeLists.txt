@@ -137,6 +137,11 @@ tilelang_register_runtime_kernel(
   WRAPPER_SRCS split_qkv_rmsnorm_mrope_wrapper.cpp
 )
 
+tilelang_register_runtime_kernel(
+  NAME chunk_gated_delta_rule_fwd_h
+  WRAPPER_SRCS chunk_gated_delta_rule_fwd_h_wrapper.cpp
+)
+
 cc_library(
   NAME
     tilelang_kernels

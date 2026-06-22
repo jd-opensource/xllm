@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/framework/config/rec_config.h"
 #include "framework/block/block_manager_impl.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 #include "request.h"
 #include "request_state.h"
 
@@ -205,7 +206,7 @@ TEST(SampleSlotTest, RequestPropagatesSampleSlotsToSequenceRuntime) {
 }
 
 TEST(SampleSlotTest, RequestOutputSplitsSampleResultsBySampleId) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   BlockManager::Options options;
   options.num_blocks(4).block_size(4);
   BlockManagerImpl manager(options);
@@ -287,7 +288,7 @@ TEST(SampleSlotTest, RequestOutputSplitsSampleResultsBySampleId) {
 }
 
 TEST(SampleSlotTest, RequestOutputStableSortsOutOfOrderSampleIds) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   BlockManager::Options options;
   options.num_blocks(4).block_size(4);
   BlockManagerImpl manager(options);

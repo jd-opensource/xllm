@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -281,6 +281,10 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8 = {
     {IN_MLP_W1_OFFSET, "mlp.up_proj.input_offset"},
     {IN_MLP_W1_SCALE, "mlp.up_proj.input_scale"},
     {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"},
+    {IN_MLP_CPROJ_BIAS, "mlp.down_proj.quant_bias"},
+    {IN_MLP_CPROJ_DEQSCALE, "mlp.down_proj.deq_scale"},
+    {IN_MLP_CPROJ_OFFSET, "mlp.down_proj.input_offset"},
+    {IN_MLP_CPROJ_SCALE, "mlp.down_proj.input_scale"},
     {Q_NORM_WEIGHT, "self_attn.q_norm.weight"},
     {K_NORM_WEIGHT, "self_attn.k_norm.weight"}};
 

@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class FusedMoEImpl final: public torch::nn::Module {
+class FusedMoEImpl final : public torch::nn::Module {
  public:
   FusedMoEImpl() = default;
   FusedMoEImpl(const ModelArgs& model_args,

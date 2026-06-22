@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,12 +32,14 @@ class Qwen3DecoderLoader : public BaseLoader {
 
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
+  bool down_proj_quantized() const { return down_proj_quantized_; }
 
  protected:
   void merge_host_at_weights() override;
 
   torch::Tensor at_placeholder_;
   bool enableAddNorm_;
+  bool down_proj_quantized_ = false;
   int rank_id_;
 };
 

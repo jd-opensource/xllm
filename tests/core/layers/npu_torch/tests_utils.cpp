@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ limitations under the License.
 #include <cmath>
 
 #include "core/platform/device.h"
+#include "core/platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -135,7 +136,7 @@ ParallelArgs create_default_parallel_args(
     std::unique_ptr<xllm::ProcessGroup>& mock_process_group) {
   // Create mock ProcessGroup for MLU testing
   mock_process_group = std::make_unique<MockProcessGroup>(
-      torch::Device(Device::type_torch(), 0));
+      torch::Device(Platform::type_torch(), 0));
 
   // Initialize ParallelArgs with mock ProcessGroup
   ParallelArgs parallel_args(0, 1, mock_process_group.get());
