@@ -140,10 +140,10 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   if (numa_node >= 0) {
     LOG(INFO) << "Worker process (device " << device_idx
               << ") binding to NUMA node " << numa_node;
-    // Reset NUMA state inherited across posix_spawnp before rebinding;
-    // otherwise bind_process_to_numa_node cannot move to a different node.
-    if (numa::reset_inherited_numa_binding() != 0) {
-      LOG(WARNING) << "Failed to reset inherited NUMA binding for device "
+    // Prepare inherited affinity and memory policy before binding this worker
+    // to the device-local NUMA node.
+    if (numa::prepare_spawn_worker_for_numa_binding() != 0) {
+      LOG(WARNING) << "Failed to prepare spawn worker NUMA binding for device "
                    << device_idx << ", continuing best-effort";
     }
     int32_t ret = numa::bind_process_to_numa_node(numa_node);
