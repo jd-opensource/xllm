@@ -483,7 +483,11 @@ class BuildDistWheel(bdist_wheel):
         BUILD_TEST_FILE = False
 
         self.skip_build = True
-        super().run()
+        InstallWheel._building_wheel = True
+        try:
+            super().run()
+        finally:
+            InstallWheel._building_wheel = False
 
 class InstallWheel(install):
     """`python setup.py install` builds the wheel, then pip-installs it.
