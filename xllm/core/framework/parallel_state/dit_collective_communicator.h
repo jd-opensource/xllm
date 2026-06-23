@@ -38,9 +38,10 @@ class DiTCollectiveCommunicator : public CollectiveCommunicatorBase {
   // init communicator and return parallel args.
   const ParallelArgs* parallel_args() override;
 
-  void create_process_group_by_type(const std::string& group_type,
-                                    ProcessGroup*& process_group,
-                                    const torch::Device& device);
+  ProcessGroup* create_process_group_by_type(
+      const std::string& group_type,
+      std::unique_ptr<ProcessGroup>& member_group,
+      const torch::Device& device);
 
  private:
   int32_t port_ = 0;
@@ -53,7 +54,6 @@ class DiTCollectiveCommunicator : public CollectiveCommunicatorBase {
   std::unique_ptr<ProcessGroup> dit_dp_group_;
   std::unique_ptr<ProcessGroup> dit_cfg_group_;
   std::unique_ptr<ProcessGroup> dit_vae_group_;
-  std::unordered_map<std::string, std::unique_ptr<ProcessGroup>*> group_map_;
 };
 
 }  // namespace xllm
