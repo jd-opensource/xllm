@@ -24,7 +24,7 @@ namespace xllm::dit {
 
 class SequenceParallelPadManager {
  public:
-  static SequenceParallelPadManager& getInstance() {
+  static SequenceParallelPadManager& get_instance() {
     static SequenceParallelPadManager instance;
     return instance;
   }

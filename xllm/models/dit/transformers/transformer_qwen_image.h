@@ -1459,18 +1459,18 @@ class QwenDoubleStreamAttnProcessor2_0Impl : public torch::nn::Module {
     auto img_freqs = std::get<0>(image_rotary_emb);
     auto txt_freqs = std::get<1>(image_rotary_emb);
 
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         txt_query, /*tensor_name=*/"encoder_hidden_states", /*dim=*/1);
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         txt_key, /*tensor_name=*/"encoder_hidden_states", /*dim=*/1);
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         txt_value, /*tensor_name=*/"encoder_hidden_states", /*dim=*/1);
 
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         img_query, /*tensor_name=*/"hidden_states", /*dim=*/1);
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         img_key, /*tensor_name=*/"hidden_states", /*dim=*/1);
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         img_value, /*tensor_name=*/"hidden_states", /*dim=*/1);
 
     img_query = apply_rotary_emb_qwen(img_query, img_freqs, false);
@@ -1510,13 +1510,13 @@ class QwenDoubleStreamAttnProcessor2_0Impl : public torch::nn::Module {
     auto img_attn_output = chunks[1];
 
     txt_attn_output =
-        xllm::dit::SequenceParallelPadManager::getInstance().pad_tensor(
+        xllm::dit::SequenceParallelPadManager::get_instance().pad_tensor(
             txt_attn_output,
             /*tensor_name=*/"encoder_hidden_states",
             /*dim=*/1);
 
     img_attn_output =
-        xllm::dit::SequenceParallelPadManager::getInstance().pad_tensor(
+        xllm::dit::SequenceParallelPadManager::get_instance().pad_tensor(
             img_attn_output, /*tensor_name=*/"hidden_states", /*dim=*/1);
 
     // Apply output projections
@@ -1542,9 +1542,8 @@ TORCH_MODULE(QwenDoubleStreamAttnProcessor2_0);
 
 class QwenDoubleStreamAttnProcessorCMO2_0Impl : public torch::nn::Module {
  public:
-  QwenDoubleStreamAttnProcessorCMO2_0Impl(
-      qwenimage::Attention&& attn_module,
-      const ParallelArgs& parallel_args)
+  QwenDoubleStreamAttnProcessorCMO2_0Impl(qwenimage::Attention&& attn_module,
+                                          const ParallelArgs& parallel_args)
       : parallel_args_(parallel_args) {
     attn_ = register_module("attn", std::move(attn_module));
     q_heads_ = attn_->heads_;
@@ -1588,7 +1587,8 @@ class QwenDoubleStreamAttnProcessorCMO2_0Impl : public torch::nn::Module {
 
     auto txt_query = attn_->add_q_proj_->forward(encoder_hidden_states);
     auto txt_query_handler = parallel_state::all_to_all_4D(
-        txt_query.view({encoder_hidden_states.size(0), -1, q_heads_, dim_head_}),
+        txt_query.view(
+            {encoder_hidden_states.size(0), -1, q_heads_, dim_head_}),
         /*scatter_idx=*/2,
         /*gather_idx=*/1,
         /*async_ops=*/true,
@@ -1604,7 +1604,8 @@ class QwenDoubleStreamAttnProcessorCMO2_0Impl : public torch::nn::Module {
 
     auto txt_value = attn_->add_v_proj_->forward(encoder_hidden_states);
     auto txt_value_handler = parallel_state::all_to_all_4D(
-        txt_value.view({encoder_hidden_states.size(0), -1, kv_heads_, dim_head_}),
+        txt_value.view(
+            {encoder_hidden_states.size(0), -1, kv_heads_, dim_head_}),
         /*scatter_idx=*/2,
         /*gather_idx=*/1,
         /*async_ops=*/true,
@@ -1634,18 +1635,18 @@ class QwenDoubleStreamAttnProcessorCMO2_0Impl : public torch::nn::Module {
     img_value = img_value_handler();
     txt_value = txt_value_handler();
 
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         txt_query, /*tensor_name=*/"encoder_hidden_states", /*dim=*/1);
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         txt_key, /*tensor_name=*/"encoder_hidden_states", /*dim=*/1);
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         txt_value, /*tensor_name=*/"encoder_hidden_states", /*dim=*/1);
 
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         img_query, /*tensor_name=*/"hidden_states", /*dim=*/1);
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         img_key, /*tensor_name=*/"hidden_states", /*dim=*/1);
-    xllm::dit::SequenceParallelPadManager::getInstance().unpad_tensor(
+    xllm::dit::SequenceParallelPadManager::get_instance().unpad_tensor(
         img_value, /*tensor_name=*/"hidden_states", /*dim=*/1);
 
     img_query = apply_rotary_emb_qwen(img_query, img_freqs, false);
@@ -1682,13 +1683,13 @@ class QwenDoubleStreamAttnProcessorCMO2_0Impl : public torch::nn::Module {
     auto img_attn_output = chunks[1];
 
     txt_attn_output =
-        xllm::dit::SequenceParallelPadManager::getInstance().pad_tensor(
+        xllm::dit::SequenceParallelPadManager::get_instance().pad_tensor(
             txt_attn_output,
             /*tensor_name=*/"encoder_hidden_states",
             /*dim=*/1);
 
     img_attn_output =
-        xllm::dit::SequenceParallelPadManager::getInstance().pad_tensor(
+        xllm::dit::SequenceParallelPadManager::get_instance().pad_tensor(
             img_attn_output, /*tensor_name=*/"hidden_states", /*dim=*/1);
 
     auto img_out_handler = parallel_state::all_to_all_4D(
@@ -1786,9 +1787,9 @@ class QwenImageTransformerBlockImpl : public torch::nn::Module {
                              /*out_context_dim=*/std::nullopt,
                              /*context_pre_only=*/true,
                              /*pre_only=*/false,
-                              /*elementwise_affine=*/true,
-                              /*is_causal=*/false,
-                              /*sp_group=*/parallel_args_.dit_sp_group_);
+                             /*elementwise_affine=*/true,
+                             /*is_causal=*/false,
+                             /*sp_group=*/parallel_args_.dit_sp_group_);
     if (use_dit_sp_communication_overlap()) {
       attn_cmo_processor_ =
           register_module("attn_processor_",
@@ -2131,23 +2132,23 @@ class QwenImageTransformer2DModelImpl : public torch::nn::Module {
 
     // padding mask for sequence parallel scene
     auto padded_encoder_hidden_states_mask =
-        xllm::dit::SequenceParallelPadManager::getInstance().pad_tensor(
+        xllm::dit::SequenceParallelPadManager::get_instance().pad_tensor(
             encoder_hidden_states_mask,
             /*tensor_name=*/"encoder_hidden_states_mask",
             /*dim=*/1);
 
     auto new_encoder_hidden_states =
-        xllm::dit::SequenceParallelPadManager::getInstance().pad_tensor(
+        xllm::dit::SequenceParallelPadManager::get_instance().pad_tensor(
             encoder_hidden_states,
             /*tensor_name=*/"encoder_hidden_states",
             /*dim=*/1);
 
     new_hidden_states =
-        xllm::dit::SequenceParallelPadManager::getInstance().pad_tensor(
+        xllm::dit::SequenceParallelPadManager::get_instance().pad_tensor(
             new_hidden_states, /*tensor_name=*/"hidden_states", /*dim=*/1);
 
     modulate_index =
-        xllm::dit::SequenceParallelPadManager::getInstance().pad_tensor(
+        xllm::dit::SequenceParallelPadManager::get_instance().pad_tensor(
             modulate_index, /*tensor_name=*/"modulate_index", /*dim=*/1);
 
     new_encoder_hidden_states = txt_norm_->forward(new_encoder_hidden_states);

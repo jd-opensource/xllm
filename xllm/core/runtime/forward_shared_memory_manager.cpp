@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/execution_config.h"
+#include "core/framework/config/model_config.h"
 #include "platform/stream.h"
 #if defined(USE_CUDA)
 #include <cuda_runtime_api.h>
@@ -370,6 +371,10 @@ inline size_t get_dit_forward_input_size(const DiTForwardInput& input) {
   size += get_dit_generation_params_size(input.generation_params);
 
   return size;
+}
+
+inline size_t get_dit_forward_output_size(const DiTForwardOutput& output) {
+  return get_vector_tensor_size(output.tensors);
 }
 
 template <typename T>
@@ -1064,6 +1069,11 @@ inline void write_dit_forward_input(RawInputSerializeContext& context,
   write_tensor(context, input.latents);
 
   write_dit_generation_params(context, input.generation_params);
+}
+
+inline void write_dit_forward_output(char*& buffer,
+                                     const DiTForwardOutput& output) {
+  write_vector_tensor(buffer, output.tensors);
 }
 
 inline void safe_advance_buffer(const char*& buffer, size_t offset) {
@@ -2001,6 +2011,11 @@ inline void read_dit_forward_input(ReadContext& context,
   read_dit_generation_params(context, input.generation_params);
 }
 
+inline void read_dit_forward_output(const char*& buffer,
+                                    DiTForwardOutput& output) {
+  read_vector_tensor(buffer, output.tensors);
+}
+
 inline void initialize_device_buffer_session(ReadContext& context,
                                              ForwardInput& forward_input,
                                              const torch::Device& device,
@@ -2253,7 +2268,7 @@ inline void deserialize_forward_input_payload(
     input_params.multi_block_tables.emplace_back(manager_table.clone());
   }
 
-  if (FLAGS_backend == "dit") {
+  if (::xllm::ModelConfig::get_instance().backend() == "dit") {
     read_dit_forward_input(context, input_params.dit_forward_input);
   }
 
@@ -2334,8 +2349,8 @@ size_t calculate_raw_forward_output_size(const RawForwardOutput& output) {
   // mm_embedding_data
   size += get_vector_tensor_size(output.mm_embeddings);
   // dit output data
-  if (FLAGS_backend == "dit") {
-    size += get_vector_tensor_size(output.dit_forward_output.tensors);
+  if (::xllm::ModelConfig::get_instance().backend() == "dit") {
+    size += get_dit_forward_output_size(output.dit_forward_output);
   }
 
   return size;
@@ -2404,8 +2419,8 @@ void deserialize_raw_forward_output(const char* buffer,
   read_vector_tensor(buffer, output.mm_embeddings);
 
   // read dit output
-  if (FLAGS_backend == "dit") {
-    read_vector_tensor(buffer, output.dit_forward_output.tensors);
+  if (::xllm::ModelConfig::get_instance().backend() == "dit") {
+    read_dit_forward_output(buffer, output.dit_forward_output);
   }
 }
 
@@ -2422,8 +2437,8 @@ void serialize_raw_forward_output(const RawForwardOutput& output,
 
   write_vector_tensor(buffer, output.mm_embeddings);
   // write dit output
-  if (FLAGS_backend == "dit") {
-    write_vector_tensor(buffer, output.dit_forward_output.tensors);
+  if (::xllm::ModelConfig::get_instance().backend() == "dit") {
+    write_dit_forward_output(buffer, output.dit_forward_output);
   }
 }
 
@@ -2580,7 +2595,7 @@ inline void serialize_forward_input_sections(
     write_tensor(context, manager_table);
   }
 
-  if (FLAGS_backend == "dit") {
+  if (::xllm::ModelConfig::get_instance().backend() == "dit") {
     write_dit_forward_input(context, input_params.dit_forward_input);
   }
 }

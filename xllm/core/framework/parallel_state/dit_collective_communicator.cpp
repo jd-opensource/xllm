@@ -78,30 +78,21 @@ void DiTCollectiveCommunicator::create_process_groups(
                                         device);
 
   parallel_args_->process_group_ = process_group_.get();
-
-  std::unordered_map<std::string, ProcessGroup**> groups = {
-      {"tp", &parallel_args_->dit_tp_group_},
-      {"sp", &parallel_args_->dit_sp_group_},
-      {"cfg", &parallel_args_->dit_cfg_group_},
-      {"dp", &parallel_args_->dit_dp_group_},
-      {"vae", &parallel_args_->dit_vae_group_}};
-
-  // we use class members to extend the lifetime of these ProceesGroups, so that
-  // they won't be destructed.
-  group_map_ = {{"tp", &dit_tp_group_},
-                {"sp", &dit_sp_group_},
-                {"dp", &dit_dp_group_},
-                {"cfg", &dit_cfg_group_},
-                {"vae", &dit_vae_group_}};
-
-  for (auto& [group_type, process_group] : groups) {
-    create_process_group_by_type(group_type, *process_group, device);
-  }
+  parallel_args_->dit_tp_group_ =
+      create_process_group_by_type("tp", dit_tp_group_, device);
+  parallel_args_->dit_sp_group_ =
+      create_process_group_by_type("sp", dit_sp_group_, device);
+  parallel_args_->dit_cfg_group_ =
+      create_process_group_by_type("cfg", dit_cfg_group_, device);
+  parallel_args_->dit_dp_group_ =
+      create_process_group_by_type("dp", dit_dp_group_, device);
+  parallel_args_->dit_vae_group_ =
+      create_process_group_by_type("vae", dit_vae_group_, device);
 }
 
-void DiTCollectiveCommunicator::create_process_group_by_type(
+ProcessGroup* DiTCollectiveCommunicator::create_process_group_by_type(
     const std::string& group_type,
-    ProcessGroup*& process_group,
+    std::unique_ptr<ProcessGroup>& member_group,
     const torch::Device& device) {
   int32_t group_size = parallel_args_->get_group_size_by_type(group_type);
   if (group_size > 1 && dit_mapping_) {
@@ -112,30 +103,30 @@ void DiTCollectiveCommunicator::create_process_group_by_type(
     auto& rank_per_group = parallel_info.rank_per_group()[group_id];
     int port_offset = group_id + 1;
 #if defined(USE_NPU) || defined(USE_MLU)
-    *group_map_[group_type] =
-        std::move(create_process_group(global_rank_,
-                                       local_rank,
-                                       rank_per_group,
-                                       world_size_,
-                                       group_size,
-                                       port_ + port_offset,
-                                       host_,
-                                       group_type + "_group",
-                                       device));
-    process_group = (*group_map_[group_type]).get();
+    member_group = std::move(create_process_group(global_rank_,
+                                                  local_rank,
+                                                  rank_per_group,
+                                                  world_size_,
+                                                  group_size,
+                                                  port_ + port_offset,
+                                                  host_,
+                                                  group_type + "_group",
+                                                  device));
 #else
-    LOG(INFO) << "create_process_group function is used by DiT models, since "
-                 "the DiT communication group "
-              << "info have already been calculated by rank_generator, we only "
-                 "need to pass the "
-              << "info to create the process groups. For any device that want "
-                 "to reuse the "
-              << "function and dit process groups, please implement the "
-                 "corresponding "
-              << "ProcessGroupImpl construct function. ";
+    LOG(FATAL)
+        << "create_process_group function is used by DiT models, since "
+           "the DiT communication group "
+        << "info have already been calculated by rank_generator, we only "
+           "need to pass the "
+        << "info to create the process groups. For any device that want "
+           "to reuse the "
+        << "function and dit process groups, please implement the "
+           "corresponding "
+        << "ProcessGroupImpl construct function. ";
 #endif
     port_ += num_group;
   }
+  return member_group.get();
 }
 
 const ParallelArgs* DiTCollectiveCommunicator::parallel_args() {

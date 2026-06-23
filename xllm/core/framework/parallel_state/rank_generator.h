@@ -33,23 +33,10 @@ world_size: the global world_size
 */
 class RankGenerator {
  public:
-  static void init(int32_t world_size, int32_t rank_offset = 0) {
-    if (initialized_) {
-      LOG(FATAL) << "repeated initialize RankGenerator";
-    } else {
-      RankGenerator& instance = getInstance();
-      instance = RankGenerator(world_size, rank_offset);
-      initialized_ = true;
-    }
-  }
+  explicit RankGenerator(int32_t world_size = 1, int32_t rank_offset = 0)
+      : rank_offset_(rank_offset), world_size_(world_size) {}
 
-  static RankGenerator& getInstance() {
-    static RankGenerator instance;
-    return instance;
-  }
-
-  std::shared_ptr<
-      std::unordered_map<std::string, std::vector<std::vector<int32_t>>>>
+  std::unordered_map<std::string, std::vector<std::vector<int32_t>>>
   get_ranks_mapping(std::vector<int32_t>& group_ranks,
                     std::vector<std::string>& group_order) {
     CHECK(!group_ranks.empty() && group_ranks.size() != 0)
@@ -70,9 +57,10 @@ class RankGenerator {
     bool is_single_group = (group_ranks.size() == 1);
     if (is_single_group && group_ranks[0] != world_size_) {
       if (world_size_ % group_ranks[0] != 0) {
-        LOG(FATAL) << "The world_size could not be divided by vae_size, "
-                   << "got world_size: " << world_size_
-                   << ", vae_size: " << group_ranks[0] << ".";
+        LOG(FATAL) << "The world_size could not be divided by "
+                   << group_order[0] << "_size, "
+                   << "got world_size: " << world_size_ << ", "
+                   << group_order[0] << "_size: " << group_ranks[0] << ".";
       }
       LOG(WARNING) << "The sub group size does not equal world_size"
                    << ", we will assign the " << group_order[0]
@@ -98,25 +86,23 @@ class RankGenerator {
     LOG(INFO) << "RankGenerator initialized with " << ss.str()
               << "world_size=" << world_size_;
 
-    auto group_mapping = std::make_shared<
-        std::unordered_map<std::string, std::vector<std::vector<int32_t>>>>();
+    auto group_mapping =
+        std::unordered_map<std::string, std::vector<std::vector<int32_t>>>();
+    group_mapping.reserve(group_order.size());
+
     for (auto& group_name : group_order) {
       auto sub_group_ranks = get_ranks(group_name, group_ranks, group_order);
       if (::xllm::DiTConfig::get_instance().dit_debug_print()) {
         print_ranks(group_name, sub_group_ranks);
       }
-      group_mapping->insert({group_name, sub_group_ranks});
+      group_mapping.insert({group_name, sub_group_ranks});
     }
     return group_mapping;
   }
 
   int32_t get_world_size() const { return world_size_; }
-  static bool initialized_;
 
  private:
-  RankGenerator(int32_t world_size = 1, int32_t rank_offset = 0)
-      : world_size_(world_size), rank_offset_(rank_offset) {}
-
   std::vector<std::vector<int32_t>> get_ranks(
       const std::string& group_query,
       const std::vector<int32_t>& group_ranks,
