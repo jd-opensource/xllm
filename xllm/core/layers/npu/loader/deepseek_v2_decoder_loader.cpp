@@ -389,18 +389,14 @@ void DeekseekV2DecoderLoader::merge_experts_weights() {
                               experts_weights_["up_proj.weight_scale"]);
   }
 
-  // Preserve pre-existing mode divergence for IN_MLP_DOWN_WEIGHT_EXPERT:
+  // IN_MLP_DOWN_WEIGHT_EXPERT:
   //   eager: NZ when not quantized, else ND;
-  //   manual: ND on A3 or when decode is non-BF16; NZ otherwise.
+  //   manual: NZ when decode is BF16, else ND.
   torch::Tensor mlp_down_weight = merge_experts_weights(
       experts_weights_["down_proj.weight"], /*transpose=*/false);
   bool down_is_nz;
   if (load_to_host()) {
-#if defined(USE_A3)
-    down_is_nz = false;
-#else
     down_is_nz = decode_isBF16_;
-#endif
   } else {
     down_is_nz = (quantize_type_ == "");
   }
