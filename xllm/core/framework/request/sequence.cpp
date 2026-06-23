@@ -381,7 +381,8 @@ void Sequence::update_last_step_token(const Token& token, size_t token_offset) {
     // This happens when the sequence was preempted during schedule_request(),
     // causing its KV cache to be deallocated (reset), but it's still in
     // last_batch_ being processed by update_last_step_result().
-    if (kv_state_.num_kv_blocks() == 0) {
+    // Composite KV managers can have capacity without exposing local blocks.
+    if (kv_state_.current_max_tokens_capacity() == 0) {
       return;
     }
     kv_state_.incr_kv_cache_tokens_num(1);

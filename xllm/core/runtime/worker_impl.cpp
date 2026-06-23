@@ -685,6 +685,9 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
   }
 #endif
   c10::StreamGuard stream_guard = prepare_stream.set_stream_guard();
+  if (enable_schedule_overlap() && compute_stream_) {
+    prepare_stream.wait_stream(*compute_stream_);
+  }
   CHECK(prepare_stream.wait_event(input.metadata_ready_event))
       << "failed to wait input metadata ready event on worker prepare stream";
 

@@ -38,21 +38,44 @@ TEST(StoppingCheckerTest, IgnoreEosSkipsOnlyEosToken) {
             FinishReason::NONE);
 }
 
-TEST(StoppingCheckerTest, IgnoreEosStillStopsOnStopToken) {
+TEST(StoppingCheckerTest, IgnoreEosSkipsStopTokens) {
+  // Models load their built-in end markers into stop_token_ids, and a request
+  // that sets stop_token_ids replaces that default, so ignore_eos bypasses the
+  // whole set rather than just eos_token. kimi_k2 ships two end markers
+  // {163585, 163586} with eos_token=163585; under ignore_eos neither may stop.
   StoppingChecker checker(
       /*max_generated_tokens=*/10,
       /*max_context_len=*/0,
-      /*eos_token=*/2,
+      /*eos_token=*/163585,
       /*ignore_eos=*/true,
-      /*stop_tokens=*/std::unordered_set<int32_t>{7},
+      /*stop_tokens=*/std::unordered_set<int32_t>{163585, 163586},
       /*stop_sequences=*/std::vector<std::vector<int32_t>>{});
-  const std::vector<int32_t> token_ids = {1, 7};
 
-  EXPECT_EQ(checker.check(token_ids, /*num_prompt_tokens=*/1),
+  EXPECT_EQ(checker.check(std::vector<int32_t>{1, 163585},
+                          /*num_prompt_tokens=*/1),
+            FinishReason::NONE);
+  EXPECT_EQ(checker.check(std::vector<int32_t>{1, 163586},
+                          /*num_prompt_tokens=*/1),
+            FinishReason::NONE);
+}
+
+TEST(StoppingCheckerTest, StopTokensStopWhenEosNotIgnored) {
+  StoppingChecker checker(
+      /*max_generated_tokens=*/10,
+      /*max_context_len=*/0,
+      /*eos_token=*/163585,
+      /*ignore_eos=*/false,
+      /*stop_tokens=*/std::unordered_set<int32_t>{163585, 163586},
+      /*stop_sequences=*/std::vector<std::vector<int32_t>>{});
+
+  EXPECT_EQ(checker.check(std::vector<int32_t>{1, 163586},
+                          /*num_prompt_tokens=*/1),
             FinishReason::STOP);
 }
 
 TEST(StoppingCheckerTest, IgnoreEosStillStopsOnStopSequence) {
+  // stop sequences come from the request's `stop` field, independent of
+  // ignore_eos, so they keep stopping generation.
   StoppingChecker checker(
       /*max_generated_tokens=*/10,
       /*max_context_len=*/0,

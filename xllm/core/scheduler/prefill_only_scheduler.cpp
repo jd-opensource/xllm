@@ -25,6 +25,14 @@ limitations under the License.
 #include "util/utils.h"
 
 namespace xllm {
+namespace {
+
+size_t get_prefill_allocate_tokens(Sequence* sequence, size_t step_tokens) {
+  return sequence->kv_state().kv_cache_tokens_num() + step_tokens;
+}
+
+}  // namespace
+
 PrefillOnlyScheduler::PrefillOnlyScheduler(Engine* engine,
                                            const Options& options)
     : ContinuousScheduler(engine, options) {}
@@ -126,9 +134,10 @@ void PrefillOnlyScheduler::handle_prefill_requests(
       }
 
       // preempt offline decode
-      const size_t kv_cache_tokens_num =
-          prefill_sequence->kv_state().kv_cache_tokens_num();
-      if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
+      const size_t max_handle_num_tokens =
+          get_prefill_allocate_tokens(prefill_sequence.get(), num_tokens);
+      if (!kv_cache_manager_->allocate(prefill_sequence.get(),
+                                       max_handle_num_tokens)) {
         can_schedule = false;
         if (options_.enable_online_preempt_offline() && !request->offline() &&
             !running_queue_offline_->empty()) {
@@ -139,7 +148,7 @@ void PrefillOnlyScheduler::handle_prefill_requests(
           bool enough_to_evict =
               check_if_enough_to_evict(running_queue_offline_.get(),
                                        prefill_sequence.get(),
-                                       num_tokens,
+                                       max_handle_num_tokens,
                                        num_request_to_evict);
           if (enough_to_evict) {
             for (size_t i = 0; i < num_request_to_evict; ++i) {
@@ -153,7 +162,8 @@ void PrefillOnlyScheduler::handle_prefill_requests(
               request_to_preempt->set_preempted();
               waiting_priority_queue_offline_->push(request_to_preempt);
             }
-            if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
+            if (!kv_cache_manager_->allocate(prefill_sequence.get(),
+                                             max_handle_num_tokens)) {
               LOG(ERROR) << "Should be able to allocate after preempting "
                          << num_request_to_evict
                          << " offline requests, but failed.";
@@ -317,7 +327,10 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
       }
 
       // preempt offline decode
-      if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
+      const size_t max_handle_num_tokens =
+          get_prefill_allocate_tokens(prefill_sequence.get(), num_tokens);
+      if (!kv_cache_manager_->allocate(prefill_sequence.get(),
+                                       max_handle_num_tokens)) {
         can_schedule = false;
         if (options_.enable_online_preempt_offline() && !request->offline() &&
             !running_queue_offline_->empty()) {
@@ -328,7 +341,7 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
           bool enough_to_evict =
               check_if_enough_to_evict(running_queue_offline_.get(),
                                        prefill_sequence.get(),
-                                       num_tokens,
+                                       max_handle_num_tokens,
                                        num_request_to_evict);
           if (enough_to_evict) {
             for (size_t i = 0; i < num_request_to_evict; ++i) {
@@ -342,7 +355,8 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
               request_to_preempt->set_preempted();
               waiting_priority_queue_offline_->push(request_to_preempt);
             }
-            if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
+            if (!kv_cache_manager_->allocate(prefill_sequence.get(),
+                                             max_handle_num_tokens)) {
               LOG(ERROR) << "Should be able to allocate after preempting "
                          << num_request_to_evict
                          << " offline requests, but failed.";
