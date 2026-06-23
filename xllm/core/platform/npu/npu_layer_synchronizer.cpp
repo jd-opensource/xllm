@@ -30,7 +30,7 @@ NPULayerSynchronizerImpl::NPULayerSynchronizerImpl(const int64_t num_layers,
     auto ret = aclrtCreateEventWithFlag(&events_[i], flags);
     CHECK(ret == ACL_SUCCESS) << "Create event failed:" << ret;
   }
-  auto ctx_ret = aclrtGetCurrentContext(&context_);
+  aclError ctx_ret = aclrtGetCurrentContext(&context_);
   CHECK(ctx_ret == ACL_SUCCESS) << "Get current context failed:" << ctx_ret;
 }
 
