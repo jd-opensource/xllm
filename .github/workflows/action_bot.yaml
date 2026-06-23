@@ -1,0 +1,225 @@
+# Bot command handler for CI permissions.
+# Repository collaborators can comment to control CI:
+#   @xllm-bot run          - Add run-ci label to trigger CI
+#   @xllm-bot rerun        - Cancel and rerun all workflows
+#   @xllm-bot rerun failed - Rerun failed and cancelled jobs
+#   @xllm-bot stop         - Cancel all in-progress workflows
+
+name: Action Bot
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: write
+
+jobs:
+  handle-command:
+    # Only run on PR comments mentioning @xllm-bot.
+    if: |
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@xllm-bot')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check collaborator permission
+        id: check-permission
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.comment.user.login }}
+        run: |
+          echo "Checking if $ACTOR is a collaborator on $REPO..."
+
+          PERMISSION=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/repos/${REPO}/collaborators/${ACTOR}/permission" \
+            --jq '.permission' 2>/dev/null || true)
+
+          case "$PERMISSION" in
+            admin|maintain|write|triage|read)
+              echo "$ACTOR is authorized with $PERMISSION permission"
+              echo "authorized=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "$ACTOR is not a collaborator. Repository permission: ${PERMISSION:-none}"
+              echo "authorized=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Parse command
+        id: parse
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          if echo "$COMMENT_BODY" | grep -qi "@xllm-bot rerun failed"; then
+            echo "command=rerun-failed" >> "$GITHUB_OUTPUT"
+          elif echo "$COMMENT_BODY" | grep -qi "@xllm-bot rerun"; then
+            echo "command=rerun" >> "$GITHUB_OUTPUT"
+          elif echo "$COMMENT_BODY" | grep -qi "@xllm-bot stop"; then
+            echo "command=stop" >> "$GITHUB_OUTPUT"
+          elif echo "$COMMENT_BODY" | grep -qi "@xllm-bot run"; then
+            echo "command=run" >> "$GITHUB_OUTPUT"
+          else
+            echo "command=unknown" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Handle @xllm-bot run
+        if: steps.check-permission.outputs.authorized == 'true' && steps.parse.outputs.command == 'run'
+        env:
+          GH_TOKEN: ${{ secrets.XLLM_BOT_TOKEN }}
+        run: |
+          echo "Adding run-ci label to PR #${{ github.event.issue.number }}"
+
+          # Add run-ci label.
+          gh pr edit ${{ github.event.issue.number }} \
+            --repo ${{ github.repository }} \
+            --add-label "run-ci"
+
+          # React with thumbs up.
+          gh api \
+            -X POST \
+            "/repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content='+1'
+
+          echo "Label added successfully"
+
+      - name: Handle @xllm-bot rerun
+        if: steps.check-permission.outputs.authorized == 'true' && steps.parse.outputs.command == 'rerun'
+        env:
+          GH_TOKEN: ${{ secrets.XLLM_BOT_TOKEN }}
+        run: |
+          echo "Rerunning all jobs for PR #${{ github.event.issue.number }}"
+
+          # Get PR head SHA.
+          PR_SHA=$(gh pr view ${{ github.event.issue.number }} \
+            --repo ${{ github.repository }} \
+            --json headRefOid -q '.headRefOid')
+
+          echo "PR HEAD SHA: $PR_SHA"
+
+          # Cancel in-progress and queued runs first.
+          echo "Cancelling in-progress runs..."
+          gh run list \
+            --repo ${{ github.repository }} \
+            --commit "$PR_SHA" \
+            --json databaseId,status -q '.[] | select(.status == "in_progress" or .status == "queued") | .databaseId' | \
+          while read -r run_id; do
+            if [ -n "$run_id" ]; then
+              echo "Cancelling workflow $run_id..."
+              gh run cancel "$run_id" --repo ${{ github.repository }} || true
+            fi
+          done
+
+          # Wait for cancellations to complete.
+          sleep 2
+
+          # Rerun all workflow runs for this commit.
+          echo "Rerunning all workflows..."
+          gh run list \
+            --repo ${{ github.repository }} \
+            --commit "$PR_SHA" \
+            --json databaseId -q '.[].databaseId' | \
+          while read -r run_id; do
+            if [ -n "$run_id" ]; then
+              echo "Rerunning workflow $run_id..."
+              gh run rerun "$run_id" --repo ${{ github.repository }} || true
+            fi
+          done
+
+          # React with thumbs up.
+          gh api \
+            -X POST \
+            "/repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content='+1'
+
+          echo "Rerun triggered successfully"
+
+      - name: Handle @xllm-bot rerun failed
+        if: steps.check-permission.outputs.authorized == 'true' && steps.parse.outputs.command == 'rerun-failed'
+        env:
+          GH_TOKEN: ${{ secrets.XLLM_BOT_TOKEN }}
+        run: |
+          echo "Rerunning failed/cancelled jobs for PR #${{ github.event.issue.number }}"
+
+          # Get PR head SHA.
+          PR_SHA=$(gh pr view ${{ github.event.issue.number }} \
+            --repo ${{ github.repository }} \
+            --json headRefOid -q '.headRefOid')
+
+          echo "PR HEAD SHA: $PR_SHA"
+
+          # Rerun failed and cancelled workflow runs for this commit.
+          # Cancelled jobs are common with fail-fast when one job fails.
+          for STATUS in failure cancelled; do
+            gh run list \
+              --repo ${{ github.repository }} \
+              --commit "$PR_SHA" \
+              --status "$STATUS" \
+              --json databaseId -q '.[].databaseId' | \
+            while read -r run_id; do
+              if [ -n "$run_id" ]; then
+                echo "Rerunning $STATUS workflow $run_id..."
+                gh run rerun "$run_id" --repo ${{ github.repository }} --failed || true
+              fi
+            done
+          done
+
+          # React with thumbs up.
+          gh api \
+            -X POST \
+            "/repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content='+1'
+
+          echo "Rerun-failed triggered successfully"
+
+      - name: Handle @xllm-bot stop
+        if: steps.check-permission.outputs.authorized == 'true' && steps.parse.outputs.command == 'stop'
+        env:
+          GH_TOKEN: ${{ secrets.XLLM_BOT_TOKEN }}
+        run: |
+          echo "Stopping all workflows for PR #${{ github.event.issue.number }}"
+
+          # Get PR head SHA.
+          PR_SHA=$(gh pr view ${{ github.event.issue.number }} \
+            --repo ${{ github.repository }} \
+            --json headRefOid -q '.headRefOid')
+
+          echo "PR HEAD SHA: $PR_SHA"
+
+          # Cancel all in-progress and queued runs.
+          gh run list \
+            --repo ${{ github.repository }} \
+            --commit "$PR_SHA" \
+            --json databaseId,status -q '.[] | select(.status == "in_progress" or .status == "queued") | .databaseId' | \
+          while read -r run_id; do
+            if [ -n "$run_id" ]; then
+              echo "Cancelling workflow $run_id..."
+              gh run cancel "$run_id" --repo ${{ github.repository }} || true
+            fi
+          done
+
+          # React with thumbs up.
+          gh api \
+            -X POST \
+            "/repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content='+1'
+
+          echo "Stop triggered successfully"
+
+      - name: Unauthorized user
+        if: steps.check-permission.outputs.authorized != 'true' && steps.parse.outputs.command != 'unknown'
+        env:
+          GH_TOKEN: ${{ secrets.XLLM_BOT_TOKEN }}
+        run: |
+          echo "User ${{ github.event.comment.user.login }} is not authorized"
+
+          # React with confused emoji.
+          gh api \
+            -X POST \
+            "/repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content='confused'
