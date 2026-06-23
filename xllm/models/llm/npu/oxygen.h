@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/rotary_embedding_util.h"
@@ -45,6 +46,14 @@ class OxygenModelImpl : public QWen3ModelImpl {
     } else {
       h = npu_embed_tokens_(tokens, 0);
     }
+
+    // Share the interlayer addnorm residual buffer across all decoder layers.
+    torch::Tensor residual;
+    if (::xllm::KernelConfig::get_instance().enable_interlayer_addnorm()) {
+      residual = torch::zeros_like(h, h.options());
+      set_residual(residual);
+    }
+
     if (use_deepstack) {
       deep_stacks =
           input_params.multimodal.deep_stacks;  // [num_deepstack, hidden_size]
