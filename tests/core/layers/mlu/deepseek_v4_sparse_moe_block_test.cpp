@@ -32,7 +32,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "layers/mlu/fused_moe.h"
 #include "layers/mlu/tests_utils.h"
-#include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -74,7 +74,7 @@ class DeepseekV4SparseMoEBlockTest : public ::testing::Test {
   void SetUp() override {
     options_ = torch::TensorOptions()
                    .dtype(torch::kBFloat16)
-                   .device(Device::type_torch(), 0)
+                   .device(Platform::type_torch(), 0)
                    .requires_grad(false);
     model_args_ = test::create_default_model_args();
     model_args_.model_type() = "deepseek_v4";
@@ -312,8 +312,8 @@ TEST_F(DeepseekV4SparseMoEBlockTest, LoadStateDictAcceptsUnprefixedMoeKeys) {
 
   torch::Tensor hidden_states = make_hidden({4, model_args_.hidden_size()});
   FusedMoEImpl::RouteInfo route = route_for(raw_moe, hidden_states);
-  torch::Tensor expected = raw_moe->forward_selected(
-      hidden_states, route.reduce_weight, route.expert_id);
+  torch::Tensor expected = raw_moe->forward_experts(
+      hidden_states, /*enable_all2all_communication=*/false, route);
   torch::Tensor actual = block->forward_selected(
       hidden_states, route.reduce_weight, route.expert_id, ModelInputParams());
 
@@ -321,7 +321,7 @@ TEST_F(DeepseekV4SparseMoEBlockTest, LoadStateDictAcceptsUnprefixedMoeKeys) {
   test::verify_tensor_close(actual, expected, 1e-3, 1e-4);
 }
 
-TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedMergesSharedAndRouted) {
+TEST_F(DeepseekV4SparseMoEBlockTest, SelectedRouteMergesSharedAndRouted) {
   DeepseekV4SparseMoEBlock block = create_block();
   FusedMoE raw_moe = create_raw_moe(/*enable_result_reduction=*/true);
   StateDict state_dict(create_fp_weights());
@@ -332,14 +332,14 @@ TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedMergesSharedAndRouted) {
   FusedMoEImpl::RouteInfo route = route_for(raw_moe, hidden_states);
   torch::Tensor actual = block->forward_selected(
       hidden_states, route.reduce_weight, route.expert_id, ModelInputParams());
-  torch::Tensor expected = raw_moe->forward_selected(
-      hidden_states, route.reduce_weight, route.expert_id);
+  torch::Tensor expected = raw_moe->forward_experts(
+      hidden_states, /*enable_all2all_communication=*/false, route);
 
   sync_dev();
   test::verify_tensor_close(actual, expected, 1e-3, 1e-4);
 }
 
-TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedRestores3DShape) {
+TEST_F(DeepseekV4SparseMoEBlockTest, SelectedRouteRestores3DShape) {
   DeepseekV4SparseMoEBlock block = create_block();
   FusedMoE raw_moe = create_raw_moe();
   StateDict state_dict(create_fp_weights());
@@ -362,7 +362,7 @@ TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedRestores3DShape) {
   EXPECT_EQ(actual.sizes(), hidden_states.sizes());
 }
 
-TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedRejectsInvalidTopkShape) {
+TEST_F(DeepseekV4SparseMoEBlockTest, SelectedRouteRejectsInvalidTopkShape) {
   DeepseekV4SparseMoEBlock block = create_block();
   torch::Tensor hidden_states = make_hidden({3, model_args_.hidden_size()});
   torch::Tensor topk_weights = torch::ones({2, 2}, options_);
@@ -372,7 +372,7 @@ TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedRejectsInvalidTopkShape) {
       hidden_states, topk_weights, topk_ids, ModelInputParams()));
 }
 
-TEST_F(DeepseekV4SparseMoEBlockTest, ForwardSelectedRequiresDpTokensForGather) {
+TEST_F(DeepseekV4SparseMoEBlockTest, SelectedRouteRequiresDpTokensForGather) {
   set_dp_ep_ctx(/*dp_size=*/2, /*with_dp_group=*/true);
   DeepseekV4SparseMoEBlock block = create_block();
   torch::Tensor hidden_states = make_hidden({2, model_args_.hidden_size()});

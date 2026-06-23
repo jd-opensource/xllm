@@ -553,6 +553,7 @@ class TestUT(Command):
     # Note: Use test case name patterns (from gtest), not executable names
     SEQUENTIAL_TESTS = [
         'ReduceScatterMultiDeviceTest',
+        'BroadcastMultiDeviceTest',
         'DeepEPMultiDeviceTest',
         'AttentionMultiDeviceTest',
         'FusedMoEAll2AllMultiDeviceTest',

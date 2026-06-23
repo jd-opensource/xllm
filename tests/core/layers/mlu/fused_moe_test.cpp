@@ -565,7 +565,7 @@ TEST_F(FusedMoETest, PrepRouteMatchesBaseForward) {
   verify_tensor_close(actual, expected, 1e-3, 1e-4);
 }
 
-TEST_F(FusedMoETest, ForwardSelectedMatchesRouteInfoWithPreselectedRoutes) {
+TEST_F(FusedMoETest, SelectedRouteMatchesGateRouteWith3DInput) {
   const int64_t batch_size = 4;
   const int64_t seq_len = 8;
   const int64_t hidden_size = 256;
@@ -596,23 +596,13 @@ TEST_F(FusedMoETest, ForwardSelectedMatchesRouteInfoWithPreselectedRoutes) {
   torch::Tensor hidden_states_2d =
       hidden_states.reshape({batch_size * seq_len, hidden_size});
   FusedMoEImpl::RouteInfo route_info = fused_moe->prep_route(hidden_states_2d);
-  torch::Tensor topk_weights =
-      route_info.reduce_weight.reshape({batch_size, seq_len, top_k});
-  torch::Tensor topk_ids =
-      route_info.expert_id.reshape({batch_size, seq_len, top_k})
-          .to(torch::kLong);
-  torch::Tensor expected_weights =
-      topk_weights.reshape({batch_size * seq_len, top_k});
-  torch::Tensor expected_ids =
-      topk_ids.reshape({batch_size * seq_len, top_k}).to(torch::kInt);
+  route_info.expert_id = route_info.expert_id.to(torch::kLong);
 
-  torch::Tensor expected = fused_moe->forward_experts(
-      hidden_states,
-      /*enable_all2all_communication=*/false,
-      FusedMoEImpl::RouteInfo{.reduce_weight = expected_weights,
-                              .expert_id = expected_ids});
-  torch::Tensor actual =
-      fused_moe->forward_selected(hidden_states, topk_weights, topk_ids);
+  torch::Tensor expected =
+      fused_moe->forward_experts(hidden_states,
+                                 /*enable_all2all_communication=*/false);
+  torch::Tensor actual = fused_moe->forward_experts(
+      hidden_states, /*enable_all2all_communication=*/false, route_info);
 
   xllm::Device device(options_.device());
   device.synchronize_default_stream();
@@ -624,7 +614,7 @@ TEST_F(FusedMoETest, ForwardSelectedMatchesRouteInfoWithPreselectedRoutes) {
   verify_tensor_close(actual, expected, 1e-3, 1e-4);
 }
 
-TEST_F(FusedMoETest, ForwardSelectedRejectsInvalidRouteShape) {
+TEST_F(FusedMoETest, SelectedRouteRejectsInvalidRouteShape) {
   const int64_t hidden_size = 256;
   const int64_t intermediate_size = 256;
   const int64_t num_experts = 8;
@@ -644,16 +634,24 @@ TEST_F(FusedMoETest, ForwardSelectedRejectsInvalidRouteShape) {
 
   torch::Tensor hidden_states = create_custom_input(
       {3, hidden_size}, std::vector<float>(3 * hidden_size, 0.05f));
-  torch::Tensor topk_weights = torch::ones({2, top_k}, options_);
-  torch::Tensor topk_ids =
-      torch::zeros({2, top_k}, options_.dtype(torch::kInt32));
-  torch::Tensor bad_topk_weights = torch::ones({3, top_k + 1}, options_);
+  FusedMoEImpl::RouteInfo bad_topk_route{
+      .reduce_weight = torch::ones({3, top_k + 1}, options_),
+      .expert_id = torch::zeros({3, top_k + 1}, options_.dtype(torch::kInt32))};
+  FusedMoEImpl::RouteInfo bad_token_route{
+      .reduce_weight = torch::ones({2, top_k}, options_),
+      .expert_id = torch::zeros({2, top_k}, options_.dtype(torch::kInt32))};
 
-  EXPECT_ANY_THROW(
-      fused_moe->forward_selected(hidden_states, bad_topk_weights, topk_ids));
+  EXPECT_DEATH(
+      fused_moe->forward_experts(hidden_states,
+                                 /*enable_all2all_communication=*/false,
+                                 bad_topk_route),
+      "topk mismatch");
 
-  EXPECT_ANY_THROW(
-      fused_moe->forward_selected(hidden_states, topk_weights, topk_ids));
+  EXPECT_DEATH(
+      fused_moe->forward_experts(hidden_states,
+                                 /*enable_all2all_communication=*/false,
+                                 bad_token_route),
+      "token count mismatch");
 }
 
 TEST_F(FusedMoETest, NoReductionModeMatchesExternalReduce) {

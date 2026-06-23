@@ -80,6 +80,23 @@ ProcessGroup* DeepseekV4SparseMoEBlockImpl::routed_pg() const {
                                       : parallel_args_.tp_group_;
 }
 
+FusedMoEImpl::RouteInfo DeepseekV4SparseMoEBlockImpl::make_route(
+    const torch::Tensor& topk_weights,
+    const torch::Tensor& topk_ids,
+    int64_t hidden_rows) const {
+  const int64_t topk = topk_weights.size(-1);
+  CHECK_EQ(topk_ids.size(-1), topk)
+      << "topk_ids last dim must match topk_weights last dim";
+
+  FusedMoEImpl::RouteInfo route;
+  route.reduce_weight = topk_weights.reshape({hidden_rows, topk});
+  route.expert_id = topk_ids.reshape({hidden_rows, topk});
+  if (route.expert_id.scalar_type() != torch::kInt) {
+    route.expert_id = route.expert_id.to(torch::kInt);
+  }
+  return route;
+}
+
 std::vector<int32_t> DeepseekV4SparseMoEBlockImpl::get_row_dp_tokens(
     int64_t hidden_rows,
     const ModelInputParams& input_params) const {
@@ -118,11 +135,10 @@ torch::Tensor DeepseekV4SparseMoEBlockImpl::forward_selected(
   torch::Tensor topk_ids_2d = reshape_topk(topk_ids, row_count);
 
   if (use_all2all(input_params)) {
-    torch::Tensor output =
-        moe_->forward_selected(hidden_rows,
-                               topk_weights_2d,
-                               topk_ids_2d,
-                               /*enable_all2all_communication=*/true);
+    FusedMoEImpl::RouteInfo route =
+        make_route(topk_weights_2d, topk_ids_2d, /*hidden_rows=*/row_count);
+    torch::Tensor output = moe_->forward_experts(
+        hidden_rows, /*enable_all2all_communication=*/true, route);
     return output.reshape(hidden_shape);
   }
 
@@ -138,8 +154,14 @@ torch::Tensor DeepseekV4SparseMoEBlockImpl::forward_selected(
                                                             parallel_args_);
 
   torch::Tensor shared_out = moe_->forward_shared(moe_inputs.hidden_states);
-  torch::Tensor routed_out = moe_->forward_selected(
-      moe_inputs.hidden_states, moe_inputs.topk_weights, moe_inputs.topk_ids);
+  const int64_t gathered_rows = moe_inputs.hidden_states.size(0);
+  FusedMoEImpl::RouteInfo route = make_route(moe_inputs.topk_weights,
+                                             moe_inputs.topk_ids,
+                                             /*hidden_rows=*/gathered_rows);
+  torch::Tensor routed_out =
+      moe_->forward_experts(moe_inputs.hidden_states,
+                            /*enable_all2all_communication=*/false,
+                            route);
   ProcessGroup* reduce_group = routed_pg();
   CHECK(reduce_group != nullptr) << "routed process group is not initialized";
   if (reduce_group->world_size() > 1) {

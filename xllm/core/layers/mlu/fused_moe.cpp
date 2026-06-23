@@ -546,25 +546,6 @@ torch::Tensor FusedMoEImpl::forward_experts(
   }
 }
 
-torch::Tensor FusedMoEImpl::forward_selected(
-    const torch::Tensor& hidden_states,
-    const torch::Tensor& topk_weights,
-    const torch::Tensor& topk_ids,
-    bool enable_all2all_communication) {
-  const int64_t hidden_rows =
-      hidden_states.reshape({-1, hidden_states.size(-1)}).size(0);
-
-  RouteInfo route_info;
-  route_info.reduce_weight = topk_weights.reshape({hidden_rows, topk_});
-  route_info.expert_id = topk_ids.reshape({hidden_rows, topk_});
-  if (route_info.expert_id.scalar_type() != torch::kInt) {
-    route_info.expert_id = route_info.expert_id.to(torch::kInt);
-  }
-
-  return forward_experts(
-      hidden_states, enable_all2all_communication, route_info, std::nullopt);
-}
-
 torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
                                     const ModelInputParams& input_params) {
   // we only support all2all communication for decode stage for now
