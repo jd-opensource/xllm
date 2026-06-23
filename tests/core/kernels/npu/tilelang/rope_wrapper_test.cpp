@@ -33,7 +33,11 @@ class TileLangRopeWrapperTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() { torch_npu::init_npu("npu:0"); }
 
-  static void TearDownTestSuite() { torch_npu::finalize_npu(); }
+  static void TearDownTestSuite() {
+    torch_npu::finalize_npu();
+    aclrtResetDevice(0);
+    aclFinalize();
+  }
 };
 
 struct RopeTestCase {
