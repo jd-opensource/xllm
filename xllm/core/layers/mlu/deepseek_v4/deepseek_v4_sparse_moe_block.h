@@ -54,6 +54,7 @@ class DeepseekV4SparseMoEBlockImpl final : public torch::nn::Module {
                                  const ModelInputParams& input_params);
 
  private:
+  bool use_all2all(const ModelInputParams& input_params) const;
   bool need_gather() const;
   ProcessGroup* routed_pg() const;
   std::vector<int32_t> get_row_dp_tokens(
@@ -61,6 +62,7 @@ class DeepseekV4SparseMoEBlockImpl final : public torch::nn::Module {
       const ModelInputParams& input_params) const;
 
   ParallelArgs parallel_args_;
+  bool enable_deep_ep_ = false;
   FusedMoE moe_{nullptr};
 
   friend class DeepseekV4SparseMoEBlockTestPeer;

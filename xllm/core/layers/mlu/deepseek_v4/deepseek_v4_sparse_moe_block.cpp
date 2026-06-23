@@ -19,6 +19,7 @@ limitations under the License.
 
 #include <vector>
 
+#include "core/framework/config/eplb_config.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "layers/common/dp_utils.h"
 
@@ -40,6 +41,9 @@ DeepseekV4SparseMoEBlockImpl::DeepseekV4SparseMoEBlockImpl(
     const torch::TensorOptions& options,
     bool use_hash)
     : parallel_args_(parallel_args) {
+  enable_deep_ep_ =
+      ::xllm::EPLBConfig::get_instance().expert_parallel_degree() == 2 &&
+      parallel_args_.ep_size() > 1;
   const FusedMoEArgs moe_args{
       .is_gated = true, .enable_result_reduction = false, .use_hash = use_hash};
   moe_ = register_module(
@@ -60,6 +64,11 @@ FusedMoEImpl::RouteInfo DeepseekV4SparseMoEBlockImpl::prep_route(
     torch::Tensor& hidden_states,
     const std::optional<torch::Tensor>& input_ids) {
   return moe_->prep_route(hidden_states, input_ids);
+}
+
+bool DeepseekV4SparseMoEBlockImpl::use_all2all(
+    const ModelInputParams& input_params) const {
+  return enable_deep_ep_ && all_dp_ranks_are_decode(input_params);
 }
 
 bool DeepseekV4SparseMoEBlockImpl::need_gather() const {
@@ -107,6 +116,15 @@ torch::Tensor DeepseekV4SparseMoEBlockImpl::forward_selected(
   const int64_t row_count = hidden_rows.size(0);
   torch::Tensor topk_weights_2d = reshape_topk(topk_weights, row_count);
   torch::Tensor topk_ids_2d = reshape_topk(topk_ids, row_count);
+
+  if (use_all2all(input_params)) {
+    torch::Tensor output =
+        moe_->forward_selected(hidden_rows,
+                               topk_weights_2d,
+                               topk_ids_2d,
+                               /*enable_all2all_communication=*/true);
+    return output.reshape(hidden_shape);
+  }
 
   std::vector<int32_t> row_token_nums;
   if (need_gather()) {

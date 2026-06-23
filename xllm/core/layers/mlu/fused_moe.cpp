@@ -518,17 +518,19 @@ void FusedMoEImpl::check_route(const torch::Tensor& hidden_states_2d,
 
 FusedMoEImpl::RouteInfo FusedMoEImpl::get_route(
     torch::Tensor& hidden_states_2d,
-    bool enable_all2all_communication,
+    bool /*enable_all2all_communication*/,
     const std::optional<RouteInfo>& route_info,
     const std::optional<torch::Tensor>& input_ids) {
   if (!route_info.has_value()) {
     return prep_route(hidden_states_2d, input_ids);
   }
 
-  CHECK(!enable_all2all_communication)
-      << "all2all path does not support external route_info";
   check_route(hidden_states_2d, route_info.value());
-  return route_info.value();
+  RouteInfo route = route_info.value();
+  if (route.expert_id.scalar_type() != torch::kInt) {
+    route.expert_id = route.expert_id.to(torch::kInt);
+  }
+  return route;
 }
 
 torch::Tensor FusedMoEImpl::forward_experts(
@@ -544,9 +546,11 @@ torch::Tensor FusedMoEImpl::forward_experts(
   }
 }
 
-torch::Tensor FusedMoEImpl::forward_selected(const torch::Tensor& hidden_states,
-                                             const torch::Tensor& topk_weights,
-                                             const torch::Tensor& topk_ids) {
+torch::Tensor FusedMoEImpl::forward_selected(
+    const torch::Tensor& hidden_states,
+    const torch::Tensor& topk_weights,
+    const torch::Tensor& topk_ids,
+    bool enable_all2all_communication) {
   const int64_t hidden_rows =
       hidden_states.reshape({-1, hidden_states.size(-1)}).size(0);
 
@@ -557,10 +561,8 @@ torch::Tensor FusedMoEImpl::forward_selected(const torch::Tensor& hidden_states,
     route_info.expert_id = route_info.expert_id.to(torch::kInt);
   }
 
-  return forward_experts(hidden_states,
-                         /*enable_all2all_communication=*/false,
-                         route_info,
-                         std::nullopt);
+  return forward_experts(
+      hidden_states, enable_all2all_communication, route_info, std::nullopt);
 }
 
 torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,

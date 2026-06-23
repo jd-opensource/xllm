@@ -60,7 +60,8 @@ class FusedMoEImpl : public torch::nn::Module {
       const std::optional<torch::Tensor>& input_ids = std::nullopt);
   torch::Tensor forward_selected(const torch::Tensor& hidden_states,
                                  const torch::Tensor& topk_weights,
-                                 const torch::Tensor& topk_ids);
+                                 const torch::Tensor& topk_ids,
+                                 bool enable_all2all_communication = false);
   torch::Tensor forward_shared(const torch::Tensor& hidden_states);
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
