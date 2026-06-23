@@ -301,9 +301,13 @@ class AclGraphTaskUpdateTest : public ::testing::Test {
 
   void reset_sequences() {
     for (auto& sequence : sequences_) {
-      auto blocks = sequence.kv_state().kv_blocks();
-      if (!blocks.empty()) {
-        block_manager_->deallocate(blocks);
+      auto kv_blocks = sequence.kv_state().blocks(BlockType::KV);
+      if (!kv_blocks.empty()) {
+        block_manager_->deallocate(kv_blocks);
+      }
+      auto single_blocks = sequence.kv_state().blocks(BlockType::SINGLE);
+      if (!single_blocks.empty()) {
+        block_manager_->deallocate(single_blocks);
       }
     }
     sequences_.clear();
@@ -359,8 +363,8 @@ class AclGraphTaskUpdateTest : public ::testing::Test {
       auto& sequence = sequences_.back();
 
       auto linear_state_block = block_manager_->allocate(1);
-      sequence.set_single_block(std::move(linear_state_block[0]));
-      sequence.add_kv_blocks(block_manager_->allocate(2));
+      sequence.add_blocks(BlockType::SINGLE, linear_state_block);
+      sequence.add_blocks(BlockType::KV, block_manager_->allocate(2));
       sequence.kv_state().incr_kv_cache_tokens_num(4);
       sequence.append_token(token_seed + static_cast<int32_t>(i));
       batch->add(&sequence);
@@ -383,8 +387,9 @@ class AclGraphTaskUpdateTest : public ::testing::Test {
       auto& sequence = sequences_.back();
 
       auto linear_state_block = block_manager_->allocate(1);
-      sequence.set_single_block(std::move(linear_state_block[0]));
-      sequence.add_kv_blocks(
+      sequence.add_blocks(BlockType::SINGLE, linear_state_block);
+      sequence.add_blocks(
+          BlockType::KV,
           block_manager_->allocate(static_cast<size_t>(num_kv_blocks)));
       sequence.kv_state().incr_kv_cache_tokens_num(
           static_cast<size_t>(prompt_len));
