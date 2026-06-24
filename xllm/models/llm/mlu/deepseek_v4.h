@@ -263,6 +263,11 @@ class DeepseekV4ModelImpl final
     }
     layer::AttentionMetadata& attn_metadata =
         *(modified_input_params.attn_metadata);
+    if (is_empty_dp_rank && !mlu_graph_forward) {
+      // Empty-DP inputs only preserve local shape and collective participation.
+      // They must not write dummy KV rows into real cache slots.
+      attn_metadata.is_dummy = true;
+    }
 
     if (!mlu_graph_forward) {
       prepare_dsa_metadata(attn_metadata, runtime_device);
