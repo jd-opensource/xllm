@@ -54,7 +54,6 @@ class DeepseekV4SparseMoEBlockImpl final : public torch::nn::Module {
                                  const ModelInputParams& input_params);
 
  private:
-  bool use_all2all(const ModelInputParams& input_params) const;
   bool need_gather() const;
   ProcessGroup* routed_pg() const;
   FusedMoEImpl::RouteInfo make_route(const torch::Tensor& topk_weights,

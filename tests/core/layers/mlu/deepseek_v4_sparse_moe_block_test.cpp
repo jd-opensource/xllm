@@ -51,11 +51,6 @@ class DeepseekV4SparseMoEBlockTestPeer {
     return block.need_gather();
   }
 
-  static bool use_all2all(DeepseekV4SparseMoEBlockImpl& block,
-                          const ModelInputParams& input_params) {
-    return block.use_all2all(input_params);
-  }
-
   static void set_enable_deep_ep(DeepseekV4SparseMoEBlockImpl& block,
                                  bool enable_deep_ep) {
     block.enable_deep_ep_ = enable_deep_ep;
@@ -266,28 +261,6 @@ TEST_F(DeepseekV4SparseMoEBlockTest, NeedGatherOnlyForDpEp) {
   set_tp_ctx(/*world_size=*/2, /*ep_size=*/2);
   block = create_block();
   EXPECT_FALSE(DeepseekV4SparseMoEBlockTestPeer::need_gather(*block));
-}
-
-TEST_F(DeepseekV4SparseMoEBlockTest, UseAll2AllOnlyForDecodeWhenDeepEpEnabled) {
-  set_tp_ctx(/*world_size=*/2, /*ep_size=*/2);
-  DeepseekV4SparseMoEBlock block = create_block();
-  DeepseekV4SparseMoEBlockTestPeer::set_enable_deep_ep(*block, true);
-
-  ModelInputParams decode_params;
-  decode_params.parallel.dp_global_token_nums = {1, 1};
-  decode_params.parallel.dp_is_decode = {1, 1};
-  EXPECT_TRUE(
-      DeepseekV4SparseMoEBlockTestPeer::use_all2all(*block, decode_params));
-
-  ModelInputParams mixed_params;
-  mixed_params.parallel.dp_global_token_nums = {2, 1};
-  mixed_params.parallel.dp_is_decode = {0, 1};
-  EXPECT_FALSE(
-      DeepseekV4SparseMoEBlockTestPeer::use_all2all(*block, mixed_params));
-
-  DeepseekV4SparseMoEBlockTestPeer::set_enable_deep_ep(*block, false);
-  EXPECT_FALSE(
-      DeepseekV4SparseMoEBlockTestPeer::use_all2all(*block, decode_params));
 }
 
 TEST_F(DeepseekV4SparseMoEBlockTest, ConvertsModelTokensToRowTokens) {

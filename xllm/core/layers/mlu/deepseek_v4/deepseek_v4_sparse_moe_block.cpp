@@ -66,11 +66,6 @@ FusedMoEImpl::RouteInfo DeepseekV4SparseMoEBlockImpl::prep_route(
   return moe_->prep_route(hidden_states, input_ids);
 }
 
-bool DeepseekV4SparseMoEBlockImpl::use_all2all(
-    const ModelInputParams& input_params) const {
-  return enable_deep_ep_ && all_dp_ranks_are_decode(input_params);
-}
-
 bool DeepseekV4SparseMoEBlockImpl::need_gather() const {
   return need_selected_moe_dp_gather(parallel_args_);
 }
@@ -134,7 +129,7 @@ torch::Tensor DeepseekV4SparseMoEBlockImpl::forward_selected(
   torch::Tensor topk_weights_2d = reshape_topk(topk_weights, row_count);
   torch::Tensor topk_ids_2d = reshape_topk(topk_ids, row_count);
 
-  if (use_all2all(input_params)) {
+  if (enable_deep_ep_ && all_dp_ranks_are_decode(input_params)) {
     FusedMoEImpl::RouteInfo route =
         make_route(topk_weights_2d, topk_ids_2d, /*hidden_rows=*/row_count);
     torch::Tensor output = moe_->forward_experts(
