@@ -184,7 +184,11 @@ std::optional<ForwardOutput> run_llm_no_sync_impl(LLMWorkerImpl& worker,
   ForwardInput processed_input;
   worker.prepare_work_before_execute_on_stream(
       input, processed_input, prepare_stream);
-  return worker.execute_no_sync_on_stream(processed_input, compute_stream);
+  std::optional<ForwardOutput> output =
+      worker.execute_no_sync_on_stream(processed_input, compute_stream);
+  const int32_t ret = compute_stream.synchronize();
+  CHECK_EQ(ret, 0) << "failed to synchronize MTP compute stream, ret=" << ret;
+  return output;
 }
 
 torch::Tensor clone_host_tensor(const torch::Tensor& tensor) {
@@ -948,9 +952,8 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
   update_decode_step_input(input, last_states);
   prepare_draft_extend_inputs(input, last_states, current_draft_input);
   draft_outputs.reserve(num_speculative_tokens);
-  const bool reuse_mtp_topk_indices =
-      should_reuse_mtp_topk_indices(draft_impl_->context_.get_model_args(),
-                                    enable_schedule_overlap());
+  const bool reuse_mtp_topk_indices = should_reuse_mtp_topk_indices(
+      draft_impl_->context_.get_model_args(), enable_schedule_overlap());
   torch::Tensor mtp_topk_indices;
   for (int32_t draft_idx = 0; draft_idx < num_speculative_tokens; ++draft_idx) {
     if (reuse_mtp_topk_indices) {
