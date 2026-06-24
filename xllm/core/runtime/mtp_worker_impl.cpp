@@ -27,6 +27,7 @@ limitations under the License.
 #endif
 #include "core/framework/block/block_utils.h"
 #include "core/framework/config/disagg_pd_config.h"
+#include "core/framework/config/execution_config.h"
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/model_config.h"
@@ -222,13 +223,58 @@ bool should_reuse_mtp_topk_indices(const ModelArgs& model_args) {
          model_args.index_n_heads() > 0 && model_args.index_topk() > 0;
 }
 
+// Enable the ACL graph double-buffer prepare path for VLM speculative validate.
+// Eagle3/MTP fills the target validate tokens from draft outputs outside the
+// normal last-step token replacement path, so the target worker needs an
+// explicit graph-input prepare before its validate forward.
+bool should_prepare_target_graph_input_for_validate(
+    const runtime::Options& options,
+    const ForwardInput& validate_input,
+    bool enable_schedule_overlap) {
+#if defined(USE_NPU)
+  return ::xllm::ExecutionConfig::get_instance().enable_graph() &&
+         ::xllm::ExecutionConfig::get_instance().enable_graph_double_buffer() &&
+         enable_schedule_overlap &&
+         (options.backend() == "vlm" || options.backend() == "llm") &&
+         (validate_input.input_params.meta.batch_forward_type.has_decode() ||
+          (validate_input.input_params.is_spec_verify &&
+           validate_input.input_params.meta.batch_forward_type
+               .is_chunked_prefill()));
+#else
+  return false;
+#endif
+}
+
+// Prepare the next ACL graph replay slot for a target validate forward.  The
+// prepared token tensor is also recorded as input_tokens_override so the graph
+// persistent token buffer, and VLM input embedding when present, are based on
+// the validate tokens after Eagle3/MTP draft-token fill.
+void prepare_worker_graph_input_no_sync(WorkerImpl& worker,
+                                        ForwardInput& processed_input,
+                                        Stream& prepare_stream,
+                                        Stream& compute_stream) {
+#if defined(USE_NPU)
+  c10::StreamGuard stream_guard = prepare_stream.set_stream_guard();
+  processed_input.input_params.graph.input_tokens_override =
+      processed_input.token_ids;
+  prepare_stream.wait_stream(compute_stream);
+  worker.prepare_npu_graph_decode_input(processed_input);
+  record_metadata_ready_event(prepare_stream, processed_input);
+#endif
+}
+
 std::optional<ForwardOutput> run_worker_no_sync_impl(WorkerImpl& worker,
                                                      const ForwardInput& input,
                                                      Stream& prepare_stream,
                                                      Stream& compute_stream,
-                                                     ForwardInput& processed_input) {
+                                                     ForwardInput& processed_input,
+                                                     bool prepare_graph_input = false) {
   worker.prepare_work_before_execute_on_stream(
       input, processed_input, prepare_stream);
+  if (prepare_graph_input) {
+    prepare_worker_graph_input_no_sync(
+        worker, processed_input, prepare_stream, compute_stream);
+  }
   return worker.execute_no_sync_on_stream(processed_input, compute_stream);
 }
 
@@ -1172,11 +1218,15 @@ std::optional<ForwardOutput> MTPWorkerImpl::run_validate(
   ForwardInput target_prepared;
   fill_validate_input_from_draft_outputs(
       draft_outputs, validate_input, *compute_stream_);
+  const bool prepare_target_graph_input =
+      should_prepare_target_graph_input_for_validate(
+          options_, validate_input, enable_schedule_overlap());
   ForwardOutput target_output = run_worker_no_sync_impl(*target_impl_,
                                                         validate_input,
                                                         *prepare_stream_,
                                                         *compute_stream_,
-                                                        target_prepared)
+                                                        target_prepared,
+                                                        prepare_target_graph_input)
                                     .value();
   COUNTER_ADD(speculative_execution_latency_seconds_target,
               timer.elapsed_seconds());

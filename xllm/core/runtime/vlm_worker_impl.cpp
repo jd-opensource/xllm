@@ -101,6 +101,28 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& input) {
   return step_internal(input, ForwardSyncPolicy::LEGACY);
 }
 
+std::optional<ForwardOutput> VLMWorkerImpl::step_for_schedule_overlap(
+    const ForwardInput& input) {
+  return execute_no_sync_on_stream(input, *compute_stream_);
+}
+
+ForwardInput
+VLMWorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
+    ForwardInput& input) {
+  c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
+  CHECK(compute_stream_->wait_event(last_step_output_.ready_event))
+      << "failed to wait last step output ready event";
+  CHECK(compute_stream_->wait_event(input.metadata_ready_event))
+      << "failed to wait input metadata ready event";
+  ForwardInput updated_input = update_input_by_last_step_output(input);
+#if defined(USE_NPU)
+  if (can_prepare_npu_graph_decode_input(updated_input.input_params)) {
+    prepare_npu_graph_decode_input(updated_input);
+  }
+#endif
+  return updated_input;
+}
+
 std::optional<ForwardOutput> VLMWorkerImpl::execute_no_sync_on_stream(
     const ForwardInput& input,
     Stream& compute_stream) {
@@ -194,6 +216,11 @@ std::optional<ForwardOutput> VLMWorkerImpl::step_internal(
     }
   }
 
+  bool should_sync_default_stream = true;
+#if defined(USE_NPU)
+  should_sync_default_stream =
+      !can_skip_npu_graph_decode_sync(input.input_params);
+#endif
   if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
     output.retained_input = std::make_shared<ForwardInput>(input);
     if (enable_schedule_overlap()) {
@@ -202,8 +229,10 @@ std::optional<ForwardOutput> VLMWorkerImpl::step_internal(
     return output;
   }
 
-  auto ret = device_.synchronize_default_stream();
-  (void)ret;
+  if (should_sync_default_stream) {
+    int ret = device_.synchronize_default_stream();
+    CHECK_EQ(ret, 0) << "synchronize_default_stream failed";
+  }
   return output;
 }
 

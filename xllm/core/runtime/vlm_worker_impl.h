@@ -54,6 +54,12 @@ class VLMWorkerImpl : public WorkerImpl {
   std::optional<ForwardOutput> step_internal(
       const ForwardInput& input,
       ForwardSyncPolicy sync_policy = ForwardSyncPolicy::LEGACY);
+
+ protected:
+  std::optional<ForwardOutput> step_for_schedule_overlap(
+      const ForwardInput& input) override;
+  ForwardInput update_input_by_last_step_output_for_schedule_overlap(
+      ForwardInput& input) override;
 };
 
 }  // namespace xllm

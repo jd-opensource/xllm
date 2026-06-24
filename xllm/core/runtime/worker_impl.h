@@ -115,6 +115,10 @@ class WorkerImpl {
   void prepare_work_before_execute_on_stream(const ForwardInput& input,
                                              ForwardInput& processed_input,
                                              Stream& prepare_stream);
+  // Prepares ACL graph replay inputs for regular worker decode.  MTP validate
+  // fills target tokens later from draft outputs, so that path prepares graph
+  // input in MTPWorkerImpl after fill_validate_input_from_draft_outputs().
+  void prepare_npu_graph_decode_input(const ForwardInput& input);
 
   // Internal helper shared by worker pipelines before model execution.
   virtual void apply_kv_block_swaps(const ModelInputParams& input_params);
