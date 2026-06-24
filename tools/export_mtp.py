@@ -82,6 +82,9 @@ class ConfigView:
     def get(self, name: str, default: Any = None) -> Any:
         return self._data.get(name, default)
 
+    def __contains__(self, name: str) -> bool:
+        return name in self._data
+
     def get_nested(self, path: str, default: Any = None) -> Any:
         current: Any = self._data
         for name in path.split("."):
@@ -260,15 +263,16 @@ def update_mtp_dsa_topk_config(
         return
 
     index_topk_freq = int(config.get("index_topk_freq", 1) or 1)
-    updates.update(
-        {
-            "index_share_for_mtp_iteration": True,
-            "index_topk_freq": max(index_topk_freq, 2),
-            "index_skip_topk_offset": 0,
-            "index_topk_pattern": "S",
-            "indexer_types": ["full"],
-        }
-    )
+    mtp_topk_updates = {
+        "index_share_for_mtp_iteration": True,
+        "index_topk_freq": max(index_topk_freq, 2),
+        "index_skip_topk_offset": 0,
+        "index_topk_pattern": "S",
+        "indexer_types": ["full"],
+    }
+    for key, value in mtp_topk_updates.items():
+        if key in config:
+            updates[key] = value
 
 
 def update_and_save_config(config: ConfigView, output_dir: str, model_type: str, mtp_layer_count: int) -> None:
