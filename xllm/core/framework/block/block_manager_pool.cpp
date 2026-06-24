@@ -24,9 +24,11 @@ limitations under the License.
 #include "concurrent_block_manager_impl.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/service_config.h"
+#include "framework/model/model_input_params.h"
 #include "framework/xtensor/page_allocator.h"
 #include "framework/xtensor/phy_page_pool.h"
 #include "framework/xtensor/xtensor_block_manager_impl.h"
+#include "linear_state_block_manager.h"
 
 namespace xllm {
 
@@ -34,6 +36,12 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
     : options_(options) {
   CHECK(dp_size > 0) << "dp_size must be greater than 0";
   block_managers_.reserve(dp_size);
+  const uint32_t default_max_single_block_sequences =
+      options_.max_concurrent_requests() > 0
+          ? options_.max_concurrent_requests()
+          : static_cast<uint32_t>(std::max(
+                ::xllm::ServiceConfig::get_instance().max_concurrent_requests(),
+                0));
 
   BlockManager::Options block_options;
   block_options.num_blocks(options_.num_blocks())
@@ -53,15 +61,23 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
       .slot_size(options_.slot_size())
       .model_id(options_.model_id());
 
-  const uint32_t max_single_block_sequences =
-      options_.max_concurrent_requests() > 0
-          ? options_.max_concurrent_requests()
-          : static_cast<uint32_t>(std::max(
-                ::xllm::ServiceConfig::get_instance().max_concurrent_requests(),
-                0));
-  const uint32_t num_single_blocks = std::max<uint32_t>(
-      options_.num_single_blocks(), max_single_block_sequences + 2);
+  uint32_t num_single_blocks = std::max<uint32_t>(
+      options_.num_single_blocks(), default_max_single_block_sequences + 2);
+  if (options_.enable_linear_state() && options_.single_block_capacity() > 0) {
+    // A single block is held for the whole lifetime of a sequence (it backs the
+    // per-sequence embedding / linear-state id), so the pool must cover the
+    // number of concurrently live sequences -- bounded by max_concurrent
+    // requests, not the per-step batch size. The default above already encodes
+    // that; only an explicit capacity (e.g. tests deliberately exercising
+    // exhaustion) overrides it.
+    num_single_blocks = options_.single_block_capacity();
+  }
   CHECK_GT(num_single_blocks, 0u) << "num_single_blocks must be positive";
+
+  if (options_.enable_linear_state()) {
+    CHECK_GT(options_.linear_state_num_slots(), 0)
+        << "linear_state_num_slots must be set when linear state is enabled";
+  }
 
   for (int32_t i = 0; i < dp_size; ++i) {
     // The pool always holds a CompositeBlockManager. Its KV leaf is a flat
@@ -87,6 +103,26 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
         CompositeBlockManager::LeafEntry{std::move(single_leaf),
                                          /*participates_in_admission=*/false,
                                          /*supports_prefix_cache=*/false});
+    if (options_.enable_linear_state()) {
+      // LINEAR leaf: dedicated slot pool with its own hash domain. It is a
+      // sequence-growth leaf (participates_in_admission=true) so the composite
+      // hands a live slot to every sequence on first grow;
+      // supports_prefix_cache stays false because the prefix-cache surface here
+      // is bespoke (not the KV-shaped allocate_shared/cache contract). The
+      // linear-state typed APIs (resolve/commit) are scheduler-thread only, so
+      // we do not wrap this leaf in ConcurrentBlockManagerImpl even under
+      // disagg-PD / kvcache-store; sequence-level growth still goes through the
+      // composite under the scheduler, and Block dtor -> free() reaches the
+      // leaf directly.
+      leaves.emplace(
+          BlockType::LINEAR,
+          CompositeBlockManager::LeafEntry{
+              std::make_unique<LinearStateBlockManager>(
+                  static_cast<uint32_t>(options_.linear_state_num_slots()),
+                  options_.block_size()),
+              /*participates_in_admission=*/true,
+              /*supports_prefix_cache=*/false});
+    }
     block_managers_.emplace_back(
         std::make_unique<CompositeBlockManager>(std::move(leaves)));
   }
@@ -123,6 +159,50 @@ int32_t BlockManagerPool::get_dp_rank(Sequence* sequence) const {
   return dp_rank;
 }
 
+LinearStateBlockManager* BlockManagerPool::linear_leaf_for(
+    int32_t dp_rank) const {
+  if (!options_.enable_linear_state()) {
+    return nullptr;
+  }
+  CHECK_GE(dp_rank, 0);
+  CHECK_LT(static_cast<size_t>(dp_rank), block_managers_.size());
+  auto* composite =
+      static_cast<CompositeBlockManager*>(block_managers_[dp_rank].get());
+  BlockManager* leaf = composite->leaf_of(BlockType::LINEAR);
+  return static_cast<LinearStateBlockManager*>(leaf);
+}
+
+LinearStateBlockManager* BlockManagerPool::linear_state_prefix_cache(
+    int32_t dp_rank) {
+  return linear_leaf_for(dp_rank);
+}
+
+LinearStateCheckpointReservations
+BlockManagerPool::resolve_linear_state_cache_ops(
+    int32_t dp_rank,
+    std::vector<LinearStateCacheOp>* cache_ops,
+    const std::vector<Sequence*>& sequences) {
+  LinearStateBlockManager* linear = linear_leaf_for(dp_rank);
+  LinearStateCheckpointReservations reservations;
+  if (linear != nullptr && cache_ops != nullptr && !cache_ops->empty()) {
+    reservations = linear->resolve_cache_ops(cache_ops, sequences);
+  }
+  reservations.dp_rank = dp_rank;
+  return reservations;
+}
+
+void BlockManagerPool::commit_linear_state_reservations(
+    LinearStateCheckpointReservations&& reservations) {
+  if (reservations.dp_rank < 0) {
+    return;
+  }
+  LinearStateBlockManager* linear = linear_leaf_for(reservations.dp_rank);
+  if (linear == nullptr) {
+    return;
+  }
+  linear->commit_reservations(std::move(reservations));
+}
+
 void BlockManagerPool::deallocate(Request* request) {
   DCHECK(request != nullptr);
   for (auto& sequence : request->sequences()) {
@@ -140,7 +220,8 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
   DCHECK(sequence != nullptr);
   int32_t dp_rank = get_dp_rank(sequence);
   // The composite fans deallocate (with final cache) out across all leaves,
-  // including the SINGLE resource leaf and the (flat or xtensor) KV leaf.
+  // including the SINGLE resource leaf, the LINEAR leaf, and the (flat or
+  // xtensor) KV leaf.
   auto* composite =
       static_cast<CompositeBlockManager*>(block_managers_[dp_rank].get());
   composite->deallocate_for_sequence(sequence);
@@ -178,9 +259,9 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   // failure, wrongly deallocate + reset the already-held SWA/C4/C128 blocks.
   const bool started_empty = !sequence->kv_state().has_any_blocks();
 
-  // The leaves (KV / SWA / C4 / C128 / Single) each apply their own strategy;
-  // the pool only orchestrates prefix-share-then-beam-then-grow, which beam (KV
-  // copy-on-write) must sit between.
+  // The leaves (KV / SWA / C4 / C128 / SINGLE / LINEAR) each apply their own
+  // strategy; the pool only orchestrates prefix-share-then-beam-then-grow,
+  // which beam (KV copy-on-write) must sit between.
   auto* composite =
       static_cast<CompositeBlockManager*>(block_managers_[dp_rank].get());
   if (started_empty) {
@@ -196,7 +277,8 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   }
   // Always run the composite growth pass: even when KV is already satisfied, a
   // sequence (e.g. a fork/clone of a beam parent) may still be missing its
-  // per-sequence SINGLE block. The composite skips no-op leaves internally.
+  // per-sequence SINGLE / LINEAR block. The composite skips no-op leaves
+  // internally.
   if (!composite->allocate_sequence(sequence, num_tokens)) {
     if (started_empty) {
       composite->deallocate_for_sequence(sequence);
@@ -384,7 +466,8 @@ void BlockManagerPool::deallocate_without_cache(Sequence* sequence) {
                                BlockType::SWA,
                                BlockType::C4,
                                BlockType::C128,
-                               BlockType::SINGLE}) {
+                               BlockType::SINGLE,
+                               BlockType::LINEAR}) {
     const Slice<Block> blocks = sequence->kv_state().blocks(type);
     if (!blocks.empty()) {
       block_managers_[dp_rank]->deallocate(blocks);

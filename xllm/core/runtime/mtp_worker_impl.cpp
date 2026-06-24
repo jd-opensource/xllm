@@ -29,6 +29,7 @@ limitations under the License.
 #include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/service_config.h"
 #include "core/framework/config/speculative_config.h"
 #include "core/framework/kv_cache/kv_cache_estimation.h"
 #include "core/framework/multimodal/mm_data.h"
@@ -96,6 +97,10 @@ KVCacheEstimateOptions make_kv_cache_estimate_options(
       static_cast<int64_t>(options.num_speculative_tokens());
   estimate_options.max_tokens_per_batch =
       static_cast<int64_t>(options.max_tokens_per_batch());
+  estimate_options.max_concurrent_requests = static_cast<int64_t>(
+      ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
+  estimate_options.max_linear_state_cache_slots =
+      options.max_linear_state_cache_slots();
   estimate_options.is_draft_engine = options.is_draft_engine();
   estimate_options.enable_prefix_cache =
       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();

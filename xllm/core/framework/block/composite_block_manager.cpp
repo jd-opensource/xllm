@@ -23,6 +23,7 @@ limitations under the License.
 #include "concurrent_block_manager_impl.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "framework/xtensor/xtensor_block_manager_impl.h"
+#include "linear_state_block_manager.h"
 #include "single_block_manager.h"
 #include "sliding_window_block_manager.h"
 
@@ -239,6 +240,23 @@ void CompositeBlockManager::allocate_shared_for_sequence(Sequence* seq) {
                            .slice(0, kv_state.shared_blocks_num(BlockType::KV));
   std::vector<Block> shared = kv_leaf.allocate_shared(
       seq->tokens(), existed, seq->mm_data(), seq->block_hashes());
+  // Linear-state clamp: when a linear-state leaf is registered, the KV shared
+  // prefix must be trimmed to the prefix length recoverable from a committed
+  // linear-state checkpoint (min(kv_match, linear_recoverable_L)). The clamp
+  // lives on the linear leaf because it owns the hash domain and the
+  // contains() lookup.
+  auto linear_it = leaves_.find(BlockType::LINEAR);
+  if (linear_it != leaves_.end() && !shared.empty()) {
+    auto* linear_leaf =
+        static_cast<LinearStateBlockManager*>(linear_it->second.leaf.get());
+    const size_t safe_count = linear_leaf->compute_safe_shared_prefix_length(
+        seq, kv_state.shared_blocks_num(BlockType::KV), shared.size());
+    DCHECK_LE(safe_count, shared.size());
+    if (safe_count < shared.size()) {
+      kv_leaf.deallocate(Slice<Block>(shared).slice(safe_count));
+      shared.resize(safe_count);
+    }
+  }
   seq->add_shared_blocks(BlockType::KV, std::move(shared));
 }
 

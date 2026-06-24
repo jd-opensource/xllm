@@ -27,8 +27,14 @@ limitations under the License.
 namespace xllm {
 namespace {
 
-size_t get_prefill_allocate_tokens(Sequence* sequence, size_t step_tokens) {
-  return sequence->kv_state().kv_cache_tokens_num() + step_tokens;
+// In chunked prefill the scheduler commits `step_tokens` worth of compute this
+// step, but the KV manager must grow to fit the entire prompt so that later
+// chunks of the same sequence (which run with the same step budget but reuse
+// the already-allocated blocks) have capacity. Using `kv_cache + step_tokens`
+// undersizes capacity when prefix cache + linear-state clamp leave kv_cache
+// at fewer tokens than `seq->num_tokens()` covers.
+size_t get_prefill_allocate_tokens(Sequence* sequence, size_t /*step_tokens*/) {
+  return sequence->num_tokens();
 }
 
 }  // namespace
