@@ -615,8 +615,7 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
   param.numOfDeviceExperts = num_experts_per_partition_;
   param.maskStartIdx = 0;
   param.firstKDenseReplace = args.first_k_dense_replace();
-  // param.numOfSharedExperts = args.n_shared_experts();
-  param.numOfSharedExperts = 2;
+  param.numOfSharedExperts = args.n_shared_experts();
   param.routingMethod = "noAuxTc";
   param.numOfGroups = args.n_group();
   param.topkGroups = atb::SVector<int>{args.topk_group()};

@@ -15,10 +15,55 @@ limitations under the License.
 
 #pragma once
 
+#include <sstream>
+
+#include <glog/logging.h>
+
 #include "core/layers/npu/npu_deepseek_v32_decoder_layer_impl.h"
 #include "deepseek_v32.h"
 
 namespace xllm::npu::model {
+
+namespace detail {
+
+inline std::string format_eos_token_ids(
+  const std::vector<int32_t>& token_ids) {
+  std::ostringstream stream;
+  for (size_t index = 0; index < token_ids.size(); ++index) {
+    if (index > 0) {
+      stream << ",";
+    }
+    stream << token_ids[index];
+  }
+  return stream.str();
+}
+
+inline void log_glm5_npu_model_args(const ModelArgs& model_args,
+                                    const std::string& model_tag) {
+  LOG(INFO) << model_tag
+            << " parsed args: model_type=" << model_args.model_type()
+            << ", dtype=" << model_args.dtype()
+            << ", max_position_embeddings="
+            << model_args.max_position_embeddings()
+            << ", rope_theta=" << model_args.rope_theta()
+            << ", n_shared_experts=" << model_args.n_shared_experts()
+            << ", num_experts_per_tok=" << model_args.num_experts_per_tok()
+            << ", scoring_func=" << model_args.scoring_func()
+            << ", index_n_heads=" << model_args.index_n_heads()
+            << ", index_head_dim=" << model_args.index_head_dim()
+            << ", index_topk=" << model_args.index_topk()
+            << ", index_topk_freq=" << model_args.index_topk_freq()
+            << ", index_skip_topk_offset="
+            << model_args.index_skip_topk_offset()
+            << ", indexer_rope_interleave=" << std::boolalpha
+            << model_args.indexer_rope_interleave()
+            << ", num_nextn_predict_layers="
+            << model_args.num_nextn_predict_layers()
+            << ", eos_token_ids=["
+            << format_eos_token_ids(model_args.eos_token_id_vec()) << "]";
+}
+
+}  // namespace detail
 
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
@@ -38,6 +83,7 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
     dtype_ = options.dtype().toScalarType();
     num_speculative_tokens_ = model_args.num_speculative_tokens();
     index_topk_ = model_args.index_topk();
+    detail::log_glm5_npu_model_args(model_args, "GLM5 NPU main model");
 
     npu_embed_tokens_ =
         register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
@@ -319,7 +365,9 @@ TORCH_MODULE(GlmMoeDsaForCausalLM);
 REGISTER_CAUSAL_MODEL(glm_moe_dsa, GlmMoeDsaForCausalLM);
 
 // register the model args
-REGISTER_MODEL_ARGS(glm_moe_dsa, [&] {
+REGISTER_MODEL_ARGS(
+    glm_moe_dsa,
+    ([&] {
   LOAD_ARG_OR(model_type, "model_type", "glm_moe_dsa");
   LOAD_ARG_OR(dtype, "dtype", "");
   LOAD_ARG_OR(attention_bias, "attention_bias", false);
@@ -333,13 +381,18 @@ REGISTER_MODEL_ARGS(glm_moe_dsa, [&] {
   LOAD_ARG_OR(intermediate_size, "intermediate_size", 12288);
   LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 202752);
   LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-5);
-  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int>{154820});
+  LOAD_ARG_OR_FUNC(eos_token_id_vec, "eos_token_id", [&] {
+    return std::vector<int32_t>{154820, 154827, 154829};
+  });
+  LOAD_ARG_OR(bos_token_id, "bos_token_id", 0);
+  LOAD_ARG_OR(rope_theta, "rope_parameters.rope_theta", 1000000.0f);
 
   LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
   LOAD_ARG_OR(sliding_window, "sliding_window", 4096);
   LOAD_ARG_OR(max_window_layers, "max_window_layers", 61);
 
   LOAD_ARG_OR(first_k_dense_replace, "first_k_dense_replace", 3);
+  LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
   LOAD_ARG_OR(moe_layer_freq, "moe_layer_freq", 1);
   LOAD_ARG_OR(topk_method, "topk_method", "noaux_tc");
   LOAD_ARG_OR(n_routed_experts, "n_routed_experts", 256);
@@ -350,20 +403,24 @@ REGISTER_MODEL_ARGS(glm_moe_dsa, [&] {
   LOAD_ARG_OR(norm_topk_prob, "norm_topk_prob", true);
   LOAD_ARG_OR(n_group, "n_group", 1);
   LOAD_ARG_OR(topk_group, "topk_group", 1);
+  LOAD_ARG_OR(scoring_func, "scoring_func", "sigmoid");
   LOAD_ARG_OR(qk_nope_head_dim, "qk_nope_head_dim", 192);
   LOAD_ARG_OR(qk_rope_head_dim, "qk_rope_head_dim", 64);
   LOAD_ARG_OR(v_head_dim, "v_head_dim", 256);
   LOAD_ARG_OR(q_lora_rank, "q_lora_rank", 2048);
   LOAD_ARG_OR(kv_lora_rank, "kv_lora_rank", 512);
   LOAD_ARG_OR(index_head_dim, "index_head_dim", 128);
-  LOAD_ARG_OR(index_n_heads, "index_n_heads", 0);
+  LOAD_ARG_OR(num_nextn_predict_layers, "num_nextn_predict_layers", 1);
+  LOAD_ARG_OR(index_n_heads, "index_n_heads", 32);
   LOAD_ARG_OR(index_topk, "index_topk", 2048);
   LOAD_ARG_OR(index_topk_freq, "index_topk_freq", 1);
   LOAD_ARG_OR(index_topk_pattern, "index_topk_pattern", "");
   LOAD_ARG_OR(index_skip_topk_offset, "index_skip_topk_offset", 0);
+  LOAD_ARG_OR(index_share_for_mtp_iteration, "index_share_for_mtp_iteration", false);
 
   LOAD_ARG_OR(use_qk_norm, "use_qk_norm", true);
-  LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
+  LOAD_ARG_OR(indexer_rope_interleave, "indexer_rope_interleave", true);
+  LOAD_ARG_OR(rope_theta, "rope_theta", args->rope_theta());
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
 
   SET_ARG(head_dim, args->qk_nope_head_dim() + args->qk_rope_head_dim());
@@ -373,5 +430,5 @@ REGISTER_MODEL_ARGS(glm_moe_dsa, [&] {
   SET_ARG(stop_token_ids,
           std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
                                       args->eos_token_id_vec().end()));
-});
+    }));
 }  // namespace xllm::npu::model
