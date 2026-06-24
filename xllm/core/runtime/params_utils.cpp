@@ -92,7 +92,7 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
   Timer timer;
   int32_t num_seqs = 0;
   if (next_tokens.defined()) {
-    num_seqs = next_tokens.size(0);
+    num_seqs = static_cast<int32_t>(next_tokens.size(0));
   }
   if (embeddings.defined() && embeddings.numel() > 0) {
     num_seqs = std::max(num_seqs, static_cast<int32_t>(embeddings.size(0)));
@@ -112,7 +112,7 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
       const auto curr_embeddings =
           embeddings.defined() ? embeddings[curr_idx] : embeddings;
 
-      int32_t num_tokens = curr_next_tokens.size(0);
+      int32_t num_tokens = static_cast<int32_t>(curr_next_tokens.size(0));
       std::vector<Token> tokens;
       tokens.reserve(num_tokens);
       for (int32_t i = 0; i < num_tokens; ++i) {
