@@ -99,7 +99,13 @@ std::vector<int32_t> DeepseekV4SparseMoEBlockImpl::get_row_dp_tokens(
       input_params.parallel.dp_global_token_nums;
   CHECK(!token_nums.empty()) << "dp_global_token_nums is empty";
 
+  CHECK(parallel_args_.dp_local_process_group_ != nullptr)
+      << "dp_local_process_group_ is not initialized";
   const int64_t dp_rank = parallel_args_.dp_local_process_group_->rank();
+  CHECK_GE(dp_rank, 0) << "invalid dp rank " << dp_rank;
+  CHECK_LT(dp_rank, static_cast<int64_t>(token_nums.size()))
+      << "dp rank " << dp_rank << " exceeds dp_global_token_nums size "
+      << token_nums.size();
   const int32_t local_token_num = token_nums[dp_rank];
   CHECK_GT(local_token_num, 0)
       << "local dp token num must be positive for row-level conversion";
@@ -165,7 +171,7 @@ torch::Tensor DeepseekV4SparseMoEBlockImpl::forward_selected(
 
   torch::Tensor output = std::move(routed_out);
   if (shared_out.defined()) {
-    output = output + shared_out;
+    output.add_(shared_out);
   }
   if (moe_inputs.need_slice) {
     output = slice_selected_moe_output(

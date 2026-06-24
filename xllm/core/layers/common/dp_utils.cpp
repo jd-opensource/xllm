@@ -212,7 +212,7 @@ SelectedMoeInputs gather_selected_moe_inputs(
   CHECK_LT(rank, static_cast<int64_t>(dp_token_nums.size()))
       << "rank " << rank << " must be less than dp_token_nums size "
       << dp_token_nums.size();
-  CHECK_EQ(hidden_states.size(0), dp_token_nums[rank])
+  CHECK_EQ(hidden_states.size(0), static_cast<int64_t>(dp_token_nums[rank]))
       << "selected MoE local rows " << hidden_states.size(0)
       << " must match dp_token_nums[" << rank << "] " << dp_token_nums[rank];
 
