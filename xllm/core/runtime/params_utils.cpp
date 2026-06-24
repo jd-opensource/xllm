@@ -90,7 +90,10 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
                              const std::vector<torch::Tensor>& dit_images,
                              proto::ForwardOutput* pb_forward_output) {
   Timer timer;
-  int32_t num_seqs = next_tokens.size(0);
+  int32_t num_seqs = 0;
+  if (next_tokens.defined()) {
+    num_seqs = next_tokens.size(0);
+  }
   if (embeddings.defined() && embeddings.numel() > 0) {
     num_seqs = std::max(num_seqs, static_cast<int32_t>(embeddings.size(0)));
   }

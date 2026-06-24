@@ -127,27 +127,31 @@ c10::intrusive_ptr<c10d::Work> ProcessGroup::allgather_base_async(
   CHECK(pg_ != nullptr) << "Process group is not initialized.";
   CHECK_EQ(input.device(), device())
       << "input should be on the same device as the process group";
+  CHECK(input.is_contiguous())
+      << "allgather_base_async input must be contiguous so the async "
+         "collective can safely outlive this call";
   CHECK(output.defined()) << "output should be preallocated";
   CHECK_EQ(output.device(), device())
       << "output should be on the same device as the process group";
   CHECK(output.is_contiguous()) << "output should be contiguous";
 
-  torch::Tensor input_buf = input.contiguous();
-  const std::vector<int64_t> out_shape =
-      get_gather_shape(world_size(), input_buf);
+  const std::vector<int64_t> out_shape = get_gather_shape(world_size(), input);
   CHECK_EQ(output.sizes(), torch::IntArrayRef(out_shape))
       << "output shape mismatch for allgather_base_async";
   c10d::AllgatherOptions opts;
-  return pg_->_allgather_base(output, input_buf, opts);
+  torch::Tensor input_ref = input;
+  return pg_->_allgather_base(output, input_ref, opts);
 }
 
 torch::Tensor ProcessGroup::allgather_base_sync(const torch::Tensor& input) {
   CHECK(pg_ != nullptr) << "Process group is not initialized.";
   CHECK_EQ(input.device(), device())
       << "input should be on the same device as the process group";
-  torch::Tensor output =
-      torch::empty(get_gather_shape(world_size(), input), input.options());
-  allgather_base_async(input, output)->wait();
+  torch::Tensor input_buf = input.contiguous();
+  torch::Tensor output = torch::empty(get_gather_shape(world_size(), input_buf),
+                                      input_buf.options());
+  c10d::AllgatherOptions opts;
+  pg_->_allgather_base(output, input_buf, opts)->wait();
   return output;
 }
 
