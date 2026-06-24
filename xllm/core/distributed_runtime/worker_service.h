@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -124,6 +124,11 @@ class WorkerService : public proto::DistributeWorker {
                                  const proto::Empty* req,
                                  proto::ActivationMemory* resp,
                                  ::google::protobuf::Closure* done) override;
+
+  void UpdateWeights(::google::protobuf::RpcController* controller,
+                     const proto::UpdateWeightsRequest* req,
+                     proto::Status* resp,
+                     ::google::protobuf::Closure* done);
 
   void Sleep(::google::protobuf::RpcController* controller,
              const proto::SleepRequest* req,

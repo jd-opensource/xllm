@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -74,7 +74,8 @@ const QuantArgs& DiTModelContext::get_quant_args(
   }
 }
 
-#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU)
+#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU) || \
+    defined(USE_DCU)
 ModelContext DiTModelContext::get_model_context(
     const std::string& component) const {
 #if defined(USE_NPU)

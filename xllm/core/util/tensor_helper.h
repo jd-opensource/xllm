@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -355,10 +355,10 @@ inline torch::Tensor get_tensor_from_blob(const std::vector<int64_t>& dims,
 
   tensor.set_(storage, 0, dims);
   return tensor;
-#elif defined(USE_CUDA) || defined(USE_MLU)
+#elif defined(USE_CUDA) || defined(USE_MLU) || defined(USE_DCU)
   auto options = torch::TensorOptions()
                      .dtype(dtype)
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_DCU)
                      .device(torch::kCUDA)
 #else
                      .device(torch::kPrivateUse1)
@@ -375,13 +375,13 @@ inline torch::Tensor get_tensor_from_blob(const std::vector<int64_t>& dims,
                                           const torch::ScalarType dtype,
                                           const void* dev_addr,
                                           const torch::Tensor& owner) {
-#if defined(USE_CUDA) || defined(USE_MLU)
+#if defined(USE_CUDA) || defined(USE_MLU) || defined(USE_DCU)
   CHECK(owner.defined())
       << "get_tensor_from_blob requires a valid owner tensor";
 
   auto options = torch::TensorOptions()
                      .dtype(dtype)
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_DCU)
                      .device(torch::kCUDA)
 #else
                      .device(torch::kPrivateUse1)

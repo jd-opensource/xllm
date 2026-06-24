@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -319,10 +319,28 @@ bool DiTRequestParams::verify_params(
     return false;
   }
 
-  if (generation_params.width < 0 || generation_params.height < 0) {
+  if (generation_params.width <= 0 || generation_params.height <= 0) {
     CALLBACK_WITH_ERROR(
         StatusCode::INVALID_ARGUMENT,
-        "Invalid image dimensions: width and height must be non-negative.");
+        "Invalid image dimensions: width and height must be positive.");
+    return false;
+  }
+
+  if (generation_params.num_inference_steps <= 0) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "num_inference_steps must be positive.");
+    return false;
+  }
+
+  if (generation_params.num_images_per_prompt == 0) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "num_images_per_prompt must be greater than 0.");
+    return false;
+  }
+
+  if (generation_params.num_videos_per_prompt == 0) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "num_videos_per_prompt must be greater than 0.");
     return false;
   }
 

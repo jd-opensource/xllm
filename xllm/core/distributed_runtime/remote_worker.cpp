@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -371,6 +371,22 @@ folly::SemiFuture<bool> RemoteWorker::wakeup_async(
       promise.setValue(true);
     }
   });
+  return future;
+}
+
+folly::SemiFuture<bool> RemoteWorker::update_weights_async(
+    const std::string& weights_path) {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule(
+      [this, weights_path, promise = std::move(promise)]() mutable {
+        if (!channel_->update_weights(weights_path)) {
+          LOG(ERROR) << "UpdateWeights failed";
+          promise.setValue(false);
+        } else {
+          promise.setValue(true);
+        }
+      });
   return future;
 }
 

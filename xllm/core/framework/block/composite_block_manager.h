@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -60,6 +60,10 @@ class CompositeBlockManager : public BlockManager {
 
  private:
   std::vector<std::unique_ptr<BlockManager>> sub_managers_;
+  // The KVCacheState slot each sub-manager fills, parallel to sub_managers_.
+  // The composite owns this mapping; the sub-managers themselves are unaware of
+  // which block type they serve.
+  std::vector<BlockType> sub_manager_types_;
 };
 
 }  // namespace xllm

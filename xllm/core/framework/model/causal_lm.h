@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -66,6 +66,8 @@ class CausalLM : public torch::nn::Module {
                               const ModelInputParams& parameters) = 0;
 
   virtual bool requires_graph_forward_metadata() { return false; }
+
+  virtual bool is_hybrid_linear_attention() { return false; }
 
   virtual std::unique_ptr<ModelGraphMetadataState>
   create_graph_forward_metadata_state() {
@@ -183,6 +185,14 @@ class CausalLMImpl : public CausalLM {
       return model_->requires_graph_forward_metadata();
     } else {
       return CausalLM::requires_graph_forward_metadata();
+    }
+  }
+
+  bool is_hybrid_linear_attention() override {
+    if constexpr (detail::has_is_hybrid_linear_attention<Model>::value) {
+      return model_->is_hybrid_linear_attention();
+    } else {
+      return CausalLM::is_hybrid_linear_attention();
     }
   }
 

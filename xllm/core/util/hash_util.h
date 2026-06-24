@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@ limitations under the License.
 #include <torch/torch.h>
 #include <xxHash/xxhash.h>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -70,5 +72,12 @@ struct FixedStringKeyEqual {
 
 XXH3Key hash_tensor(const torch::Tensor& tensor);
 XXH3Key hash_string(const std::string& str);
+
+using PrefixHash = std::array<uint8_t, XXH3_128BITS_HASH_VALUE_LEN>;
+
+inline bool is_zero_prefix_hash(const PrefixHash& prefix_hash) {
+  return std::all_of(
+      prefix_hash.begin(), prefix_hash.end(), [](uint8_t v) { return v == 0; });
+}
 
 }  // namespace xllm

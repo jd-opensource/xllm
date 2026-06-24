@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -179,6 +179,11 @@ folly::SemiFuture<bool> WorkerClient::sleep_async(MasterStatus master_status) {
 folly::SemiFuture<bool> WorkerClient::wakeup_async(
     const WakeupOptions& options) {
   return worker_->wakeup_async(options);
+}
+
+folly::SemiFuture<bool> WorkerClient::update_weights_async(
+    const std::string& /*weights_path*/) {
+  LOG(FATAL) << "WorkerClient Method update_weights is UnImplemented.";
 }
 
 folly::SemiFuture<bool> WorkerClient::start_profile_async() {

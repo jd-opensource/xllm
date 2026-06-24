@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -58,6 +58,9 @@ struct Options {
 
   // maximum encoder cache size in MB (0 disables encoder cache)
   PROPERTY(int64_t, max_encoder_cache_size) = 0;
+
+  // active linear-state slots. 0 derives capacity from the KV cache budget.
+  PROPERTY(int64_t, max_linear_state_cache_slots) = 0;
 
   // number of decoding tokens per sequence
   // in speculative decoding, it is the number of speculative tokens + 1
@@ -203,6 +206,11 @@ struct Options {
 
   // start with offline inference, default is false
   PROPERTY(bool, enable_offline_inference) = false;
+
+  // enable RL sleep/wakeup memory mode (SleepableAllocator). Propagated from
+  // the user-facing Options so that the engine and worker route the offline
+  // sleep()/wake_up() to the VMM-backed allocator instead of xtensor.
+  PROPERTY(bool, enable_sleep_mode) = false;
 
   // disable per-request statistic logs.
   PROPERTY(bool, disable_log_stats) = false;

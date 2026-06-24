@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ std::string Options::to_string() const {
      << ", max_memory_utilization: " << max_memory_utilization()
      << ", enable_prefix_cache: " << enable_prefix_cache()
      << ", max_encoder_cache_size: " << max_encoder_cache_size()
+     << ", max_linear_state_cache_slots: " << max_linear_state_cache_slots()
      << ", max_tokens_per_batch: " << max_tokens_per_batch()
      << ", max_seqs_per_batch: " << max_seqs_per_batch()
      << ", max_tokens_per_chunk_for_prefill: "

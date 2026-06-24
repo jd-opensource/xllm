@@ -45,6 +45,7 @@ set(DCU_LOCAL_HIP_SOURCES
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/scaled_matmul.cpp
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/build_block_table_from_paged_kv.hip
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/random_sample.hip
+  ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/rejection_sample.hip
 
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/attention_runner.cpp
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/piecewise_graphs.cpp

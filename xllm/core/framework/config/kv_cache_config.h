@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -47,6 +47,7 @@ class KVCacheConfig final {
          "kv_cache_dtype",
          "enable_prefix_cache",
          "enable_in_batch_prefix_cache",
+         "max_linear_state_cache_slots",
          "xxh3_128bits_seed",
          "enable_xtensor",
          "phy_page_granularity_size"}};
@@ -64,6 +65,8 @@ class KVCacheConfig final {
   PROPERTY(bool, enable_prefix_cache) = true;
 
   PROPERTY(bool, enable_in_batch_prefix_cache) = false;
+
+  PROPERTY(int64_t, max_linear_state_cache_slots) = 0;
 
   PROPERTY(uint32_t, xxh3_128bits_seed) = 1024;
 

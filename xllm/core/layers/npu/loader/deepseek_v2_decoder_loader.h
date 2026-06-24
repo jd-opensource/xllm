@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -154,6 +154,7 @@ class DeekseekV2DecoderLoader : public BaseLoader {
   bool prefill_isBF16_;
   bool decode_isBF16_;
   bool enable_kimi_k25_moe_scale_dtype_fix_{false};
+  bool norm_has_bias_{false};
   std::mutex shared_experts_mutex_;
   std::mutex experts_mutex_;
 

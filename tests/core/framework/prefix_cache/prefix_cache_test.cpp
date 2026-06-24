@@ -407,6 +407,20 @@ TEST(HashUtilTest, XXHash3) {
         std::memcmp(hash_value_1, hash_value_2, XXH3_128BITS_HASH_VALUE_LEN),
         0);
   }
+
+  {
+    std::vector<int32_t> tokens_1(256, 1);
+    uint8_t hash_value_1[XXH3_128BITS_HASH_VALUE_LEN];
+    std::vector<int32_t> tokens_2(256, 2);
+    uint8_t hash_value_2[XXH3_128BITS_HASH_VALUE_LEN];
+    uint8_t hash_value_3[XXH3_128BITS_HASH_VALUE_LEN];
+
+    xxh3_128bits_hash(nullptr, tokens_1, hash_value_1);
+    xxh3_128bits_hash(hash_value_1, tokens_2, hash_value_2);
+    xxh3_128bits_hash(hash_value_1, tokens_2, hash_value_3);
+
+    EXPECT_EQ(XXH3Key(hash_value_2), XXH3Key(hash_value_3));
+  }
 }
 
 // Validates the precompute change: match() must return identical blocks whether

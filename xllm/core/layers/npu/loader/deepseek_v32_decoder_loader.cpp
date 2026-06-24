@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -393,16 +393,12 @@ void DeekseekV32DecoderLoader::merge_experts_weights() {
                               experts_weights_["up_proj.weight_scale"]);
   }
 
-  // IN_MLP_DOWN_WEIGHT_EXPERT: eager always NZ; manual NZ on A3 else ND.
+  // IN_MLP_DOWN_WEIGHT_EXPERT: eager always NZ; manual ND.
   torch::Tensor mlp_down_weight = merge_experts_weights(
       experts_weights_["down_proj.weight"], /*transpose=*/false);
   bool down_is_nz;
   if (load_to_host()) {
-#if defined(USE_A3)
-    down_is_nz = true;
-#else
     down_is_nz = false;
-#endif
   } else {
     down_is_nz = true;
   }
