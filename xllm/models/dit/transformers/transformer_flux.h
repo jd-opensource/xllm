@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ inline torch::Tensor apply_rotary_emb(const torch::Tensor& x,
 
 #if defined(USE_NPU)
   return at_npu::native::custom_ops::npu_rotary_mul(x, cos, sin, "interleave");
-#elif defined(USE_CUDA) || defined(USE_MLU)
+#elif defined(USE_CUDA) || defined(USE_MLU) || defined(USE_DCU)
   std::vector<int64_t> reshape_shape;
   for (int64_t i = 0; i < x.dim() - 1; ++i) {
     reshape_shape.push_back(x.size(i));
@@ -278,7 +278,7 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
     auto attn_output = std::get<0>(results);
     attn_output = attn_output.to(query.dtype());
     return attn_output.flatten(2);
-#elif defined(USE_CUDA) || defined(USE_MLU)
+#elif defined(USE_CUDA) || defined(USE_MLU) || defined(USE_DCU)
     query = query.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
     key = key.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
     value = value.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);

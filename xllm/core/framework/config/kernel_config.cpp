@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,9 +34,10 @@ DEFINE_bool(enable_intralayer_addnorm,
 
 DEFINE_int32(enable_fused_mc2,
              -1,
-             "Fused MC2 mode for NPU EP MoE. -1 uses auto default, 0 "
-             "disables fused MC2, 1 uses DispatchFFNCombine, 2 uses "
-             "DispatchGmmCombineDecode.");
+             "Fused MC2 mode for NPU. -1 uses auto default, 0 disables fused "
+             "MC2, positive values enable dense matmul-allreduce, 1 uses "
+             "DispatchFFNCombine for MoE, 2 uses DispatchGmmCombineDecode for "
+             "MoE.");
 DEFINE_bool(enable_interlayer_addnorm,
             false,
             "enable fused interlayer addnorm ops.");
@@ -44,6 +45,14 @@ DEFINE_bool(enable_interlayer_addnorm,
 DEFINE_bool(enable_split_rmsnorm_rope,
             false,
             "enable fused split rmsnorm rope ops.");
+
+DEFINE_bool(enable_aclnn_matmul,
+            false,
+            "enable ACLNN matmul backend for supported NPU ATB layers.");
+
+DEFINE_bool(enable_aclnn_swiglu,
+            false,
+            "enable ACLNN SwiGLU backend for supported NPU ATB layers.");
 #endif
 
 namespace xllm {
@@ -74,6 +83,8 @@ void KernelConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_fused_mc2);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_interlayer_addnorm);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_split_rmsnorm_rope);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_aclnn_matmul);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_aclnn_swiglu);
 #endif
 }
 
@@ -85,6 +96,8 @@ void KernelConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_fused_mc2);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_interlayer_addnorm);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_split_rmsnorm_rope);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_aclnn_matmul);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_aclnn_swiglu);
 #endif
 }
 
@@ -100,6 +113,14 @@ void KernelConfig::append_config_json(
       config_json, default_config, enable_intralayer_addnorm);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_fused_mc2);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_interlayer_addnorm);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_split_rmsnorm_rope);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_aclnn_matmul);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_aclnn_swiglu);
 #endif
 }
 

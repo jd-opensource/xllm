@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 
@@ -30,7 +31,7 @@ bool tensor_equal(const torch::Tensor& lhs, const torch::Tensor& rhs) {
 }  // namespace
 
 TEST(EmbeddingCacheTest, WritePrefillTargetContextAndClear) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   EmbeddingCache cache(/*total_nums=*/4);
 
   std::vector<int32_t> ids = {3, 2};
@@ -91,7 +92,7 @@ TEST(EmbeddingCacheTest, WritePrefillTargetContextSelectsEmbeddings) {
 }
 
 TEST(EmbeddingCacheTest, WriteValidateTargetContext) {
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   EmbeddingCache cache(/*total_nums=*/2);
   std::vector<int32_t> ids = {0, 1};
   std::vector<std::string> request_ids = {"req_0", "req_1"};

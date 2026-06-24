@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "core/framework/config/execution_config.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 #include "util/env_var.h"
 #if defined(USE_NPU)
 #ifdef TORCH_HIGHER_THAN_PTA6
@@ -103,10 +104,13 @@ void ModelContext::derive_optimization_config() {
   optimization_config_.enable_fused_spec_kernel = false;
   optimization_config_.enable_fused_mla_kernel = false;
   optimization_config_.enable_fused_indexer_qk = false;
+  optimization_config_.enable_spec_token_broadcast = false;
 
   // determine whether to enable fused kernel based on backend
-  std::string backend = Device::type_str();
-  if (backend == "mlu") {
+  if (Platform::is_dcu()) {
+    // DCU currently uses the unfused speculative sampling path.
+    optimization_config_.enable_fused_spec_kernel = false;
+  } else if (Platform::is_mlu()) {
     // TODO: enable fused spec kernel for mlu backend
     // The current implementation of fused spec kernel is not stable.
     optimization_config_.enable_fused_spec_kernel = false;
@@ -116,6 +120,9 @@ void ModelContext::derive_optimization_config() {
     // The current implementation of fused indexer qk is missing the
     //  weights and bias loading.
     optimization_config_.enable_fused_indexer_qk = true;
+    // Unify speculative sampling results across TP ranks to guard against
+    // per-rank RNG divergence under enable_schedule_overlap.
+    optimization_config_.enable_spec_token_broadcast = true;
   }
 }
 

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -219,6 +219,10 @@ bool Worker::sleep(MasterStatus master_status) {
 
 bool Worker::wakeup(const WakeupOptions& options) {
   return impl_->wakeup(options);
+}
+
+bool Worker::update_weights(const std::string& weights_path) {
+  return impl_->update_weights(weights_path);
 }
 
 folly::SemiFuture<bool> Worker::wakeup_async(const WakeupOptions& options) {

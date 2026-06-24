@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -134,7 +134,7 @@ void Request::log_error_statistic(Status status) {
 size_t Request::total_num_blocks() {
   size_t num = 0;
   for (auto& seq : sequences()) {
-    num += seq->kv_state().num_kv_blocks();
+    num += seq->kv_state().num_blocks(BlockType::KV);
   }
   return num;
 }

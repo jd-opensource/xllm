@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -348,6 +348,20 @@ bool CommChannel::sleep(MasterStatus master_status) {
   stub_->Sleep(&cntl, &req, &s, nullptr);
   if (cntl.Failed() || !s.ok()) {
     LOG(ERROR) << "Sleep failed: " << cntl.ErrorText();
+    return false;
+  }
+  return true;
+}
+
+bool CommChannel::update_weights(const std::string& weights_path) {
+  proto::UpdateWeightsRequest req;
+  proto::Status s;
+  brpc::Controller cntl;
+
+  req.set_weights_path(weights_path);
+  stub_->UpdateWeights(&cntl, &req, &s, nullptr);
+  if (cntl.Failed() || !s.ok()) {
+    LOG(ERROR) << "UpdateWeights failed: " << cntl.ErrorText();
     return false;
   }
   return true;

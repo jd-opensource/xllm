@@ -10,7 +10,6 @@ cc_library(
     closure_guard.h
     concurrentqueue.h
     cpu_affinity.h
-    double_buffer.h
     env_var.h
     hash_util.h
     http_downloader.h

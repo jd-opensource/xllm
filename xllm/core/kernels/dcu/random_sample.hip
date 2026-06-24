@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -215,16 +215,25 @@ __global__ void __launch_bounds__(1024, 1)
 namespace xllm::kernel::dcu {
 
 torch::Tensor random_sample(const torch::Tensor& probs) {
-  CHECK_EQ(probs.dim(), 2) << "probs must be a 2D tensor";
-  const torch::Device device = probs.device();
-  const int64_t batch_size = probs.size(0);
-  CHECK(probs.is_cuda()) << "probs must be on a HIP/DCU device";
-  CHECK_EQ(probs.scalar_type(), torch::kFloat32)
+  CHECK(probs.dim() == 2 || probs.dim() == 3)
+      << "probs must be a 2D or 3D tensor";
+
+  torch::Tensor flat_probs;
+  if (probs.dim() == 3) {
+    flat_probs = probs.reshape({-1, probs.size(2)});
+  } else {
+    flat_probs = probs;
+  }
+
+  const torch::Device device = flat_probs.device();
+  const int64_t batch_size = flat_probs.size(0);
+  CHECK(flat_probs.is_cuda()) << "probs must be on a HIP/DCU device";
+  CHECK_EQ(flat_probs.scalar_type(), torch::kFloat32)
       << "probs must be float32";
   CHECK_GE(batch_size, 0);
   CHECK_LE(batch_size, INT32_MAX);
-  CHECK_GE(probs.size(1), 1);
-  CHECK_LE(probs.size(1), UINT32_MAX);
+  CHECK_GE(flat_probs.size(1), 1);
+  CHECK_LE(flat_probs.size(1), UINT32_MAX);
 
   const torch::ScalarType out_dtype = torch::kInt32;
   torch::Tensor samples = torch::empty(
@@ -240,18 +249,21 @@ torch::Tensor random_sample(const torch::Tensor& probs) {
 
   const c10::hip::HIPStream stream = c10::hip::getCurrentHIPStream(
       static_cast<c10::DeviceIndex>(device.index()));
-  const uint32_t d = static_cast<uint32_t>(probs.size(1));
+  const uint32_t d = static_cast<uint32_t>(flat_probs.size(1));
   const uint32_t smem_size = sizeof(SamplingTempStorage);
 
   sampling_from_prob_kernel<kVecSize>
       <<<batch_size, kBlockThreads, smem_size, stream>>>(
-          probs.data_ptr<float>(),
+          flat_probs.data_ptr<float>(),
           samples.data_ptr<int32_t>(),
           d,
           seed,
           offset);
   C10_HIP_KERNEL_LAUNCH_CHECK();
 
+  if (probs.dim() == 3) {
+    return samples.reshape({probs.size(0), probs.size(1)});
+  }
   return samples;
 }
 

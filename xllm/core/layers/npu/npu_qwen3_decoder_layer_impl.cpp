@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -61,6 +61,7 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
       isPrefill;
   param.loraEnableGMM = false;
   param.enableXattention = is_rec_multi_round_mode();
+  const auto& kernel_config = ::xllm::KernelConfig::get_instance();
 
   param.linearTransposeType = {static_cast<int>(TransposeType::NOT_TRANSPOSE),
                                static_cast<int>(TransposeType::INVALID),
@@ -78,6 +79,11 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
       static_cast<int>(optionalValue.value()) / parallel_args.world_size();
   param.backend =
       ::xllm::ParallelConfig::get_instance().communication_backend();
+  param.enableMC2 = kernel_config.enable_fused_mc2() > 0 &&
+                    param.backend == "hccl" && quantize_type_.empty();
+  if (param.enableMC2) {
+    LOG(WARNING) << "currently A3 doesn't support MC2.";
+  }
   param.enableLogN = false;
   param.tensorParallelInfo = {
       parallel_args.rank(),
@@ -88,13 +94,19 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
 
   param.numHiddenLayers = args.n_layers();
   param.enableIntraLayerAddNorm = true;
-  if (::xllm::KernelConfig::get_instance().enable_interlayer_addnorm()) {
+  if (kernel_config.enable_interlayer_addnorm()) {
     param.enableInterLayerAddNorm = true;
   }
   param.enablePreFetchWeight =
       ::xllm::LoadConfig::get_instance().enable_prefetch_weight();
   param.enableAclGraphPagedAttention =
       ::xllm::ExecutionConfig::get_instance().enable_graph() && !isPrefill;
+  if (kernel_config.enable_aclnn_matmul()) {
+    param.matmulBackend = atb_speed::common::OpBackend::ACLNN;
+  }
+  if (kernel_config.enable_aclnn_swiglu()) {
+    param.swigluBackend = atb_speed::common::OpBackend::ACLNN;
+  }
   initialize_parallel_parameters(param, parallel_args);
   initialize_quantization_parameters(param);
 
@@ -116,7 +128,7 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
         ::xllm::KVCacheConfig::get_instance().block_size() == 128;
   }
   num_hidden_layers_ = args.n_layers();
-  if (::xllm::KernelConfig::get_instance().enable_split_rmsnorm_rope()) {
+  if (kernel_config.enable_split_rmsnorm_rope()) {
     param.enableSplitRmsNormRope = true;
   }
 }

@@ -1,5 +1,5 @@
 """
-Export MTP layer for multiple model types (DeepSeek-V3, DeepSeek-V3.2, DeepSeek-R1, DeepSeek-V4, GLM4.5, GLM4.7, Qwen3.5 etc.).
+Export MTP layer for multiple model types (DeepSeek-V3, DeepSeek-V3.2, DeepSeek-R1, DeepSeek-V4, GLM4.5, GLM4.7, Qwen3.5, MiMo etc.).
 The exported model can be used for speculative decoding.
 
 Usage:
@@ -20,6 +20,9 @@ Usage:
 
     # Qwen3.5
     python3 export_mtp.py --input-dir /path/to/Qwen3.5 --output-dir /path/to/Qwen3.5-mtp
+
+    # MiMo
+    python3 export_mtp.py --input-dir /path/to/MiMo-7B-Base --output-dir /path/to/MiMo-7B-Base-mtp
 """
 # adapted from https://github.com/sgl-project/sglang/blob/main/scripts/export_deepseek_nextn.py
 import argparse
@@ -40,6 +43,7 @@ from scripts.logger import logger
 
 
 LEGACY_LAYER_MTP_MODEL_TYPES = {"deepseek_v3", "deepseek_v32", "glm4_moe", "glm_moe_dsa"}
+MIMO_MTP_MODEL_TYPES = {"mimo"}
 QWEN3_5_MODEL_TYPES = {"qwen3_5", "qwen3_5_text"}
 QWEN3_5_MOE_MODEL_TYPES = {"qwen3_5_moe", "qwen3_5_moe_text"}
 QWEN3_5_EXPORT_MODEL_TYPES = QWEN3_5_MODEL_TYPES | QWEN3_5_MOE_MODEL_TYPES
@@ -138,6 +142,9 @@ def detect_model_type(config: ConfigView) -> str:
             return "glm4_moe"
         return "glm4"
 
+    if any("mimo" in name for name in model_names):
+        return "mimo"
+
     if any("qwen3_5" in name for name in model_names):
         if any("moe" in name for name in model_names):
             return "qwen3_5_moe"
@@ -173,6 +180,7 @@ def get_mtp_model_type(model_type: str) -> str:
         "deepseek_v4": "deepseek_v4_mtp",
         "glm4_moe": "glm4_moe_mtp",
         "glm_moe_dsa": "glm_moe_dsa_mtp",
+        "mimo": "mimo_mtp",
         "qwen3_5": "qwen3_5_mtp",
         "qwen3_5_text": "qwen3_5_mtp",
         "qwen3_5_moe": "qwen3_5_moe_mtp",
@@ -189,6 +197,7 @@ def get_mtp_architecture(model_type: str) -> str:
         "deepseek_v4": "DeepseekV4MtpForCausalLM",
         "glm4_moe": "Glm4MoeMtpForCausalLM",
         "glm_moe_dsa": "GlmMoeDsaMtpForCausalLM",
+        "mimo": "MiMoMtpForCausalLM",
         "qwen3_5": "Qwen3_5MtpForCausalLM",
         "qwen3_5_text": "Qwen3_5MtpForCausalLM",
         "qwen3_5_moe": "Qwen3_5MtpForCausalLM",
@@ -271,6 +280,9 @@ def copy_non_safetensors_files(input_dir: str, output_dir: str) -> None:
 def get_mtp_weight_prefix(config: ConfigView, model_type: str) -> str:
     if model_type == "deepseek_v4":
         return "mtp.0."
+    if model_type in MIMO_MTP_MODEL_TYPES:
+        # MiMo checkpoint stores MTP weights at "model.mtp_layers.0." (0-indexed).
+        return "model.mtp_layers.0."
     return f"model.layers.{get_mtp_layer_id(config, model_type)}"
 
 
@@ -283,6 +295,12 @@ def map_mtp_key(key: str, prefix: str, model_type: str) -> str | None:
 
     if model_type == "deepseek_v4":
         return key.replace(prefix, "model.layers.0.", 1)
+
+    if model_type in MIMO_MTP_MODEL_TYPES:
+        # MiMo checkpoint stores MTP weights at "model.mtp_layers.0.*".
+        # MiMoMtpModelImpl loads directly from "mtp_layers.0.*", so no
+        # key remapping is needed — return the original key unchanged.
+        return key
 
     if any(special in key for special in ["embed_tokens", "shared_head", "enorm", "hnorm", "eh_proj"]):
         return key.replace(prefix, "model", 1)
@@ -493,7 +511,7 @@ if __name__ == "__main__":
         "--model-type",
         type=str,
         default=None,
-        help="Model type (deepseek_v3, deepseek_v32, deepseek_v4, glm4_moe, glm_moe_dsa, qwen3_5, qwen3_5_moe). If not specified, will auto-detect. Note: DeepSeek V3 and R1 use 'deepseek_v3', V3.2 uses 'deepseek_v32', V4 uses 'deepseek_v4'.",
+        help="Model type (deepseek_v3, deepseek_v32, deepseek_v4, glm4_moe, glm_moe_dsa, mimo, qwen3_5, qwen3_5_moe). If not specified, will auto-detect. Note: DeepSeek V3 and R1 use 'deepseek_v3', V3.2 uses 'deepseek_v32', V4 uses 'deepseek_v4'.",
     )
     args = parser.parse_args()
 

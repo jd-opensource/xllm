@@ -1,3 +1,4 @@
+import glob
 import io
 import os
 import re
@@ -7,9 +8,9 @@ import sys
 import argparse
 from typing import Any, Optional
 
-from distutils.core import Command
-from setuptools import Extension, find_namespace_packages, setup
+from setuptools import Command, Extension, find_namespace_packages, setup
 from setuptools.command.build_ext import build_ext
+from setuptools.command.install import install
 
 try:
     from setuptools.command.bdist_wheel import bdist_wheel
@@ -482,7 +483,66 @@ class BuildDistWheel(bdist_wheel):
         BUILD_TEST_FILE = False
 
         self.skip_build = True
-        super().run()
+        InstallWheel._building_wheel = True
+        try:
+            super().run()
+        finally:
+            InstallWheel._building_wheel = False
+
+class InstallWheel(install):
+    """`python setup.py install` builds the wheel, then pip-installs it.
+
+    bdist_wheel re-invokes the install command internally to stage files into
+    its own build directory; the _building_wheel guard makes that re-entrant
+    call fall back to the standard install behavior to avoid infinite recursion.
+    """
+    _building_wheel = False
+
+    def run(self) -> None:
+        if InstallWheel._building_wheel:
+            super().run()
+            return
+
+        InstallWheel._building_wheel = True
+        try:
+            logger.info("📦 building wheel before install...")
+            self.run_command("bdist_wheel")
+        finally:
+            InstallWheel._building_wheel = False
+
+        wheel_path = self._locate_built_wheel()
+        if not wheel_path:
+            logger.error("❌ Install failed: no built wheel found.")
+            exit(1)
+
+        logger.info(f"⬇️  installing wheel: {wheel_path}")
+        try:
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install",
+                "--force-reinstall", "--no-deps", wheel_path,
+            ])
+        except subprocess.CalledProcessError:
+            logger.exception(f"❌ Failed to install wheel: {wheel_path}")
+            exit(1)
+        logger.info(f"✅ Installed {os.path.basename(wheel_path)}")
+
+    def _locate_built_wheel(self) -> Optional[str]:
+        # bdist_wheel records produced artifacts in distribution.dist_files.
+        wheels = [
+            path
+            for command, _, path in self.distribution.dist_files
+            if command == "bdist_wheel" and path.endswith(".whl") and os.path.isfile(path)
+        ]
+        if wheels:
+            return max(wheels, key=os.path.getmtime)
+
+        # Fallback: scan the wheel output directory directly.
+        bdist_wheel_cmd = self.get_finalized_command("bdist_wheel")
+        dist_dir = getattr(bdist_wheel_cmd, "dist_dir", None) or "dist"
+        candidates = glob.glob(os.path.join(dist_dir, "*.whl"))
+        if candidates:
+            return max(candidates, key=os.path.getmtime)
+        return None
 
 class TestUT(Command):
     description = "Run all testing binary."
@@ -755,6 +815,7 @@ if __name__ == "__main__":
         ext_modules=[CMakeExtension("xllm", "xllm/")],
         cmdclass={"build_ext": ExtBuild,
                   "test": test_cmd,
+                  "install": InstallWheel,
                   'bdist_wheel': BuildDistWheel},
         options=options,
         packages=find_namespace_packages(include=["scripts", "scripts.*"]),

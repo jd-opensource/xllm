@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,7 +26,8 @@ limitations under the License.
 #include "forward_params.h"
 #include "framework/eplb/eplb_executor.h"
 #include "framework/kv_cache/kv_cache_shape.h"
-#include "framework/kv_cache_transfer/hierarchy_kv_cache_transfer.h"
+// hierarchy temporarily disabled during the block-manager refactor
+// #include "framework/kv_cache_transfer/hierarchy_kv_cache_transfer.h"
 #include "framework/kv_cache_transfer/kv_cache_store.h"
 #include "framework/kv_cache_transfer/kv_cache_transfer.h"
 #include "framework/model/causal_lm.h"
@@ -144,6 +145,10 @@ class WorkerImpl {
 
   virtual bool wakeup(const WakeupOptions& options);
 
+  // RL deep-sleep: reload model weights in place from disk (vllm-ascend
+  // `reload_weights`). `weights_path` empty = reuse the original model path.
+  virtual bool update_weights(const std::string& weights_path);
+
   // Start/stop online timeline profiling on this worker's device. CUDA only
   // for now; on other backends these are no-ops returning false.
   virtual bool start_profile();
@@ -209,7 +214,8 @@ class WorkerImpl {
   // Only used for deepseek chunked prefill ops on npu device
   void prepare_mla_prefixcache_inputs(ModelInputParams& input_params);
 
-  void init_hierarchy_kv_cache_transfer();
+  // hierarchy temporarily disabled during the block-manager refactor
+  // void init_hierarchy_kv_cache_transfer();
 
   bool allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
                                  bool use_huge_page_allocator = false,
@@ -220,6 +226,20 @@ class WorkerImpl {
   int64_t get_num_layers() const;
 
   bool wakeup_local(const WakeupOptions& options);
+
+  // ---- RL deep-sleep path (SleepableAllocator), isolated from the xtensor
+  // ---- (PageAllocator) sleep/wakeup path. ----
+  // True when this worker uses the RL SleepableAllocator path rather than the
+  // xtensor PageAllocator path.
+  bool rl_sleep_mode() const;
+  // Enable manual-loader weight routing into the SleepableAllocator. Called
+  // once during init_model before the layers are constructed.
+  void setup_rl_sleep_weights();
+  // Deep sleep / wake the SleepableAllocator regions (weights + KV).
+  bool rl_sleep();
+  bool rl_wakeup();
+  // Original xtensor (PageAllocator) sleep path.
+  bool xtensor_sleep(MasterStatus master_status);
 
 #if defined(USE_CUDA) || defined(USE_DCU)
   void refresh_cuda_block_copy_runtime_state();
@@ -302,7 +322,8 @@ class WorkerImpl {
   InstanceRole instance_role_ = InstanceRole::DEFAULT;
 
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
-  std::unique_ptr<HierarchyKVCacheTransfer> hierarchy_kv_cache_transfer_;
+  // hierarchy temporarily disabled during the block-manager refactor
+  // std::unique_ptr<HierarchyKVCacheTransfer> hierarchy_kv_cache_transfer_;
   std::unique_ptr<WorkerRendezvous> worker_rendezvous_;
 
 #if defined(USE_CUDA) || defined(USE_DCU)

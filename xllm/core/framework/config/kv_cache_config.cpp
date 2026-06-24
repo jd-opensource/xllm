@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -48,6 +48,11 @@ DEFINE_bool(enable_in_batch_prefix_cache,
             "Whether to cache admitted prefill full blocks into the prefix "
             "cache so that later requests in the same batch can share them.");
 
+DEFINE_int64(max_linear_state_cache_slots,
+             0,
+             "Maximum active linear-attention state cache slots. 0 derives an "
+             "automatic capacity from the available KV cache budget.");
+
 DEFINE_uint32(xxh3_128bits_seed, 1024, "Default XXH3 128-bits hash seed.");
 
 DEFINE_bool(
@@ -70,6 +75,7 @@ void KVCacheConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(kv_cache_dtype);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_prefix_cache);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_in_batch_prefix_cache);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_linear_state_cache_slots);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(xxh3_128bits_seed);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_xtensor);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(phy_page_granularity_size);
@@ -82,6 +88,7 @@ void KVCacheConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(kv_cache_dtype);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_prefix_cache);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_in_batch_prefix_cache);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_linear_state_cache_slots);
   XLLM_CONFIG_ASSIGN_FROM_JSON(xxh3_128bits_seed);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_xtensor);
   XLLM_CONFIG_ASSIGN_FROM_JSON(phy_page_granularity_size);
@@ -102,6 +109,8 @@ void KVCacheConfig::append_config_json(
       config_json, default_config, enable_prefix_cache);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_in_batch_prefix_cache);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, max_linear_state_cache_slots);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, xxh3_128bits_seed);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

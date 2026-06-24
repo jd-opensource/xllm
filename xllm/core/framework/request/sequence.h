@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -200,22 +200,18 @@ class Sequence final {
   void clear_mtp_bootstrap_embedding() {
     mtp_bootstrap_embedding_ = torch::Tensor();
   }
-  bool has_single_block_id() const { return single_block_.is_valid(); }
+  // Single per-sequence resource block id (linear-state / embedding), or -1.
   int32_t get_single_block_id() const {
-    return has_single_block_id() ? single_block_.id() : -1;
+    return kv_state_.get_single_block_id();
   }
-  void set_single_block(Block&& single_block) {
-    single_block_ = std::move(single_block);
-  }
-  Block reset_single_block() { return std::move(single_block_); }
   const std::string& request_id() const { return request_id_; }
   // get input embedding
   torch::Tensor get_input_embedding() const { return input_embedding_; }
 
-  void add_kv_blocks(const std::vector<Block>& blocks);
-  void add_host_kv_blocks(const std::vector<Block>& blocks);
-  void add_shared_kv_blocks(std::vector<Block>&& blocks);
-  void add_shared_host_kv_blocks(std::vector<Block>&& blocks);
+  void add_blocks(BlockType type, const std::vector<Block>& blocks);
+  void add_host_blocks(BlockType type, const std::vector<Block>& blocks);
+  void add_shared_blocks(BlockType type, std::vector<Block>&& blocks);
+  void add_shared_host_blocks(BlockType type, std::vector<Block>&& blocks);
 
   // Precomputed chained block hashes used by the prefix cache. Covers all full
   // blocks of the current tokens; reused by match()/insert() so the hash is
@@ -525,10 +521,6 @@ class Sequence final {
   // but the generated tokens are retained for the next execution.
   // In the next execution, we should treat these generated tokens as prompts.
   size_t volatile_num_prompt_tokens_ = 0;
-
-  // Scheduler-side logical single-block handle. Transport expands this into
-  // embedding_ids / linear_state_ids as needed by worker-side physical caches.
-  Block single_block_;
 
   // is the sequence finished
   mutable bool finished_ = false;

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -785,6 +785,16 @@ torch::Tensor random_sample(RandomSampleParams& params) {
 torch::Tensor rejection_sample(RejectionSampleParams& params) {
 #if defined(USE_MLU)
   return mlu::rejection_sample(params.draft_token_ids,
+                               params.num_draft_tokens,
+                               params.cu_num_draft_tokens,
+                               params.draft_probs,
+                               params.target_probs,
+                               params.bonus_token_ids,
+                               params.uniform_rand,
+                               params.uniform_probs,
+                               params.max_spec_len);
+#elif defined(USE_DCU)
+  return dcu::rejection_sample(params.draft_token_ids,
                                params.num_draft_tokens,
                                params.cu_num_draft_tokens,
                                params.draft_probs,
@@ -1767,6 +1777,36 @@ torch::Tensor causal_conv1d(const torch::Tensor& x,
                             activation_mode,
                             pad_slot_id,
                             run_mode);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+void causal_conv1d_out(const torch::Tensor& output,
+                       const torch::Tensor& x,
+                       const torch::Tensor& weight,
+                       const torch::Tensor& conv_state,
+                       const std::optional<torch::Tensor>& bias_opt,
+                       const torch::IntArrayRef query_start_loc_opt,
+                       const torch::IntArrayRef cache_indices_opt,
+                       const torch::IntArrayRef initial_state_mode_opt,
+                       const torch::IntArrayRef num_accepted_tokens_opt,
+                       int64_t activation_mode,
+                       int64_t pad_slot_id,
+                       int64_t run_mode) {
+#if defined(USE_NPU)
+  npu::causal_conv1d_out(output,
+                         x,
+                         weight,
+                         conv_state,
+                         bias_opt,
+                         query_start_loc_opt,
+                         cache_indices_opt,
+                         initial_state_mode_opt,
+                         num_accepted_tokens_opt,
+                         activation_mode,
+                         pad_slot_id,
+                         run_mode);
 #else
   NOT_IMPLEMENTED();
 #endif

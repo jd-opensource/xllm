@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,8 +15,10 @@ limitations under the License.
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "core/framework/multimodal/mm_data.h"
 #include "util/hash_util.h"
@@ -32,6 +34,11 @@ void mm_xxh3_128bits_hash(const std::vector<const uint8_t*>& mm_hash_values,
                           const uint8_t* pre_hash_value,
                           const Slice<int32_t>& token_ids,
                           uint8_t* hash_value);
+
+std::vector<PrefixHash> compute_linear_state_prefix_hashes(
+    const Slice<int32_t>& token_ids,
+    size_t block_size,
+    size_t boundary_tokens);
 
 // Type tag bound to the engine: LLM uses TEXT, VLM uses MM.
 enum class BlockHasherType {

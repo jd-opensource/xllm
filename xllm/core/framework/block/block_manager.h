@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -46,7 +46,6 @@ class BlockManager {
     PROPERTY(int32_t, block_size) = 0;
     PROPERTY(bool, enable_prefix_cache) = true;
     PROPERTY(bool, enable_disagg_pd) = false;
-    PROPERTY(bool, enable_cache_upload) = false;
     // Token-level sliding window size for composite SWA allocation.
     PROPERTY(uint32_t, sliding_window_size) = 0;
     // Base SWA/cache-state block rows retained per sequence.
@@ -81,13 +80,15 @@ class BlockManager {
                      const Slice<XXH3Key>& block_hashes = {}) = 0;
   virtual void cache(const std::vector<Block>& blocks) = 0;
 
-  // get merged all dp rank KVCacheEvent
-  virtual void get_merged_kvcache_event(KvCacheEvent* event) const = 0;
-
   virtual size_t num_blocks_in_prefix_cache() const = 0;
   virtual size_t num_free_blocks() const = 0;
   virtual size_t num_used_blocks() const = 0;
   virtual double kv_cache_utilization() const = 0;
+
+  // Evict all entries from the prefix cache (returning their blocks to the free
+  // pool). Used by RL sleep/wakeup: after deep sleep the KV physical memory is
+  // discarded, so any cached prefix would point to garbage and must be dropped.
+  virtual void reset_prefix_cache() {}
 
   // get the options for the block manager
   const Options& options() const { return options_; }

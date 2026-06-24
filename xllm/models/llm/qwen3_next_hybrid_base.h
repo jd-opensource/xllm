@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -306,6 +306,8 @@ class Qwen3HybridForCausalLMImplBase : public torch::nn::Module {
     return;
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
+
+  bool is_hybrid_linear_attention() { return true; }
 
   layer::LmHead get_lm_head() { return lm_head_; }
 

@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -36,6 +36,7 @@ limitations under the License.
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 #include "runtime/dit_forward_params.h"
 
 namespace xllm {
@@ -148,7 +149,7 @@ struct ForwardInputBufferPlan {
         continue;
       }
       const void* ptr = base + entry.offset;
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_DCU)
       if (device.type() == torch::kCUDA) {
         *entry.target = get_tensor_from_blob(entry.host_tensor.sizes().vec(),
                                              entry.host_tensor.scalar_type(),
@@ -198,9 +199,8 @@ inline bool add_sampling_to_plan(const SamplingParameters& source,
 
 inline torch::Tensor normalize_positions_for_device(
     const torch::Tensor& positions) {
-  const auto dev = Device::type_str();
-  if ((dev == "cuda" || dev == "ilu" || dev == "musa") && positions.defined() &&
-      positions.scalar_type() != torch::kInt64) {
+  if ((Platform::is_cuda() || Platform::is_ilu() || Platform::is_musa()) &&
+      positions.defined() && positions.scalar_type() != torch::kInt64) {
     return positions.to(torch::kInt64);
   }
   return positions;

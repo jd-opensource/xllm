@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,7 +44,8 @@ class GraphPersistentParam final {
   GraphPersistentParam(const ModelArgs& args,
                        const torch::Device& device,
                        const runtime::Options& options,
-                       bool need_update_attn_mask = false);
+                       bool need_update_attn_mask = false,
+                       bool is_hybrid_linear_attention = false);
 
   ~GraphPersistentParam();
 
@@ -250,6 +251,9 @@ class GraphPersistentParam final {
 
   // Flag indicating whether attention mask needs to be updated
   bool need_update_attn_mask_;
+  // Flag indicating whether the model uses hybrid linear attention
+  // (e.g., Qwen3.5/Next with gated delta net layers)
+  bool is_hybrid_linear_attention_;
   // Flag indicating whether attention plan needs to be updated based on model
   // type
   bool need_update_attention_plan_;

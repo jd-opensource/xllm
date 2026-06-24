@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -70,7 +70,7 @@ void DisaggPDChunkedPrefillScheduler::match_prefix_blocks(Sequence* sequence) {
     return;
   }
 
-  if (sequence->kv_state().num_kv_blocks() == 0) {
+  if (sequence->kv_state().num_blocks(BlockType::KV) == 0) {
     kv_cache_manager_->allocate_shared(sequence);
     return;
   }

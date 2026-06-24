@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -52,6 +52,7 @@ DECLARE_int32(block_size);
 DECLARE_int64(max_cache_size);
 DECLARE_double(max_memory_utilization);
 DECLARE_string(kv_cache_dtype);
+DECLARE_int64(max_linear_state_cache_slots);
 
 DECLARE_bool(enable_prefix_cache);
 
@@ -225,8 +226,6 @@ DECLARE_double(host_blocks_factor);
 
 DECLARE_bool(enable_kvcache_store);
 
-DECLARE_bool(enable_cache_upload);
-
 DECLARE_string(store_protocol);
 
 DECLARE_string(store_master_server_address);
@@ -372,6 +371,10 @@ DECLARE_int32(enable_fused_mc2);
 DECLARE_bool(enable_interlayer_addnorm);
 
 DECLARE_bool(enable_split_rmsnorm_rope);
+
+DECLARE_bool(enable_aclnn_matmul);
+
+DECLARE_bool(enable_aclnn_swiglu);
 #endif
 
 // --- chat template config ---

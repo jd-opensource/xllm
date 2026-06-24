@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -74,7 +74,13 @@ FinishReason StoppingChecker::check(const Slice<int32_t>& token_ids,
   }
 
   // check stop tokens
-  if (stop_tokens_.count(last_token_id) > 0) {
+  // Models load their built-in end markers into stop_token_ids, often more
+  // than one (kimi_k2 -> {163585, 163586}, qwen3_5 -> {eos, 248046}), so
+  // ignore_eos_ must bypass the whole set to honor fixed-length generation;
+  // gating on eos_token_ alone would still cut off the other end markers. A
+  // request that supplies stop_token_ids replaces this default, so pairing it
+  // with ignore_eos is contradictory by construction and ignore_eos wins.
+  if (!ignore_eos_ && stop_tokens_.count(last_token_id) > 0) {
     return FinishReason::STOP;
   }
 

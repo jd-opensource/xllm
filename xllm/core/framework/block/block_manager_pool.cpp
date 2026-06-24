@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -41,9 +41,6 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
       .block_size(options_.block_size())
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_cache_upload(options_.host_num_blocks() > 0
-                               ? false
-                               : options_.enable_cache_upload())
       .sliding_window_size(options_.sliding_window_size())
       .swa_blocks_per_seq(options_.swa_blocks_per_seq())
       .max_tokens_per_batch(options_.max_tokens_per_batch())
@@ -138,7 +135,7 @@ bool BlockManagerPool::allocate_single_block(Sequence* sequence,
   CHECK(sequence != nullptr);
   CHECK_GE(dp_rank, 0);
   CHECK_LT(static_cast<size_t>(dp_rank), single_block_managers_.size());
-  if (sequence->has_single_block_id()) {
+  if (sequence->get_single_block_id() >= 0) {
     return true;
   }
 
@@ -153,7 +150,7 @@ bool BlockManagerPool::allocate_single_block(Sequence* sequence,
                << ", configured_single_blocks=" << options_.num_single_blocks();
     return false;
   }
-  sequence->set_single_block(std::move(single_blocks[0]));
+  sequence->add_blocks(BlockType::SINGLE, single_blocks);
   return true;
 }
 
@@ -162,11 +159,12 @@ void BlockManagerPool::deallocate_single_block(Sequence* sequence,
   DCHECK(sequence != nullptr);
   CHECK_GE(dp_rank, 0);
   CHECK_LT(static_cast<size_t>(dp_rank), single_block_managers_.size());
-  auto single_block = sequence->reset_single_block();
-  if (!single_block.is_valid()) {
+  const Slice<Block> single = sequence->kv_state().blocks(BlockType::SINGLE);
+  if (single.empty()) {
     return;
   }
-  single_block_managers_[dp_rank]->deallocate({&single_block, 1});
+  single_block_managers_[dp_rank]->deallocate(single);
+  sequence->kv_state().erase_blocks(BlockType::SINGLE);
 }
 
 void BlockManagerPool::deallocate(Request* request) {
@@ -196,7 +194,8 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
 
   // add blocks to the prefix cache
   cache(sequence);
-  block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+  block_managers_[dp_rank]->deallocate(
+      sequence->kv_state().blocks(BlockType::KV));
   deallocate_single_block(sequence, dp_rank);
   // release the blocks after prefix cache insertion
   sequence->reset();
@@ -227,8 +226,9 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   AUTO_COUNTER(allocate_blocks_latency_seconds);
   DCHECK(sequence != nullptr);
   int32_t dp_rank = get_dp_rank(sequence);
-  const bool started_empty = sequence->kv_state().num_kv_blocks() == 0;
-  const bool needs_single_block = !sequence->has_single_block_id();
+  const bool started_empty =
+      sequence->kv_state().num_blocks(BlockType::KV) == 0;
+  const bool needs_single_block = sequence->get_single_block_id() < 0;
   if (needs_single_block && !allocate_single_block(sequence, dp_rank)) {
     return false;
   }
@@ -250,7 +250,7 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
     BlockManagerPool::allocate_shared(sequence);
   }
 
-  const size_t num_blocks = sequence->kv_state().num_kv_blocks();
+  const size_t num_blocks = sequence->kv_state().num_blocks(BlockType::KV);
   // round up to the nearest block number
   const size_t block_size = options_.block_size();
   const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
@@ -264,7 +264,8 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   const auto blocks = block_managers_[dp_rank]->allocate(num_additional_blocks);
   if (blocks.size() != num_additional_blocks) {
     if (started_empty) {
-      block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+      block_managers_[dp_rank]->deallocate(
+          sequence->kv_state().blocks(BlockType::KV));
       if (needs_single_block) {
         deallocate_single_block(sequence, dp_rank);
       }
@@ -276,7 +277,7 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
     return false;
   }
 
-  sequence->add_kv_blocks(blocks);
+  sequence->add_blocks(BlockType::KV, blocks);
 
   return true;
 }
@@ -300,7 +301,7 @@ std::vector<Block> BlockManagerPool::allocate(size_t num_tokens,
 
 bool BlockManagerPool::try_allocate(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
-  const bool needs_single_block = !sequence->has_single_block_id();
+  const bool needs_single_block = sequence->get_single_block_id() < 0;
   if (needs_single_block && !allocate_single_block(sequence, dp_rank)) {
     return false;
   }
@@ -320,8 +321,10 @@ bool BlockManagerPool::try_allocate(Sequence* sequence) {
   if (options_.enable_prefix_cache()) {
     sequence->update_block_hashes(static_cast<uint32_t>(options_.block_size()),
                                   options_.hasher_type());
-    const auto& existed_shared_blocks = sequence->kv_state().kv_blocks().slice(
-        0, sequence->kv_state().shared_kv_blocks_num());
+    const auto& existed_shared_blocks =
+        sequence->kv_state()
+            .blocks(BlockType::KV)
+            .slice(0, sequence->kv_state().shared_blocks_num(BlockType::KV));
     // If the sequence holds shared_blocks, the hash values of these blocks do
     // not need to be recalculated and can be reused directly.
     shared_blocks =
@@ -331,8 +334,9 @@ bool BlockManagerPool::try_allocate(Sequence* sequence) {
                                                   sequence->block_hashes());
 
     if (!shared_blocks.empty()) {
-      sequence->add_kv_blocks(shared_blocks);
-      sequence->kv_state().incr_shared_kv_blocks_num(shared_blocks.size());
+      sequence->add_blocks(BlockType::KV, shared_blocks);
+      sequence->kv_state().incr_shared_blocks_num(BlockType::KV,
+                                                  shared_blocks.size());
       shared_num = shared_blocks.size();
     }
   }
@@ -354,7 +358,7 @@ bool BlockManagerPool::try_allocate(Sequence* sequence) {
       return false;
     }
 
-    sequence->add_kv_blocks(std::move(blocks));
+    sequence->add_blocks(BlockType::KV, std::move(blocks));
   }
 
   sequence->kv_state().incr_kv_cache_tokens_num(sequence->tokens().size());
@@ -394,8 +398,10 @@ void BlockManagerPool::allocate_shared(Sequence* sequence) {
     int32_t dp_rank = get_dp_rank(sequence);
     sequence->update_block_hashes(static_cast<uint32_t>(options_.block_size()),
                                   options_.hasher_type());
-    const auto& existed_shared_blocks = sequence->kv_state().kv_blocks().slice(
-        0, sequence->kv_state().shared_kv_blocks_num());
+    const auto& existed_shared_blocks =
+        sequence->kv_state()
+            .blocks(BlockType::KV)
+            .slice(0, sequence->kv_state().shared_blocks_num(BlockType::KV));
     // If the sequence holds shared_blocks, the hash values of these blocks do
     // not need to be recalculated and can be reused directly.
     std::vector<Block> shared_blocks =
@@ -403,7 +409,7 @@ void BlockManagerPool::allocate_shared(Sequence* sequence) {
                                                   existed_shared_blocks,
                                                   sequence->mm_data(),
                                                   sequence->block_hashes());
-    sequence->add_shared_kv_blocks(std::move(shared_blocks));
+    sequence->add_shared_blocks(BlockType::KV, std::move(shared_blocks));
   }
 }
 
@@ -416,8 +422,9 @@ void BlockManagerPool::cache(Sequence* sequence) {
   sequence->update_block_hashes(static_cast<uint32_t>(options_.block_size()),
                                 options_.hasher_type());
   const auto token_ids = sequence->cached_tokens();
-  auto* blocks = sequence->kv_state().mutable_kv_blocks();
-  auto existed_shared_blocks_num = sequence->kv_state().shared_kv_blocks_num();
+  auto* blocks = sequence->kv_state().mutable_blocks(BlockType::KV);
+  auto existed_shared_blocks_num =
+      sequence->kv_state().shared_blocks_num(BlockType::KV);
   block_managers_[dp_rank]->cache(token_ids,
                                   *blocks,
                                   existed_shared_blocks_num,
@@ -443,10 +450,10 @@ void BlockManagerPool::cache(Sequence* sequence, size_t num_tokens) {
   const size_t block_size = static_cast<size_t>(options_.block_size());
   const size_t available_tokens_num =
       std::min({num_tokens,
-                sequence->kv_state().num_kv_blocks() * block_size,
+                sequence->kv_state().num_blocks(BlockType::KV) * block_size,
                 sequence->tokens().size()});
   const size_t existed_shared_blocks_num =
-      sequence->kv_state().shared_kv_blocks_num();
+      sequence->kv_state().shared_blocks_num(BlockType::KV);
   if (available_tokens_num <= existed_shared_blocks_num * block_size) {
     return;
   }
@@ -456,19 +463,13 @@ void BlockManagerPool::cache(Sequence* sequence, size_t num_tokens) {
   sequence->update_block_hashes(static_cast<uint32_t>(options_.block_size()),
                                 options_.hasher_type());
   const auto token_ids = sequence->tokens().slice(0, available_tokens_num);
-  auto* blocks = sequence->kv_state().mutable_kv_blocks();
+  auto* blocks = sequence->kv_state().mutable_blocks(BlockType::KV);
   CHECK_GE(blocks->size(), existed_shared_blocks_num);
   block_managers_[dp_rank]->cache(token_ids,
                                   *blocks,
                                   existed_shared_blocks_num,
                                   sequence->mm_data(),
                                   sequence->block_hashes());
-}
-
-void BlockManagerPool::get_merged_kvcache_event(KvCacheEvent* event) const {
-  for (int32_t i = 0; i < block_managers_.size(); ++i) {
-    block_managers_[i]->get_merged_kvcache_event(event);
-  }
 }
 
 float BlockManagerPool::get_gpu_cache_usage_perc() const {
@@ -482,6 +483,15 @@ float BlockManagerPool::get_gpu_cache_usage_perc() const {
 uint32_t BlockManagerPool::num_blocks() const { return options_.num_blocks(); }
 
 int32_t BlockManagerPool::block_size() const { return options_.block_size(); }
+
+void BlockManagerPool::reset_prefix_cache() {
+  if (!options_.enable_prefix_cache()) {
+    return;
+  }
+  for (auto& block_manager : block_managers_) {
+    block_manager->reset_prefix_cache();
+  }
+}
 
 std::vector<size_t> BlockManagerPool::num_blocks_in_prefix_cache() const {
   std::vector<size_t> num_blocks_in_prefix_cache(block_managers_.size());
@@ -529,7 +539,8 @@ void BlockManagerPool::deallocate_without_cache(Sequence* sequence) {
   DCHECK(!block_managers_[dp_rank].get()->is_composite())
       << "Composite manager does not support deallocate_without_cache yet.";
 
-  block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+  block_managers_[dp_rank]->deallocate(
+      sequence->kv_state().blocks(BlockType::KV));
   deallocate_single_block(sequence, dp_rank);
   sequence->reset();
 }

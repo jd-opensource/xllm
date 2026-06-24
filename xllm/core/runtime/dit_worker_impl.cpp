@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -163,8 +163,9 @@ folly::SemiFuture<bool> DiTWorkerImpl::init_model_async(
 std::optional<ForwardOutput> DiTWorkerImpl::step(const ForwardInput& inputs) {
   torch::DeviceGuard device_guard(device_);
   Timer timer;
-  auto output = dit_model_executor_->forward(
-      inputs.input_params.dit_forward_input.to(device_, dtype_));
+  ForwardInput input_on_device = inputs.to(device_, dtype_);
+  DiTForwardOutput output = dit_model_executor_->forward(
+      input_on_device.input_params.dit_forward_input);
 
   auto ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());

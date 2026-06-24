@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -261,8 +261,8 @@ void SequencesGroup::process_beam_search(bool force_requested_result_size) {
       source_info.generated_token_ids.push_back(token_ids[token_idx]);
       source_info.generated_logprobs.push_back(log_probs[token_idx]);
     }
-    source_info.src_blocks.assign(seq->kv_state().kv_blocks().begin(),
-                                  seq->kv_state().kv_blocks().end());
+    source_info.src_blocks.assign(seq->kv_state().blocks(BlockType::KV).begin(),
+                                  seq->kv_state().blocks(BlockType::KV).end());
 
     source_infos.emplace_back(std::move(source_info));
   };

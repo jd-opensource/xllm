@@ -33,7 +33,6 @@ cc_library(
     embedding_cache.h
     indexed_kv_cache_impl.h
     kv_cache.h
-    kv_cache_event.h
     kv_cache_impl.h
     kv_cache_shape.h
     kv_cache_tensor_role.h

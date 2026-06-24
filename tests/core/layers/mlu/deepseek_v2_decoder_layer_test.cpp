@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ limitations under the License.
 #include "layers/common/attention_metadata_builder.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -138,7 +139,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     quant_args_ = test::create_default_quant_args();
     options_ = torch::TensorOptions()
                    .dtype(torch::kBFloat16)
-                   .device(Device::type_torch(), 0)
+                   .device(Platform::type_torch(), 0)
                    .requires_grad(false);
     parallel_args_ = test::create_default_parallel_args(mock_process_group_);
     // Use a small but structurally valid DeepSeek-style config so the tests

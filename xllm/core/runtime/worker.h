@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -51,6 +51,8 @@ class Worker {
   bool sleep(MasterStatus master_status);
 
   bool wakeup(const WakeupOptions& options);
+
+  bool update_weights(const std::string& weights_path);
 
   folly::SemiFuture<bool> wakeup_async(const WakeupOptions& options);
 

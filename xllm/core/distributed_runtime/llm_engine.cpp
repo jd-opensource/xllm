@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -40,7 +40,8 @@ limitations under the License.
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/service_config.h"
 #include "framework/block/block_utils.h"
-#include "framework/block/hierarchy_block_manager_pool.h"
+// hierarchy temporarily disabled during the block-manager refactor
+// #include "framework/block/hierarchy_block_manager_pool.h"
 #include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
@@ -509,7 +510,6 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
               ? false
               : options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_cache_upload(options_.enable_cache_upload())
       .enable_kvcache_store(options_.enable_kvcache_store())
       .enable_xtensor(::xllm::KVCacheConfig::get_instance().enable_xtensor())
       .num_layers(args_.n_layers())
@@ -561,11 +561,18 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   }
 
   if (options_.host_blocks_factor() > 1.0 || options_.enable_kvcache_store()) {
-    kv_cache_manager_ =
-        std::make_unique<HierarchyBlockManagerPool>(options, this, dp_size_);
-  } else {
-    kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
+    // hierarchy temporarily disabled during the block-manager refactor.
+    // host-offload / kvcache-store routes the device + host dual
+    // KVCacheState through HierarchyBlockManagerPool, which is parked while
+    // the composite block-manager refactor lands in smaller pieces. Until
+    // then this path fails loudly rather than silently degrading to a
+    // device-only pool.
+    LOG(FATAL) << "host-offload / kvcache-store is temporarily disabled during "
+                  "the block-manager refactor (hierarchy rebuild in progress). "
+                  "Please disable --host_blocks_factor and "
+                  "--enable_kvcache_store for now.";
   }
+  kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
 
   // init kv cache for each worker in parallel
   std::vector<folly::SemiFuture<bool>> futures;
@@ -1153,8 +1160,41 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
   return batched_inputs;
 }
 
-bool LLMEngine::sleep(MasterStatus master_status) {
-  // sleep/wakeup/fork_master requires
+bool LLMEngine::rl_sleep_mode() const {
+  // RL sleep mode (SleepableAllocator) is mutually exclusive with the
+  // xtensor-based sleep path: it does not require xtensor and does not touch
+  // PageAllocator. When xtensor is on, RL sleep mode is disabled so the xtensor
+  // path is preserved.
+  return options_.enable_sleep_mode() &&
+         !::xllm::KVCacheConfig::get_instance().enable_xtensor();
+}
+
+bool LLMEngine::rl_sleep(MasterStatus master_status) {
+  LOG(INFO) << "Starting RL sleep. Worker clients count: "
+            << worker_clients_num_;
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "No worker clients available to sleep.";
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+  for (auto& worker : worker_clients_) {
+    futures.push_back(worker->sleep_async(master_status));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "RL sleep failed.";
+      return false;
+    }
+  }
+  return true;
+}
+
+bool LLMEngine::xtensor_sleep(MasterStatus master_status) {
+  // sleep/wakeup/fork_master (xtensor path) requires
   // ::xllm::KVCacheConfig::get_instance().enable_xtensor()
   if (!::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     LOG(WARNING) << "sleep requires --enable_xtensor=true";
@@ -1168,8 +1208,8 @@ bool LLMEngine::sleep(MasterStatus master_status) {
     return false;
   }
 
-  // Put the model to sleep in PageAllocator
-  // This releases both weight pages and KV cache pages
+  // Put the model to sleep in PageAllocator (xtensor path).
+  // This releases both weight pages and KV cache pages.
   const std::string& model_id = options_.model_id();
   auto& page_allocator = PageAllocator::get_instance();
   if (!page_allocator.sleep_model(model_id)) {
@@ -1179,20 +1219,49 @@ bool LLMEngine::sleep(MasterStatus master_status) {
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
-
   for (auto& worker : worker_clients_) {
     futures.push_back(worker->sleep_async(master_status));
   }
 
   auto results = folly::collectAll(futures).get();
-
   for (const auto& result : results) {
     if (!result.value()) {
       LOG(ERROR) << "Sleep failed.";
       return false;
     }
   }
+  return true;
+}
 
+bool LLMEngine::sleep(MasterStatus master_status) {
+  if (rl_sleep_mode()) {
+    return rl_sleep(master_status);
+  }
+  return xtensor_sleep(master_status);
+}
+
+bool LLMEngine::update_weights(const std::string& weights_path) {
+  LOG(INFO) << "Updating weights on " << worker_clients_num_
+            << " worker(s) from: "
+            << (weights_path.empty() ? "<original path>" : weights_path);
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "No worker clients available to update weights.";
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+  for (auto& worker : worker_clients_) {
+    futures.emplace_back(worker->update_weights_async(weights_path));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.hasValue() || !result.value()) {
+      LOG(ERROR) << "UpdateWeights failed on a worker.";
+      return false;
+    }
+  }
   return true;
 }
 
@@ -1244,8 +1313,32 @@ bool LLMEngine::stop_profile() {
   return true;
 }
 
-bool LLMEngine::wakeup(const WakeupOptions& options) {
-  // sleep/wakeup/fork_master requires
+bool LLMEngine::rl_wakeup(const WakeupOptions& options) {
+  LOG(INFO) << "Starting RL wakeup. Worker clients count: "
+            << worker_clients_num_;
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "No worker clients available to wakeup.";
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+  for (auto& worker : worker_clients_) {
+    futures.push_back(worker->wakeup_async(options));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "RL wakeup failed.";
+      return false;
+    }
+  }
+  return true;
+}
+
+bool LLMEngine::xtensor_wakeup(const WakeupOptions& options) {
+  // sleep/wakeup/fork_master (xtensor path) requires
   // ::xllm::KVCacheConfig::get_instance().enable_xtensor()
   if (!::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     LOG(WARNING) << "wakeup requires --enable_xtensor=true";
@@ -1259,8 +1352,8 @@ bool LLMEngine::wakeup(const WakeupOptions& options) {
     return false;
   }
 
-  // Wake up the model in PageAllocator
-  // This re-allocates both KV cache pages and weight pages
+  // Wake up the model in PageAllocator (xtensor path).
+  // This re-allocates both KV cache pages and weight pages.
   const std::string& model_id = options_.model_id();
   auto& page_allocator = PageAllocator::get_instance();
   if (!page_allocator.wakeup_model(model_id)) {
@@ -1294,7 +1387,6 @@ bool LLMEngine::wakeup(const WakeupOptions& options) {
   }
 
   auto results = folly::collectAll(futures).get();
-
   for (const auto& result : results) {
     if (!result.value()) {
       LOG(ERROR) << "Wakeup failed.";
@@ -1302,8 +1394,14 @@ bool LLMEngine::wakeup(const WakeupOptions& options) {
     }
   }
   LOG(INFO) << "Wakeup finished for LLM engine.";
-
   return true;
+}
+
+bool LLMEngine::wakeup(const WakeupOptions& options) {
+  if (rl_sleep_mode()) {
+    return rl_wakeup(options);
+  }
+  return xtensor_wakeup(options);
 }
 
 bool LLMEngine::get_xtensor_offsets_for_blocks(

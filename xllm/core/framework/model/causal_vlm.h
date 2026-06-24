@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -59,6 +59,14 @@ class CausalVLMImpl : public CausalVLM {
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& parameters) override {
     return model_->forward(tokens, positions, kv_caches, parameters);
+  }
+
+  bool is_hybrid_linear_attention() override {
+    if constexpr (detail::has_is_hybrid_linear_attention<Model>::value) {
+      return model_->is_hybrid_linear_attention();
+    } else {
+      return CausalLM::is_hybrid_linear_attention();
+    }
   }
 
   torch::Tensor pooler(const torch::Tensor& hidden_states,

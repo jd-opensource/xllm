@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,6 +24,7 @@ limitations under the License.
 #include <cstdint>
 
 #include "platform/device.h"
+#include "platform/platform.h"
 #include "sampler.h"
 
 namespace xllm {
@@ -31,9 +32,9 @@ namespace xllm {
 namespace {
 // Helper function to get test device: MLU if available, otherwise CPU
 torch::Device get_test_device() {
-  std::string backend = Device::type_str();
-  if ((backend == "mlu" || backend == "cuda") && Device::device_count() > 0) {
-    return torch::Device(Device::type_torch(), 0);
+  if ((Platform::is_mlu() || Platform::is_cuda()) &&
+      Platform::device_count() > 0) {
+    return torch::Device(Platform::type_torch(), 0);
   }
   return torch::Device(torch::kCPU);
 }
@@ -412,18 +413,17 @@ TEST(RejectionSamplerTest, RandomSelectedOnlyMatchesDenseWhenAccepted) {
 
 TEST(RejectionSamplerTest, RandomFused) {
   // Skip test if not running on MLU backend
-  std::string backend = Device::type_str();
-  if (backend != "mlu") {
+  if (!Platform::is_mlu()) {
     GTEST_SKIP() << "Skipping RandomFused test: fused kernel only available on "
                     "MLU backend.";
   }
-  if (Device::device_count() == 0) {
+  if (Platform::device_count() == 0) {
     GTEST_SKIP() << "Skipping RandomFused test: no MLU devices available";
   }
 
   // Prepare random test data
   torch::ScalarType dtype(torch::kFloat32);
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
   const auto options = torch::dtype(dtype).device(device);
   torch::manual_seed(100);
 
@@ -531,12 +531,12 @@ TEST(RejectionSamplerTest, RandomFused) {
 
 TEST(RejectionSamplerTest, RandomFusedRecoveryDistribution) {
   // Check MLU device
-  if (Device::type_str() != "mlu" || Device::device_count() == 0) {
+  if (!Platform::is_mlu() || Platform::device_count() == 0) {
     GTEST_SKIP() << "Skipping test: MLU device required.";
   }
 
   torch::manual_seed(42);
-  torch::Device device(Device::type_torch(), 0);
+  torch::Device device(Platform::type_torch(), 0);
 
   // Keep vocab_size small for statistical verification
   int64_t vocab_size = 4;

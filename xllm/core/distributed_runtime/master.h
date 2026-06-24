@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -42,6 +42,8 @@ class Master {
   virtual bool wakeup() { return false; }
 
   virtual bool wakeup(const WakeupOptions& options) { return false; }
+
+  virtual bool update_weights(const std::string& weights_path) { return false; }
 
   virtual bool link_p2p(const std::vector<std::string>& remote_addrs) {
     return false;

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -149,6 +149,9 @@ class RemoteWorker : public WorkerClient {
 
   virtual folly::SemiFuture<bool> wakeup_async(
       const WakeupOptions& options) override;
+
+  virtual folly::SemiFuture<bool> update_weights_async(
+      const std::string& weights_path) override;
 
   virtual folly::SemiFuture<bool> start_profile_async() override;
 

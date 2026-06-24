@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -46,6 +46,8 @@ limitations under the License.
 
 namespace xllm::npu {
 
+struct AclGraphTaskUpdateContext;
+
 // ACL graph executor using libtorch NPUGraph for memory management
 // NPUGraph provides mempool to manage temporary tensors during forward pass
 class AclGraph {
@@ -91,6 +93,8 @@ class AclGraph {
                                     const torch::Tensor& positions,
                                     ModelInputParams& params);
 
+  void update_graph_tasks(const ModelInputParams& params);
+
   // NPUGraph with mempool for managing temporary tensors during forward pass
   c10_npu::NPUGraph graph_;
   uint32_t num_tokens_;
@@ -105,6 +109,9 @@ class AclGraph {
   aclrtStream graph_stream_ = nullptr;
   aclrtEvent replay_done_event_ = nullptr;
   c10::DeviceIndex device_index_;
+  std::shared_ptr<AclGraphTaskUpdateContext> graph_task_context_;
+
+  std::optional<c10_npu::NPUStream> update_stream_;
 };
 
 // Executor implementation using ACL graph optimization

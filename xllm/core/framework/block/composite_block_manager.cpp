@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ limitations under the License.
 
 #include "block_manager_impl.h"
 #include "framework/block/block_utils.h"
-#include "framework/kv_cache/kv_cache_event.h"
 #include "sliding_window_block_manager.h"
 
 namespace xllm {
@@ -47,6 +46,7 @@ CompositeBlockManager::CompositeBlockManager(
   CHECK_GT(n, 0u) << "CompositeBlockManager requires at least one sub-manager";
 
   sub_managers_.reserve(n);
+  sub_manager_types_.reserve(n);
 
   for (size_t i = 0; i < n; ++i) {
     const uint32_t type = options_.manager_types()[i];
@@ -58,7 +58,13 @@ CompositeBlockManager::CompositeBlockManager(
                       compress_ratio);
       opts.num_blocks(static_cast<uint32_t>(options_.num_blocks()) /
                       compress_ratio);
+      // Compressed incremental groups are keyed by their compression ratio.
+      CHECK(compress_ratio == 4 || compress_ratio == 128)
+          << "unexpected compress_ratio " << compress_ratio
+          << " for composite BlockManagerImpl sub-manager";
       sub_managers_.push_back(std::make_unique<BlockManagerImpl>(opts));
+      sub_manager_types_.push_back(compress_ratio == 4 ? BlockType::C4
+                                                       : BlockType::C128);
     } else if (type == kManagerTypeSlidingWindowBlockManager) {
       const uint32_t swa_blocks_per_seq = options_.swa_blocks_per_seq();
       CHECK_GT(swa_blocks_per_seq, 0u) << "swa_blocks_per_seq must be positive";
@@ -86,6 +92,7 @@ CompositeBlockManager::CompositeBlockManager(
              "physical SW cache pool.";
       sub_managers_.push_back(
           std::make_unique<SlidingWindowBlockManager>(opts));
+      sub_manager_types_.push_back(BlockType::SWA);
     } else {
       LOG(FATAL) << "Unknown manager_type " << type;
     }
@@ -97,32 +104,45 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
   if (seq == nullptr) {
     return false;
   }
-  std::vector<std::vector<Block>>* composite =
-      seq->kv_state().mutable_composite_blocks();
-  const size_t original_manager_count = composite->size();
-  composite->resize(sub_managers_.size());
-  std::vector<size_t> original_sizes(composite->size(), 0);
-  for (size_t i = 0; i < composite->size(); ++i) {
-    original_sizes[i] = composite->at(i).size();
+  KVCacheState& kv_state = seq->kv_state();
+  // Per sub-manager block list (keyed by its BlockType), created on demand. The
+  // index i stays aligned with sub_managers_[i].
+  std::vector<std::vector<Block>*> manager_blocks(sub_managers_.size());
+  std::vector<size_t> original_sizes(sub_managers_.size(), 0);
+  for (size_t i = 0; i < sub_managers_.size(); ++i) {
+    manager_blocks[i] = kv_state.mutable_blocks(sub_manager_types_[i]);
+    original_sizes[i] = manager_blocks[i]->size();
   }
 
-  auto rollback_new_blocks = [&]() {
-    for (size_t i = 0; i < composite->size(); ++i) {
-      auto& manager_blocks = composite->at(i);
-      if (manager_blocks.size() <= original_sizes[i]) {
-        continue;
-      }
-      sub_managers_[i]->deallocate(
-          Slice<Block>(manager_blocks.data() + original_sizes[i],
-                       manager_blocks.size() - original_sizes[i]));
-      manager_blocks.resize(original_sizes[i]);
+  // Blocks taken from each compressed sub-manager during this call. They are
+  // staged here and only committed into manager_blocks after every group's
+  // allocation has succeeded; the SWA group grows in place, so its rollback is
+  // tracked by size instead.
+  std::vector<std::vector<Block>> pending_blocks(sub_managers_.size());
+
+  // Undo every allocation this call has made. Each batch is returned through
+  // its owning sub-manager's deallocate() (logical release) before the Block
+  // refs are dropped (physical return on destruction), mirroring
+  // deallocate_sequence(); a bare resize() would skip the sub-manager and leak
+  // the staged pending_blocks that were never inserted into manager_blocks.
+  auto rollback = [&]() {
+    std::vector<Block>& swa = *manager_blocks[0];
+    if (swa.size() > original_sizes[0]) {
+      sub_managers_[0]->deallocate(Slice<Block>(
+          swa.data() + original_sizes[0], swa.size() - original_sizes[0]));
+      swa.resize(original_sizes[0]);
     }
-    composite->resize(original_manager_count);
+    for (size_t i = 1; i < sub_managers_.size(); ++i) {
+      if (!pending_blocks[i].empty()) {
+        sub_managers_[i]->deallocate(pending_blocks[i]);
+        pending_blocks[i].clear();
+      }
+    }
   };
 
-  auto& swa_blocks = composite->at(0);
+  std::vector<Block>& swa_blocks = *manager_blocks[0];
   const size_t block_size = sub_managers_[0]->block_size();
-  const size_t cached_tokens = seq->kv_state().kv_cache_tokens_num();
+  const size_t cached_tokens = kv_state.kv_cache_tokens_num();
   const size_t sliding_window_tokens =
       std::max<size_t>(sub_managers_[0]->options().sliding_window_size(), 1);
   size_t release_blocks = 0;
@@ -145,13 +165,12 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
       swa_blocks_needed > old_swa_size ? swa_blocks_needed - old_swa_size : 0;
   if (additional_swa_blocks >
       sub_managers_[0]->num_free_blocks() + valid_release_blocks) {
-    composite->resize(original_manager_count);
+    rollback();
     return false;
   }
 
-  std::vector<std::vector<Block>> pending_blocks(sub_managers_.size());
   for (size_t i = 1; i < sub_managers_.size(); ++i) {
-    const size_t num_blocks = composite->at(i).size();
+    const size_t num_blocks = manager_blocks[i]->size();
     const size_t block_size = sub_managers_[i]->block_size();
     const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
     if (num_blocks_needed <= num_blocks) {
@@ -161,7 +180,7 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
     const uint32_t num_additional_blocks = num_blocks_needed - num_blocks;
     pending_blocks[i] = sub_managers_[i]->allocate(num_additional_blocks);
     if (pending_blocks[i].size() != num_additional_blocks) {
-      composite->resize(original_manager_count);
+      rollback();
       return false;
     }
   }
@@ -189,7 +208,7 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
         sub_managers_[0]->allocate(swa_blocks_needed - old_size);
     if (blocks.size() != swa_blocks_needed - old_size) {
       swa_blocks.resize(old_size);
-      composite->resize(original_manager_count);
+      rollback();
       return false;
     }
     std::move(blocks.begin(), blocks.end(), swa_blocks.begin() + old_size);
@@ -199,9 +218,10 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
     if (pending_blocks[i].empty()) {
       continue;
     }
-    composite->at(i).insert(composite->at(i).end(),
-                            std::make_move_iterator(pending_blocks[i].begin()),
-                            std::make_move_iterator(pending_blocks[i].end()));
+    manager_blocks[i]->insert(
+        manager_blocks[i]->end(),
+        std::make_move_iterator(pending_blocks[i].begin()),
+        std::make_move_iterator(pending_blocks[i].end()));
   }
   return true;
 }
@@ -210,12 +230,11 @@ void CompositeBlockManager::deallocate_sequence(Sequence* seq) {
   if (seq == nullptr) {
     return;
   }
-  const std::vector<std::vector<Block>>& composite =
-      seq->kv_state().composite_blocks();
-  const size_t n = std::min(composite.size(), sub_managers_.size());
-  for (size_t i = 0; i < n; ++i) {
-    if (!composite[i].empty()) {
-      sub_managers_[i]->deallocate(composite[i]);
+  KVCacheState& kv_state = seq->kv_state();
+  for (size_t i = 0; i < sub_managers_.size(); ++i) {
+    const Slice<Block> group_blocks = kv_state.blocks(sub_manager_types_[i]);
+    if (!group_blocks.empty()) {
+      sub_managers_[i]->deallocate(group_blocks);
     }
   }
 }
@@ -290,13 +309,6 @@ void CompositeBlockManager::cache(const Slice<int32_t>& /*token_ids*/,
 
 void CompositeBlockManager::cache(const std::vector<Block>& /*blocks*/) {
   // Prefix cache is not supported for CompositeBlockManager yet.
-}
-
-void CompositeBlockManager::get_merged_kvcache_event(
-    KvCacheEvent* event) const {
-  for (const auto& mgr : sub_managers_) {
-    mgr->get_merged_kvcache_event(event);
-  }
 }
 
 size_t CompositeBlockManager::num_blocks_in_prefix_cache() const {

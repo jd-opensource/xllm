@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -126,25 +126,22 @@ int64_t infer_actual_batch_size(const ModelInputParams& params) {
   return 0;
 }
 
-bool is_qwen3_5_model_type(const std::string& model_type) {
-  return model_type == "qwen3_5" || model_type == "qwen3_5_moe" ||
-         model_type == "qwen3_5_text" || model_type.rfind("qwen3_5_", 0) == 0;
-}
-
 }  // namespace
 
 // GraphPersistentParam implementation
 GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
                                            const torch::Device& device,
                                            const runtime::Options& options,
-                                           bool need_update_attn_mask)
+                                           bool need_update_attn_mask,
+                                           bool is_hybrid_linear_attention)
     : args_(args),
       device_(device),
       options_(options),
       context_for_plan_(nullptr),
       custom_pa_op_for_plan_(nullptr),
       stream_for_plan_(nullptr),
-      need_update_attn_mask_(need_update_attn_mask) {
+      need_update_attn_mask_(need_update_attn_mask),
+      is_hybrid_linear_attention_(is_hybrid_linear_attention) {
   // Determine whether attention plan needs to be updated based on model type
   // Future logic can be extended here for more complex model-specific behavior
   need_update_attention_plan_ = (args.model_type() != "deepseek_v32" &&
@@ -577,7 +574,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       params.meta.batch_forward_type.is_chunked_prefill();
   const bool is_qwen3_5_spec_verify_chunked_prefill =
       params.is_spec_verify && is_chunked_prefill &&
-      is_qwen3_5_model_type(args_.model_type());
+      is_hybrid_linear_attention_;
   CHECK(is_decode || is_qwen3_5_spec_verify_chunked_prefill)
       << "ACL graph persistent param only supports decode or Qwen3.5 "
          "spec-verify chunked prefill";
@@ -815,8 +812,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
           ? params.attention.device.q_cu_seq_lens.size(0)
           : 0;
   if (has_q_cu && q_cu_size > 0) {
-    const bool use_qwen3_5_query_start_loc =
-        is_qwen3_5_model_type(args_.model_type());
+    const bool use_qwen3_5_query_start_loc = is_hybrid_linear_attention_;
     const bool input_has_leading_zero =
         params.is_spec_verify && use_qwen3_5_query_start_loc;
     const int64_t required_q_cu_seq_lens =
@@ -1022,8 +1018,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
           expanded_kv_seq_lens_vec;
     }
     if (params.attention.device.q_cu_seq_lens.defined()) {
-      const bool use_qwen3_5_query_start_loc =
-          is_qwen3_5_model_type(args_.model_type());
+      const bool use_qwen3_5_query_start_loc = is_hybrid_linear_attention_;
       params_for_capture->attention.device.q_cu_seq_lens = q_cu_seq_lens_.slice(
           /*dim=*/0,
           /*start=*/0,
@@ -1042,6 +1037,38 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     replace_capture_cp_ep_padding(
         params.parallel.cp_ep_padding_data,
         params_for_capture->parallel.cp_ep_padding_data);
+
+    auto& qsl = params_for_capture->parallel.query_start_loc;
+    qsl.clear();
+    qsl.reserve(static_cast<size_t>(padded_batch_size) + 1);
+    qsl.emplace_back(0);
+    for (int64_t i = 0; i < padded_batch_size; ++i) {
+      qsl.emplace_back(qsl.back() +
+                       padded_q_seq_lens_vec[static_cast<size_t>(i)]);
+    }
+
+    if (!params.parallel.has_initial_state.empty()) {
+      auto& his = params_for_capture->parallel.has_initial_state;
+      his = params.parallel.has_initial_state;
+      if (his.size() > static_cast<size_t>(actual_batch_size)) {
+        his.resize(static_cast<size_t>(actual_batch_size));
+      }
+      his.resize(static_cast<size_t>(padded_batch_size), 0);
+    }
+
+    if (params.num_accepted_tokens.defined() &&
+        params.num_accepted_tokens.numel() > 0) {
+      torch::Tensor nat_host = params.num_accepted_tokens.to(torch::kCPU)
+                                   .to(torch::kLong)
+                                   .contiguous();
+      const int64_t copy_size =
+          std::min<int64_t>(actual_batch_size, nat_host.numel());
+      const int64_t* data = nat_host.data_ptr<int64_t>();
+      params_for_capture->num_accepted_tokens_host.assign(data,
+                                                          data + copy_size);
+      params_for_capture->num_accepted_tokens_host.resize(
+          static_cast<size_t>(padded_batch_size), 1);
+    }
 
     return params_for_capture;
   }

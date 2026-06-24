@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -125,6 +125,15 @@ template <typename T>
 struct has_requires_graph_forward_metadata<
     T,
     std::void_t<decltype(std::declval<T>()->requires_graph_forward_metadata())>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_is_hybrid_linear_attention : std::false_type {};
+
+template <typename T>
+struct has_is_hybrid_linear_attention<
+    T,
+    std::void_t<decltype(std::declval<T>()->is_hybrid_linear_attention())>>
     : std::true_type {};
 
 template <typename T, typename = void>

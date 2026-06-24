@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -637,6 +637,17 @@ void WorkerService::UnlinkP2P(::google::protobuf::RpcController* controller,
     resp->set_ok(status);
   });
   return;
+}
+
+void WorkerService::UpdateWeights(::google::protobuf::RpcController* controller,
+                                  const proto::UpdateWeightsRequest* req,
+                                  proto::Status* resp,
+                                  ::google::protobuf::Closure* done) {
+  threadpool_->schedule([this, controller, req, resp, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    bool status = worker_->update_weights(req->weights_path());
+    resp->set_ok(status);
+  });
 }
 
 void WorkerService::Sleep(::google::protobuf::RpcController* controller,

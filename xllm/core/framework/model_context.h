@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -40,6 +40,12 @@ struct OptimizationConfig {
   bool enable_fused_spec_kernel = false;
   bool enable_fused_mla_kernel = false;
   bool enable_fused_indexer_qk = false;
+
+  // Broadcast speculative-decoding sampling results across the TP consensus
+  // group so every rank adopts rank 0's accepted/draft tokens. Guards against
+  // per-rank RNG divergence crashing the draft decoder's TP all-reduce under
+  // enable_schedule_overlap.
+  bool enable_spec_token_broadcast = false;
 
   // we can detailize this part later. for example:
   // PROPERTY(bool, enable_fused_mlp_kernel) = false;

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ limitations under the License.
 #include "layers/mlu/deepseek_v32_sp_context.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "platform/platform.h"
 
 namespace xllm {
 namespace layer {
@@ -583,7 +584,7 @@ int32_t run_attention_test_child(int32_t rank,
                                  bool enable_fused_mla_kernel,
                                  int64_t q_lora_rank) {
   try {
-    const int32_t dev_count = xllm::Device::device_count();
+    const int32_t dev_count = xllm::Platform::device_count();
     if (dev_count < world_size) {
       LOG(WARNING) << "Rank " << rank << ": insufficient devices. Skipping.";
       return EXIT_CODE_SKIP;
@@ -657,7 +658,7 @@ int32_t run_attention_prefill_repl_test_child(int32_t rank,
                                               int32_t port,
                                               const std::string& host) {
   try {
-    const int32_t dev_count = xllm::Device::device_count();
+    const int32_t dev_count = xllm::Platform::device_count();
     if (dev_count < world_size) {
       LOG(WARNING) << "Rank " << rank << ": insufficient devices. Skipping.";
       return EXIT_CODE_SKIP;
@@ -737,7 +738,7 @@ int32_t run_attention_prefill_fallback_test_child(int32_t rank,
                                                   int32_t port,
                                                   const std::string& host) {
   try {
-    const int32_t dev_count = xllm::Device::device_count();
+    const int32_t dev_count = xllm::Platform::device_count();
     if (dev_count < world_size) {
       LOG(WARNING) << "Rank " << rank << ": insufficient devices. Skipping.";
       return EXIT_CODE_SKIP;
@@ -819,7 +820,7 @@ int32_t run_attention_prefill_sp_test_child(int32_t rank,
                                             const std::string& host,
                                             bool use_glm5_args = false) {
   try {
-    const int32_t dev_count = xllm::Device::device_count();
+    const int32_t dev_count = xllm::Platform::device_count();
     if (dev_count < world_size) {
       LOG(WARNING) << "Rank " << rank << ": insufficient devices. Skipping.";
       return EXIT_CODE_SKIP;
@@ -908,7 +909,7 @@ int32_t run_attention_prefill_sp_baseline_test_child(int32_t rank,
                                                      int32_t port,
                                                      const std::string& host) {
   try {
-    const int32_t dev_count = xllm::Device::device_count();
+    const int32_t dev_count = xllm::Platform::device_count();
     if (dev_count < world_size) {
       LOG(WARNING) << "Rank " << rank << ": insufficient devices. Skipping.";
       return EXIT_CODE_SKIP;
@@ -1013,7 +1014,7 @@ int32_t run_attention_chunked_test_child(int32_t rank,
                                          int32_t port,
                                          const std::string& host) {
   try {
-    const int32_t dev_count = xllm::Device::device_count();
+    const int32_t dev_count = xllm::Platform::device_count();
     if (dev_count < world_size) {
       LOG(WARNING) << "Rank " << rank << ": insufficient devices. Skipping.";
       return EXIT_CODE_SKIP;

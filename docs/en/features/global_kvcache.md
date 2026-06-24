@@ -36,7 +36,6 @@ The overall architecture is shown in the diagram below:
     Add the following gflag parameters when starting xLLM:
     ```bash
     --enable_service_routing=true
-    --enable_cache_upload=true
     # PD separation currently does not support Global KVCache Management 
     --enable_disagg_pd=false
     ```

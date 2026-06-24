@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -803,7 +803,7 @@ void Batch::process_beam_search_output(const RawForwardOutput& raw_output,
         seq_idx_set.insert(src_seq_idx);
       }
 
-      auto src_blocks = src_seq->kv_state().kv_blocks();
+      auto src_blocks = src_seq->kv_state().blocks(BlockType::KV);
       base_seq->kv_state().set_src_blocks(src_blocks, need_swap);
     }
   };

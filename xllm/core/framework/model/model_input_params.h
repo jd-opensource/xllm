@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -46,6 +47,9 @@ limitations under the License.
 #include "util/tensor_helper.h"
 
 namespace xllm {
+namespace npu {
+struct AclGraphTaskUpdateContext;
+}  // namespace npu
 namespace layer {
 struct AttentionMetadata;
 }  // namespace layer
@@ -563,7 +567,7 @@ struct AttentionInput {
         continue;
       }
       const void* ptr = device_base + entry.offset;
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_DCU)
       if (target_device.type() == torch::kCUDA) {
         *entry.target = get_tensor_from_blob(
             entry.sizes, entry.dtype, ptr, attention_device_buffer);
@@ -845,6 +849,23 @@ struct ParallelInput {
   }
 };
 
+using LinearStatePrefixHash = PrefixHash;
+
+struct LinearStateCacheOp {
+  // Live slot the sequence advances its recurrent state in.
+  int32_t linear_state_id = -1;
+  // Restore: prefix hash to restore from, and the checkpoint slot the
+  // scheduler resolved it to. The worker copies `restore_src_slot_id`
+  // -> `linear_state_id`.
+  LinearStatePrefixHash restore_prefix_hash{};
+  int32_t restore_src_slot_id = -1;
+  // Save: prefix hash to checkpoint, and the checkpoint slot the scheduler
+  // allocated for it. The worker copies `linear_state_id` ->
+  // `save_dst_slot_id`.
+  LinearStatePrefixHash save_prefix_hash{};
+  int32_t save_dst_slot_id = -1;
+};
+
 struct ExpertInput {
   torch::Tensor expert_load_data;
   torch::Tensor expert_array;
@@ -867,6 +888,9 @@ struct GraphInput {
   torch::Tensor expanded_block_tables;
   torch::Tensor expanded_tiling_data;
   std::vector<int32_t> expanded_kv_seq_lens_vec;
+#if defined(USE_NPU)
+  std::shared_ptr<npu::AclGraphTaskUpdateContext> acl_graph_task_update_context;
+#endif
 
   GraphInput to(const torch::Device& device) const {
     GraphInput out;
@@ -878,6 +902,9 @@ struct GraphInput {
     out.expanded_block_tables = safe_to(expanded_block_tables, device, true);
     out.expanded_tiling_data = safe_to(expanded_tiling_data, device, true);
     out.expanded_kv_seq_lens_vec = expanded_kv_seq_lens_vec;
+#if defined(USE_NPU)
+    out.acl_graph_task_update_context = acl_graph_task_update_context;
+#endif
     return out;
   }
 };
@@ -894,8 +921,10 @@ struct ModelInputParams {
     params.expert = expert.to(device);
     params.graph = graph.to(device);
     params.dit_forward_input = dit_forward_input.to(device);
+    params.linear_state_cache_ops = linear_state_cache_ops;
     params.is_spec_verify = is_spec_verify;
     params.num_accepted_tokens = safe_to(num_accepted_tokens, device, true);
+    params.num_accepted_tokens_host = num_accepted_tokens_host;
     params.dsa_topk_indices = safe_to(dsa_topk_indices, device, true);
     for (const auto& table : multi_block_tables) {
       params.multi_block_tables.push_back(
@@ -1020,9 +1049,14 @@ struct ModelInputParams {
 
   // Shifted target token ids for MTP training/evaluation paths.
   torch::Tensor mtp_shifted_token_ids;
+
+  // Structured per-row linear-state cache operations.
+  std::vector<LinearStateCacheOp> linear_state_cache_ops;
+
   bool is_spec_verify = false;
   torch::Tensor num_accepted_tokens;
   torch::Tensor dsa_topk_indices;
+  std::vector<int64_t> num_accepted_tokens_host;
 
   RecModelInputParams rec_params;
 

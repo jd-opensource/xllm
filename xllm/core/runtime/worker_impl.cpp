@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -51,6 +51,7 @@ limitations under the License.
 #include "core/framework/config/profile_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
+#include "core/platform/sleepable_allocator.h"
 #if defined(USE_NPU)
 #include "platform/npu/device_capture_lock.h"
 #elif defined(USE_CUDA) || defined(USE_DCU)
@@ -325,6 +326,7 @@ bool WorkerImpl::allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
       .model_id(options_.model_id())
       .model_type(args.model_type())
       .enable_xtensor(::xllm::KVCacheConfig::get_instance().enable_xtensor())
+      .enable_sleep_mode(options_.enable_sleep_mode())
       .enable_linear_attention(enable_linear_attention)
       .enable_lighting_indexer(enable_lighting_indexer)
       .enable_kv_cache_quant(enable_kv_cache_quant)
@@ -338,6 +340,9 @@ bool WorkerImpl::allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
   create_options.enable_kv_cache_huge_page_allocator(use_huge_page_allocator);
 #endif
 
+  // RL sleep mode: when enable_sleep_mode is set, allocate_kv_caches builds the
+  // KV cache over a VMM-backed SleepableAllocator region (see kv_cache.cpp), so
+  // sleep()/wake_up() can release / re-acquire it.
   allocate_kv_caches(kv_caches_, kv_cache_shape, create_options);
 
 #if defined(USE_CUDA) || defined(USE_DCU)
@@ -352,7 +357,8 @@ bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
     return false;
   }
 
-  init_hierarchy_kv_cache_transfer();
+  // hierarchy temporarily disabled during the block-manager refactor
+  // init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
   return true;
 }
@@ -382,7 +388,8 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       context_.get_model_args().model_type(),
       options_.model_id());
 
-  init_hierarchy_kv_cache_transfer();
+  // hierarchy temporarily disabled during the block-manager refactor
+  // init_hierarchy_kv_cache_transfer();
 
   status_ = Status::READY;
   return true;
@@ -414,7 +421,8 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
 #endif
 
-  init_hierarchy_kv_cache_transfer();
+  // hierarchy temporarily disabled during the block-manager refactor
+  // init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
   return true;
 }
@@ -685,6 +693,9 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
   }
 #endif
   c10::StreamGuard stream_guard = prepare_stream.set_stream_guard();
+  if (enable_schedule_overlap() && compute_stream_) {
+    prepare_stream.wait_stream(*compute_stream_);
+  }
   CHECK(prepare_stream.wait_event(input.metadata_ready_event))
       << "failed to wait input metadata ready event on worker prepare stream";
 
@@ -861,8 +872,8 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
               .device(torch::kCPU)
               .dtype(torch::kInt32)
               .pinned_memory(true));
-      bool is_prefill =
-          processed_input.input_params.meta.batch_forward_type.is_prefill();
+      const bool is_prefill =
+          processed_input.input_params.meta.batch_forward_type.no_decode();
       DpEpPadding dp_ep_padding(token_size_per_dp_group,
                                 context_.get_model_args().num_experts_per_tok(),
                                 context_.get_parallel_args().mapping_data(),
@@ -1024,9 +1035,10 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
   threadpool_.schedule([this,
                         input = std::move(input_on_device),
                         promise = std::move(promise)]() mutable {
-    if (hierarchy_kv_cache_transfer_ != nullptr) {
-      hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
-    }
+    // hierarchy temporarily disabled during the block-manager refactor
+    // if (hierarchy_kv_cache_transfer_ != nullptr) {
+    //   hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
+    // }
 
     // run the model on the given input in working thread
     if (!enable_schedule_overlap()) {
@@ -1109,7 +1121,43 @@ folly::SemiFuture<bool> WorkerImpl::init_model_async(
   return future;
 }
 
-bool WorkerImpl::sleep(MasterStatus master_status) {
+bool WorkerImpl::rl_sleep_mode() const {
+  return options_.enable_sleep_mode() &&
+         !::xllm::KVCacheConfig::get_instance().enable_xtensor();
+}
+
+void WorkerImpl::setup_rl_sleep_weights() {
+  // Route each decoder layer's contiguous weight buffer (manual loader) into a
+  // VMM-backed SleepableAllocator region so rl_sleep() can release the weight
+  // HBM. Must run before the layers are constructed (loader mode is chosen in
+  // the layer ctor) and before weights are loaded.
+  if (!rl_sleep_mode()) {
+    return;
+  }
+  ::xllm::LoadConfig::get_instance().enable_manual_loader(/*enable=*/true);
+  SleepableAllocator::get_instance().set_weights_enabled(/*enabled=*/true);
+}
+
+bool WorkerImpl::rl_sleep() {
+  // Deep sleep only: release physical HBM (weights + KV) via the VMM-backed
+  // SleepableAllocator. Contents are discarded; weights are re-loaded and KV is
+  // re-prefilled after wakeup.
+  SleepableAllocator::get_instance().sleep();
+  // Also release the default caching allocator's reserved (but free) blocks,
+  // e.g. memory left cached from profiling/warmup activation tensors, so the
+  // sleep actually returns the maximum amount of HBM to the driver.
+  Device::empty_cache(device_.index());
+  return true;
+}
+
+bool WorkerImpl::rl_wakeup() {
+  // Re-acquire physical HBM via the SleepableAllocator. v1 does a full wake
+  // (weights + kv_cache); tag-based partial wake is a follow-up.
+  SleepableAllocator::get_instance().wake_up(/*tags=*/{});
+  return true;
+}
+
+bool WorkerImpl::xtensor_sleep(MasterStatus master_status) {
   // The memory for kvcache and model weights from hbm is released by xtensor;
   if (master_status == MasterStatus::LIGHT_SLEEP) {
     // only load model weights to host memory.
@@ -1119,7 +1167,30 @@ bool WorkerImpl::sleep(MasterStatus master_status) {
     // only release model weights from host memory.
     model_->free_model_weights();
   }
+  return true;
+}
 
+bool WorkerImpl::sleep(MasterStatus master_status) {
+  if (rl_sleep_mode()) {
+    return rl_sleep();
+  }
+  return xtensor_sleep(master_status);
+}
+
+bool WorkerImpl::update_weights(const std::string& weights_path) {
+  CHECK(model_ != nullptr) << "Model is not initialized.";
+  const std::string& path =
+      weights_path.empty() ? model_weights_path_ : weights_path;
+  LOG(INFO) << "Updating weights in place from: " << path;
+
+  auto model_loader = ModelLoader::create(path);
+
+  // Limit ATen threads during weight load (same as initial load) to avoid
+  // oversubscription across tensor-parallel workers.
+  auto scoped_load_threads =
+      std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
+
+  this->load_model(std::move(model_loader));
   return true;
 }
 
@@ -1167,6 +1238,10 @@ bool WorkerImpl::stop_profile() {
 }
 
 bool WorkerImpl::wakeup(const WakeupOptions& options) {
+  if (rl_sleep_mode()) {
+    return rl_wakeup();
+  }
+
   if (!options.remote_addrs.empty()) {
 #if defined(USE_NPU)
     return wakeup_from_remote_weights(options);
@@ -1342,6 +1417,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
               {"deepseek_v32", "deepseek_v3_mtp"},
               {"glm_moe_dsa", "glm_moe_dsa_mtp"},
               {"joyai_llm_flash", "joyai_llm_flash_mtp"},
+              {"mimo", "mimo_mtp"},
           };
       const std::string& current_type = args.model_type();
       auto it = kModelTypeToMtpType.find(current_type);
@@ -1353,6 +1429,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     }
   }
 #endif
+
+  setup_rl_sleep_weights();
 
   // create model context
   dtype_ = dtype;
@@ -1380,6 +1458,10 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   scoped_load_threads =
       std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
 
+  // In RL sleep mode (see setup_rl_sleep_weights()), the manual loader
+  // allocates each layer's weight buffer from the SleepableAllocator (see
+  // base_loader.cpp), so the weights become sleepable here without any extra
+  // capture step.
   if (master_status == MasterStatus::WAKEUP) {
     this->load_model(std::move(model_loader));
   } else if (master_status == MasterStatus::LIGHT_SLEEP) {
@@ -1507,17 +1589,21 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
 }
 
 uint32_t WorkerImpl::transfer_kv_blocks(
-    const uint64_t batch_id,
-    const std::vector<BlockTransferInfo>& block_transfer_info) {
-  return hierarchy_kv_cache_transfer_->transfer_kv_blocks(
-      batch_id, std::move(block_transfer_info));
+    const uint64_t /*batch_id*/,
+    const std::vector<BlockTransferInfo>& /*block_transfer_info*/) {
+  // hierarchy temporarily disabled during the block-manager refactor.
+  LOG(FATAL) << "hierarchy kv cache transfer is disabled during the "
+                "block-manager refactor.";
+  return 0;
 }
 
 uint32_t WorkerImpl::transfer_kv_blocks(
-    const uint64_t batch_id,
-    Slice<BlockTransferInfo>& block_transfer_info) {
-  return hierarchy_kv_cache_transfer_->transfer_kv_blocks(batch_id,
-                                                          block_transfer_info);
+    const uint64_t /*batch_id*/,
+    Slice<BlockTransferInfo>& /*block_transfer_info*/) {
+  // hierarchy temporarily disabled during the block-manager refactor.
+  LOG(FATAL) << "hierarchy kv cache transfer is disabled during the "
+                "block-manager refactor.";
+  return 0;
 }
 
 int64_t WorkerImpl::get_active_activation_memory() {
@@ -1526,27 +1612,38 @@ int64_t WorkerImpl::get_active_activation_memory() {
       .active_activation_memory;
 }
 
-void WorkerImpl::init_hierarchy_kv_cache_transfer() {
-  if (options_.host_blocks_factor() > 1 || options_.enable_kvcache_store()) {
-    HierarchyKVCacheTransfer::Options transfer_options;
-    transfer_options
-        .tp_rank(options_.dp_size() > 1
-                     ? options_.node_rank() % options_.dp_size()
-                     : options_.node_rank())
-        .layers(context_.get_model_args().n_layers())
-        .host_blocks_factor(options_.host_blocks_factor())
-        .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
-        .enable_kvcache_store(options_.enable_kvcache_store())
-        .store_protocol(options_.store_protocol())
-        .store_master_server_address(options_.store_master_server_address())
-        .store_metadata_server(options_.store_metadata_server())
-        .store_local_hostname(options_.store_local_hostname());
-    hierarchy_kv_cache_transfer_ = std::make_unique<HierarchyKVCacheTransfer>(
-        transfer_options, device_, &kv_caches_);
-  }
-}
+// hierarchy temporarily disabled during the block-manager refactor
+// void WorkerImpl::init_hierarchy_kv_cache_transfer() {
+//   if (options_.host_blocks_factor() > 1 || options_.enable_kvcache_store()) {
+//     HierarchyKVCacheTransfer::Options transfer_options;
+//     transfer_options
+//         .tp_rank(options_.dp_size() > 1
+//                      ? options_.node_rank() % options_.dp_size()
+//                      : options_.node_rank())
+//         .layers(context_.get_model_args().n_layers())
+//         .host_blocks_factor(options_.host_blocks_factor())
+//         .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
+//         .enable_kvcache_store(options_.enable_kvcache_store())
+//         .store_protocol(options_.store_protocol())
+//         .store_master_server_address(options_.store_master_server_address())
+//         .store_metadata_server(options_.store_metadata_server())
+//         .store_local_hostname(options_.store_local_hostname());
+//     hierarchy_kv_cache_transfer_ =
+//     std::make_unique<HierarchyKVCacheTransfer>(
+//         transfer_options, device_, &kv_caches_);
+//   }
+// }
 void WorkerImpl::prepare_mla_prefixcache_inputs(
     ModelInputParams& input_params) {
+  const bool has_prefixcache_metadata =
+      input_params.meta.num_sequences > 0 &&
+      input_params.attention.device.kv_cache_tokens_nums.defined() &&
+      input_params.attention.device.kv_cache_tokens_nums.numel() > 0 &&
+      input_params.attention.device.q_seq_lens.defined() &&
+      input_params.attention.device.q_seq_lens.numel() > 0;
+  if (!has_prefixcache_metadata) {
+    return;
+  }
   int32_t sum_prefix =
       input_params.attention.device.kv_cache_tokens_nums.sum().item<int>();
   input_params.attention.device.history_compressed_kv =

@@ -779,8 +779,8 @@ TEST(BlockManagerPoolTest, AllocateFailureRollsBackSharedPrefixBlocks) {
   auto* failed_sequence = failed_request->sequences()[0].get();
   EXPECT_FALSE(block_manager_pool->allocate(failed_sequence,
                                             failed_sequence->num_tokens()));
-  EXPECT_EQ(failed_sequence->kv_state().num_kv_blocks(), 0);
-  EXPECT_EQ(failed_sequence->kv_state().shared_kv_blocks_num(), 0);
+  EXPECT_EQ(failed_sequence->kv_state().num_blocks(BlockType::KV), 0);
+  EXPECT_EQ(failed_sequence->kv_state().shared_blocks_num(BlockType::KV), 0);
   EXPECT_EQ(util::max(block_manager_pool->num_free_blocks()),
             free_blocks_before_failure);
   EXPECT_EQ(util::min(block_manager_pool->num_used_blocks()),
@@ -789,7 +789,7 @@ TEST(BlockManagerPoolTest, AllocateFailureRollsBackSharedPrefixBlocks) {
   auto* later_sequence = later_request->sequences()[0].get();
   EXPECT_TRUE(block_manager_pool->allocate(later_sequence,
                                            later_sequence->num_tokens()));
-  EXPECT_EQ(later_sequence->kv_state().num_kv_blocks(), 1);
+  EXPECT_EQ(later_sequence->kv_state().num_blocks(BlockType::KV), 1);
 
   (void)engine.release();
 }
@@ -833,7 +833,9 @@ TEST(ContinuousSchedulerTest,
   EXPECT_EQ(batch[0].size(), kBestOf);
 
   for (size_t i = 1; i < kBestOf; ++i) {
-    EXPECT_GT(request->sequences()[i]->kv_state().shared_kv_blocks_num(), 0u)
+    EXPECT_GT(
+        request->sequences()[i]->kv_state().shared_blocks_num(BlockType::KV),
+        0u)
         << "expanded seq " << i
         << " should reuse seq[0] prompt blocks via prefix cache";
   }
@@ -1060,10 +1062,12 @@ TEST(ContinuousSchedulerTest,
     auto batch = scheduler->prepare_batch_test();
     EXPECT_EQ(batch.size(), 1);
     EXPECT_EQ(batch[0].size(), 2);
-    EXPECT_EQ(first_request->sequences()[0]->kv_state().shared_kv_blocks_num(),
+    EXPECT_EQ(first_request->sequences()[0]->kv_state().shared_blocks_num(
+                  BlockType::KV),
               0u);
     const size_t second_shared =
-        second_request->sequences()[0]->kv_state().shared_kv_blocks_num();
+        second_request->sequences()[0]->kv_state().shared_blocks_num(
+            BlockType::KV);
 
     scheduler.reset();
     // Leak the engine: cached blocks live in the prefix-cache table at
@@ -1130,9 +1134,11 @@ TEST(ContinuousSchedulerTest, InBatchCacheReusesPartialPrefixWithinSameBatch) {
     r.batch_count = batch.size();
     r.batch0_size = batch.empty() ? 0 : batch[0].size();
     r.first_shared =
-        first_request->sequences()[0]->kv_state().shared_kv_blocks_num();
+        first_request->sequences()[0]->kv_state().shared_blocks_num(
+            BlockType::KV);
     r.second_shared =
-        second_request->sequences()[0]->kv_state().shared_kv_blocks_num();
+        second_request->sequences()[0]->kv_state().shared_blocks_num(
+            BlockType::KV);
     r.prefix_cache_blocks =
         engine->block_manager_pool()->num_blocks_in_prefix_cache()[0];
 

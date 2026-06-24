@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -149,6 +149,11 @@ class Engine {
     LOG(FATAL) << " sleep is not implemented!";
     return false;
   };
+
+  virtual bool update_weights(const std::string& weights_path) {
+    LOG(FATAL) << " update_weights is not implemented!";
+    return false;
+  }
 
   virtual bool wakeup(const WakeupOptions& options) {
     LOG(FATAL) << " wakeup is not implemented!";

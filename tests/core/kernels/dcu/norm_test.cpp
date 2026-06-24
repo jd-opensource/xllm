@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -144,6 +144,47 @@ TEST_F(RmsNormDcuTest, MatchesReference) {
     for (const auto& c : cases) {
       run_and_check(dtype, c);
     }
+  }
+}
+
+TEST_F(RmsNormDcuTest, FluxQKTransposedInputMatchesReference) {
+  torch::ScalarType dtype = torch::kBFloat16;
+  torch::TensorOptions opts = Opts(dtype, device_);
+
+  const int64_t batch = 1;
+  const int64_t seq_len = 4096;
+  const int64_t heads = 24;
+  const int64_t head_dim = 128;
+  const int64_t hidden = heads * head_dim;
+  const double eps = 1e-6;
+
+  torch::Tensor qkv = torch::randn({batch, seq_len, 3 * hidden}, opts);
+  std::vector<torch::Tensor> chunks = qkv.chunk(3, -1);
+  torch::Tensor weight =
+      (torch::randn({head_dim}, Opts(torch::kFloat32, device_)) * 0.5 + 1.0)
+          .to(dtype);
+
+  for (int32_t chunk_idx : {0, 1}) {
+    torch::Tensor input = chunks[static_cast<size_t>(chunk_idx)]
+                              .view({batch, seq_len, heads, head_dim})
+                              .transpose(1, 2);
+
+    ASSERT_FALSE(input.is_contiguous());
+    ASSERT_EQ(input.stride(-1), 1);
+
+    torch::Tensor output = torch::empty(input.sizes(), opts);
+    xllm::kernel::cuda::rms_norm(output, input, weight, eps);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    torch::Tensor expected =
+        at::rms_norm(input.cpu(), {head_dim}, weight.cpu(), eps);
+    torch::Tensor diff =
+        (output.cpu().to(torch::kFloat32) - expected.to(torch::kFloat32)).abs();
+
+    EXPECT_TRUE(torch::allclose(output.cpu(), expected, 1e-2, 1e-2))
+        << "Flux q/k transposed input mismatch, chunk_idx=" << chunk_idx
+        << ", max_abs_diff=" << diff.max().item<float>()
+        << ", mean_abs_diff=" << diff.mean().item<float>();
   }
 }
 

@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -85,6 +85,9 @@ struct KVCacheCreateOptions {
   PROPERTY(std::string, model_id);
   PROPERTY(std::string, model_type);
   PROPERTY(bool, enable_xtensor) = false;
+  // RL deep-sleep mode: build KV cache over a VMM-backed SleepableAllocator
+  // region so it can be released/re-acquired by sleep()/wake_up().
+  PROPERTY(bool, enable_sleep_mode) = false;
   PROPERTY(bool, enable_linear_attention) = false;
   PROPERTY(bool, enable_lighting_indexer) = false;
   PROPERTY(bool, enable_kv_cache_quant) = false;
