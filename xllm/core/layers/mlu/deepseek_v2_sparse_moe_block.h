@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -88,15 +88,12 @@ class DeepseekV2SparseMoEBlockImpl : public torch::nn::Module {
 
   ForwardResult forward(torch::Tensor x,
                         bool enable_moe_all2all,
-                        const CommFns& comm_fns,
-                        int64_t chunk_size = -1);
+                        const CommFns& comm_fns);
   ForwardResult forward_sp(torch::Tensor x,
                            const v32_sp::DeepseekV32SPContext& sp_ctx,
-                           const CommFns& comm_fns,
-                           int64_t chunk_size = -1);
+                           const CommFns& comm_fns);
 
  private:
-  torch::Tensor run_routed(torch::Tensor x, int64_t chunk_size);
   std::pair<torch::Tensor, PaddingInfo> shard_attn_out(
       torch::Tensor x,
       const torch::Tensor& residual,

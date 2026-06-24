@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -60,40 +60,42 @@ class FluxPipelineImpl : public FluxPipelineBaseImpl {
   }
 
   DiTForwardOutput forward(const DiTForwardInput& input) {
-    const auto& generation_params = input.generation_params;
-
-    auto seed = generation_params.seed > 0 ? generation_params.seed : 42;
-    auto prompts = std::make_optional(input.prompts);
-    auto prompts_2 = input.prompts_2.empty()
-                         ? std::nullopt
-                         : std::make_optional(input.prompts_2);
-    auto negative_prompts = input.negative_prompts.empty()
-                                ? std::nullopt
-                                : std::make_optional(input.negative_prompts);
-    auto negative_prompts_2 =
+    const DiTGenerationParams& generation_params = input.generation_params;
+    int64_t seed = generation_params.seed > 0 ? generation_params.seed : 42;
+    std::optional<std::vector<std::string>> prompts =
+        std::make_optional(input.prompts);
+    std::optional<std::vector<std::string>> prompts_2 =
+        input.prompts_2.empty() ? std::nullopt
+                                : std::make_optional(input.prompts_2);
+    std::optional<std::vector<std::string>> negative_prompts =
+        input.negative_prompts.empty()
+            ? std::nullopt
+            : std::make_optional(input.negative_prompts);
+    std::optional<std::vector<std::string>> negative_prompts_2 =
         input.negative_prompts_2.empty()
             ? std::nullopt
             : std::make_optional(input.negative_prompts_2);
 
-    auto latents = input.latents.defined() ? std::make_optional(input.latents)
-                                           : std::nullopt;
-    auto prompt_embeds = input.prompt_embeds.defined()
-                             ? std::make_optional(input.prompt_embeds)
-                             : std::nullopt;
-    auto negative_prompt_embeds =
+    std::optional<torch::Tensor> latents =
+        input.latents.defined() ? std::make_optional(input.latents)
+                                : std::nullopt;
+    std::optional<torch::Tensor> prompt_embeds =
+        input.prompt_embeds.defined() ? std::make_optional(input.prompt_embeds)
+                                      : std::nullopt;
+    std::optional<torch::Tensor> negative_prompt_embeds =
         input.negative_prompt_embeds.defined()
             ? std::make_optional(input.negative_prompt_embeds)
             : std::nullopt;
-    auto pooled_prompt_embeds =
+    std::optional<torch::Tensor> pooled_prompt_embeds =
         input.pooled_prompt_embeds.defined()
             ? std::make_optional(input.pooled_prompt_embeds)
             : std::nullopt;
-    auto negative_pooled_prompt_embeds =
+    std::optional<torch::Tensor> negative_pooled_prompt_embeds =
         input.negative_pooled_prompt_embeds.defined()
             ? std::make_optional(input.negative_pooled_prompt_embeds)
             : std::nullopt;
 
-    auto output = forward_impl(
+    torch::Tensor output = forward_impl(
         prompts,                                  // prompt
         prompts_2,                                // prompt_2
         negative_prompts,                         // negative_prompt
@@ -107,8 +109,8 @@ class FluxPipelineImpl : public FluxPipelineBaseImpl {
         seed,                                     // seed
         latents,                                  // latents
         prompt_embeds,                            // prompt_embeds
-        negative_prompt_embeds,                   // negative_prompt_embeds
         pooled_prompt_embeds,                     // pooled_prompt_embeds
+        negative_prompt_embeds,                   // negative_prompt_embeds
         negative_pooled_prompt_embeds,         // negative_pooled_prompt_embeds
         generation_params.max_sequence_length  // max_sequence_length
     );

@@ -432,8 +432,16 @@ void rms_norm(torch::Tensor output,  // [..., hidden_size]
               torch::Tensor weight,  // [hidden_size]
               double eps) {
   CHECK(output.is_contiguous());
-  CHECK(input.stride(-1) == 1);
   CHECK(weight.is_contiguous());
+
+  // The kernel addresses tokens as `blockIdx.x * input_stride + idx`, which
+  // can only represent contiguous inputs or simple 2D strided rows. Flux q/k
+  // tensors reach this path as high-dimensional transposed views, so make that
+  // layout explicit before flattening tokens for the kernel.
+  if (input.dim() > 2 && !input.is_contiguous()) {
+    input = input.contiguous();
+  }
+  CHECK(input.stride(-1) == 1);
 
   int hidden_size = input.size(-1);
   int num_tokens = input.numel() / hidden_size;

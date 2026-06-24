@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -62,6 +62,7 @@ const std::unordered_map<std::string, DetectorFactory> paser_factories = {
     REGISTER_DETECTOR("glm45", "<think>", "</think>"),
     REGISTER_DETECTOR("glm47", "<think>", "</think>"),
     REGISTER_DETECTOR("glm5", "<think>", "</think>"),
+    REGISTER_DETECTOR("deepseek-v4", "<think>", "</think>"),
     REGISTER_DETECTOR_DEFAULT_FORCE("kimi", "◁think▷", "◁/think▷", false),
     REGISTER_DETECTOR("kimi_k25", "<think>", "</think>"),
     REGISTER_DETECTOR("qwen3", "<think>", "</think>"),

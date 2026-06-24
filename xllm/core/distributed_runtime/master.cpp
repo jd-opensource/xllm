@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -236,6 +236,7 @@ Master::Master(const Options& options, EngineType type)
         .max_memory_utilization(options.max_memory_utilization())
         .enable_prefix_cache(options.enable_prefix_cache())
         .max_encoder_cache_size(options.max_encoder_cache_size())
+        .max_linear_state_cache_slots(options.max_linear_state_cache_slots())
         .task_type(options.task_type())
         .enable_mla(options_.enable_mla())
         .enable_prefill_sp(options_.enable_prefill_sp())
@@ -288,6 +289,7 @@ Master::Master(const Options& options, EngineType type)
         .max_cache_size(options_.max_cache_size())
         .max_memory_utilization(options_.max_memory_utilization())
         .enable_prefix_cache(options_.enable_prefix_cache())
+        .max_linear_state_cache_slots(options_.max_linear_state_cache_slots())
         .num_speculative_tokens(options_.num_speculative_tokens())
         .speculative_algorithm(options_.speculative_algorithm())
         .speculative_suffix_cache_max_depth(
@@ -356,6 +358,7 @@ Master::Master(const Options& options, EngineType type)
         .max_cache_size(options_.max_cache_size())
         .max_memory_utilization(options_.max_memory_utilization())
         .enable_prefix_cache(options_.enable_prefix_cache())
+        .max_linear_state_cache_slots(options_.max_linear_state_cache_slots())
         .task_type(options_.task_type())
         .enable_mla(options_.enable_mla())
         .npu_kernel_backend(options_.npu_kernel_backend())
@@ -400,6 +403,7 @@ Master::Master(const Options& options, EngineType type)
             options_.enable_prefill_piecewise_graph())
         .max_tokens_for_graph_mode(options_.max_tokens_for_graph_mode())
         .kv_cache_dtype(options_.kv_cache_dtype())
+        .enable_sleep_mode(options_.enable_sleep_mode())
         .model_id(options_.model_id());
 
     engine_ = std::make_unique<LLMEngine>(eng_options);

@@ -483,7 +483,11 @@ class BuildDistWheel(bdist_wheel):
         BUILD_TEST_FILE = False
 
         self.skip_build = True
-        super().run()
+        InstallWheel._building_wheel = True
+        try:
+            super().run()
+        finally:
+            InstallWheel._building_wheel = False
 
 class InstallWheel(install):
     """`python setup.py install` builds the wheel, then pip-installs it.
@@ -549,6 +553,7 @@ class TestUT(Command):
     # Note: Use test case name patterns (from gtest), not executable names
     SEQUENTIAL_TESTS = [
         'ReduceScatterMultiDeviceTest',
+        'BroadcastMultiDeviceTest',
         'DeepEPMultiDeviceTest',
         'AttentionMultiDeviceTest',
         'FusedMoEAll2AllMultiDeviceTest',

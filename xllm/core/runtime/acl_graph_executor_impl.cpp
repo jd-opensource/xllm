@@ -1,4 +1,4 @@
-﻿/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+﻿/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ limitations under the License.
 #include <c10/core/TensorOptions.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+#include <torch_npu/csrc/core/npu/NPUGuard.h>
 #include <torch_npu/csrc/libs/init_npu.h>
 #include <torch_npu/torch_npu.h>
 
@@ -33,7 +34,9 @@ limitations under the License.
 #include <torch_npu/csrc/framework/utils/OpPreparation.h>
 #endif
 #include "core/common/metrics.h"
+#include "core/kernels/ops_api.h"
 #include "core/platform/device.h"
+#include "core/platform/npu/acl_graph_task_update_context.h"
 #include "core/util/utils.h"
 #include "platform/npu/device_capture_lock.h"
 
@@ -54,11 +57,6 @@ std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
     }
   }
   return {torch::Tensor(), torch::Tensor()};
-}
-
-bool is_qwen3_5_model_type(const std::string& model_type) {
-  return model_type == "qwen3_5" || model_type == "qwen3_5_moe" ||
-         model_type == "qwen3_5_text" || model_type.rfind("qwen3_5_", 0) == 0;
 }
 
 }  // namespace
@@ -111,6 +109,12 @@ bool AclGraph::capture(CausalLM* model,
       persistent_param_.persistent_positions(num_tokens_),
       graph_params.value());
 
+  if (model->is_hybrid_linear_attention()) {
+    graph_task_context_ = std::make_shared<AclGraphTaskUpdateContext>();
+    graph_task_context_->begin_capture();
+    graph_params->graph.acl_graph_task_update_context = graph_task_context_;
+  }
+
   // Synchronize stream to ensure all data is copied to graph persistent buffers
   aclrtSynchronizeStream(stream);
 
@@ -157,6 +161,9 @@ bool AclGraph::capture(CausalLM* model,
       persistent_param_.set_aux_hidden_states(forward_result.aux_hidden_states);
     }
     graph_.capture_end();
+    if (graph_task_context_ != nullptr) {
+      graph_task_context_->end_capture();
+    }
     // Lock is automatically released here when lock goes out of scope
     if (need_restore_stream) {
       c10_npu::setCurrentNPUStream(
@@ -166,11 +173,67 @@ bool AclGraph::capture(CausalLM* model,
   // Synchronize and test replay to verify graph capture
   aclrtSynchronizeStream(graph_stream_);
   aclrtSynchronizeStream(stream);
-
   graph_.replay();
-
+  update_graph_tasks(graph_params.value());
   make_current_stream_wait_for_graph(stream);
   return true;
+}
+
+void AclGraph::update_graph_tasks(const ModelInputParams& params) {
+  if (graph_task_context_ == nullptr ||
+      graph_task_context_->causal_conv1d_tasks.empty()) {
+    return;
+  }
+
+  const std::vector<int64_t> empty_host_args;
+  CHECK(!params.parallel.query_start_loc.empty())
+      << "causal_conv1d graph update requires padded query_start_loc";
+  CHECK(!params.embedding.linear_state_ids.empty())
+      << "causal_conv1d graph update requires padded cache indices";
+
+  std::vector<int64_t> linear_state_indices_host(
+      params.embedding.linear_state_ids.begin(),
+      params.embedding.linear_state_ids.end());
+
+  c10_npu::NPUStream update_stream = update_stream_.value();
+  c10_npu::NPUStreamGuard stream_guard(update_stream);
+
+  for (auto& task : graph_task_context_->causal_conv1d_tasks) {
+    CHECK_EQ(params.parallel.query_start_loc.back(), task.x.size(0))
+        << "causal_conv1d graph update host args must be padded to the "
+           "capture x.shape[0]";
+    CHECK_EQ(linear_state_indices_host.size() + 1,
+             params.parallel.query_start_loc.size())
+        << "cache_indices must be sequence-scoped";
+
+    const std::vector<int64_t>& num_accepted_tokens =
+        task.branch == CausalConv1dGraphBranch::kSpecVerify
+            ? params.num_accepted_tokens_host
+            : empty_host_args;
+    if (task.branch == CausalConv1dGraphBranch::kSpecVerify) {
+      CHECK_EQ(num_accepted_tokens.size(), linear_state_indices_host.size())
+          << "spec causal_conv1d graph update requires accepted-token counts";
+    }
+
+    c10_npu::graph_task_update_begin(update_stream, task.handle);
+    xllm::kernel::causal_conv1d_out(
+        task.output,
+        task.x,
+        task.weight,
+        task.conv_state,
+        task.bias,
+        torch::IntArrayRef(params.parallel.query_start_loc),
+        torch::IntArrayRef(linear_state_indices_host),
+        torch::IntArrayRef(empty_host_args),
+        torch::IntArrayRef(num_accepted_tokens),
+        task.activation_mode,
+        task.pad_slot_id,
+        task.run_mode);
+    c10_npu::graph_task_update_end(update_stream);
+    if (task.event != nullptr) {
+      task.event->record(update_stream);
+    }
+  }
 }
 
 AclGraph::~AclGraph() {
@@ -191,6 +254,7 @@ void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
   // must be performed on a non-default stream (see
   // torch_npu/csrc/core/npu/NPUGraph.cpp:159).
   capture_stream_ = c10_npu::getStreamFromPool(true, device_index);
+  update_stream_ = c10_npu::getStreamFromPool(true, device_index);
   device_index_ = device_index;
   CHECK_EQ(aclrtCreateEventWithFlag(&replay_done_event_, ACL_EVENT_SYNC),
            ACL_SUCCESS)
@@ -247,7 +311,8 @@ ModelOutput AclGraph::replay(CausalLM* model,
   // be updated when Full Attention layers are involved, which is determined
   // by k_cache being valid and non-empty
   auto [k_cache, v_cache] = find_attention_plan_kv_cache(kv_cache);
-  const bool needs_graph_metadata = model->requires_graph_forward_metadata();
+  const bool needs_graph_metadata = model->requires_graph_forward_metadata() ||
+                                    model->is_hybrid_linear_attention();
   std::optional<ModelInputParams> graph_params =
       persistent_param_.update(tokens,
                                k_cache,
@@ -270,7 +335,11 @@ ModelOutput AclGraph::replay(CausalLM* model,
   aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
 
   graph_.replay();
-
+  if (model->is_hybrid_linear_attention()) {
+    CHECK(graph_params.has_value())
+        << "update() should return ModelInputParams for graph task update";
+    update_graph_tasks(graph_params.value());
+  }
   make_current_stream_wait_for_graph(stream);
 
   // Return the actual num_tokens portion of ModelOutput
@@ -284,9 +353,10 @@ AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
                                            const torch::Device& device,
                                            const runtime::Options& options)
     : model_(model), args_(args), device_(device), options_(options) {
-  const bool need_update_attn_mask = is_qwen3_5_model_type(args.model_type());
+  const bool need_update_attn_mask = model->is_hybrid_linear_attention();
+  const bool is_hybrid_linear_attn = model->is_hybrid_linear_attention();
   persistent_param_ = std::make_unique<GraphPersistentParam>(
-      args_, device_, options_, need_update_attn_mask);
+      args_, device_, options_, need_update_attn_mask, is_hybrid_linear_attn);
 }
 
 ForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
@@ -322,11 +392,11 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     COUNTER_INC(num_model_execution_total_eager);
     return model_->forward(tokens, positions, kv_caches, params);
   }
-  if (in_spec_verify_phase && !is_qwen3_5_model_type(args_.model_type())) {
+  if (in_spec_verify_phase && !model_->is_hybrid_linear_attention()) {
     LOG_FIRST_N(WARNING, 1)
         << "Falling back to eager mode for spec verify because the "
            "chunked-prefill validate graph path is currently only adapted for "
-           "Qwen3.5.";
+           "hybrid linear attention models.";
     COUNTER_INC(num_model_execution_total_eager);
     return model_->forward(tokens, positions, kv_caches, params);
   }

@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -84,6 +84,11 @@ class BlockManager {
   virtual size_t num_free_blocks() const = 0;
   virtual size_t num_used_blocks() const = 0;
   virtual double kv_cache_utilization() const = 0;
+
+  // Evict all entries from the prefix cache (returning their blocks to the free
+  // pool). Used by RL sleep/wakeup: after deep sleep the KV physical memory is
+  // discarded, so any cached prefix would point to garbage and must be dropped.
+  virtual void reset_prefix_cache() {}
 
   // get the options for the block manager
   const Options& options() const { return options_; }

@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -55,6 +55,12 @@ class BlockManagerImpl : public BlockManager {
       return prefix_cache_->num_blocks();
     }
     return 0;
+  }
+
+  void reset_prefix_cache() override {
+    if (options_.enable_prefix_cache() && prefix_cache_) {
+      prefix_cache_->evict(prefix_cache_->num_blocks());
+    }
   }
 
   // free blocks num

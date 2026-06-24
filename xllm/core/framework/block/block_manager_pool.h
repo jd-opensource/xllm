@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -89,6 +89,7 @@ class BlockManagerPool : public KVCacheManager {
 
   virtual uint32_t num_blocks() const override;
   virtual int32_t block_size() const override;
+  void reset_prefix_cache() override;
   virtual std::vector<size_t> num_blocks_in_prefix_cache() const override;
   virtual std::vector<size_t> num_free_blocks() const override;
   virtual std::vector<size_t> num_used_blocks() const override;

@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -54,6 +54,10 @@ class Scheduler : public SchedulerBase {
                                    std::vector<int64_t>& tbt) = 0;
 
   virtual const InstanceInfo& get_instance_info() = 0;
+
+  // Drop all prefix-cache entries. Used by RL wake_up: discarded KV after deep
+  // sleep makes cached prefixes point to garbage. Default no-op.
+  virtual void reset_prefix_cache() {}
 };
 
 }  // namespace xllm

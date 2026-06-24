@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,7 +16,9 @@ limitations under the License.
 #pragma once
 
 #include <cstddef>
+#include <map>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "core/common/types.h"
@@ -31,22 +33,37 @@ class KVCacheState {
   size_t kv_cache_tokens_num() const;
   void set_kv_cache_tokens_num(size_t num);
   void incr_kv_cache_tokens_num(size_t num);
-  // get the number of shared blocks.
-  size_t shared_kv_blocks_num() const;
-  size_t shared_kv_tokens_num() const;
 
-  void add_kv_blocks(const std::vector<Block>& new_blocks);
-  void add_shared_kv_blocks(std::vector<Block>&& blocks,
-                            size_t current_total_num_tokens);
-  void incr_shared_kv_blocks_num(size_t num);
+  // Blocks held under `type`; empty slice when the type is absent.
+  Slice<Block> blocks(BlockType type) const;
+  // Mutable block list for `type`, created on demand.
+  std::vector<Block>* mutable_blocks(BlockType type);
+  // Number of blocks held under `type`.
+  size_t num_blocks(BlockType type) const;
+  // token <-> physical slot mapping for `type` (paged attention). CHECKs the
+  // type is present.
+  std::vector<int32_t> cache_slots(BlockType type,
+                                   int32_t pos_start,
+                                   int32_t pos_end);
+
+  void add_blocks(BlockType type, const std::vector<Block>& new_blocks);
+  void add_shared_blocks(BlockType type,
+                         std::vector<Block>&& blocks,
+                         size_t current_total_num_tokens);
+  void incr_shared_blocks_num(BlockType type, size_t num);
+  // Drop all blocks held under `type` (releases their Block refs and removes
+  // the map entry).
+  void erase_blocks(BlockType type);
+  // Number of shared (prefix-cache-hit) blocks held under `type`.
+  size_t shared_blocks_num(BlockType type) const;
+  // Number of shared tokens for this sequence. Sequence-level: the value is the
+  // same across block types, so it takes no BlockType.
+  size_t shared_tokens_num() const;
+
   void set_slice_window_size(uint32_t size);
   void update_slice_window_pos();
 
   size_t current_max_tokens_capacity() const;
-
-  // returns allocated cache blocks
-  Slice<Block> kv_blocks() const;
-  std::vector<Block>* mutable_kv_blocks();
 
   Slice<Block> src_blocks() const { return src_blocks_; };
 
@@ -58,18 +75,20 @@ class KVCacheState {
 
   bool need_swap() const { return need_swap_; }
 
-  // get the number of blocks
-  size_t num_kv_blocks() const;
-  std::vector<int32_t> kv_cache_slots(int32_t pos_start, int32_t pos_end);
+  // Groups exported to the worker's multi_block_tables, in the fixed
+  // kMultiBlockExportOrder. Each pair is (type, &blocks); only types currently
+  // present in the map are returned. Empty for the flat KV path.
+  std::vector<std::pair<BlockType, const std::vector<Block>*>>
+  multi_block_export_view() const;
+  // True when this sequence holds any multi_block_tables-exported group
+  // (SWA / C4 / C128).
+  bool has_multi_block_export() const;
 
-  // composite block managers: blocks per sub-manager index (for
-  // CompositeBlockManager)
-  const std::vector<std::vector<Block>>& composite_blocks() const {
-    return composite_blocks_;
-  }
-  std::vector<std::vector<Block>>* mutable_composite_blocks() {
-    return &composite_blocks_;
-  }
+  // Single per-sequence resource block (BlockType::SINGLE). The only per-type
+  // id convenience accessor: returns the Single block id, or -1 when absent.
+  // Used for linear_state_ids / embedding_ids export and disagg-PD's
+  // linear_state_id. Other block types read via blocks(type).
+  int32_t get_single_block_id() const;
 
   void set_transfer_kv_info(TransferKVInfo&& info);
   std::optional<TransferKVInfo>& transfer_kv_info();
@@ -93,8 +112,12 @@ class KVCacheState {
   // number of tokens in kv cache
   size_t kv_cache_tokens_num_ = 0;
 
-  // kv cache blocks.
-  std::vector<Block> blocks_;
+  // KV cache blocks keyed by cache role. The flat attention KV lives under
+  // BlockType::KV; DSV4 keeps its SWA / C4 / C128 groups here; the per-sequence
+  // linear/embedding resource block lives under BlockType::SINGLE. std::map
+  // keeps deterministic iteration for reset / dealloc / debugging, but worker
+  // export order is governed by kMultiBlockExportOrder, not by map order.
+  std::map<BlockType, std::vector<Block>> composite_blocks_;
 
   // source kv cache blocks for swap
   std::vector<Block> src_blocks_;
@@ -108,13 +131,8 @@ class KVCacheState {
   // next logical prompt block index that needs PD PUSH transfer.
   size_t next_transfer_block_idx_ = 0;
 
-  // shared blocks number of the sequence.
-  uint32_t num_owned_shared_blocks_ = 0;
-
-  // blocks allocated per composite sub-manager index (used when BlockManager is
-  // CompositeBlockManager). DeepSeek V4 leans on this so each per-manager
-  // block table can be assembled independently of the legacy `blocks_` slot.
-  std::vector<std::vector<Block>> composite_blocks_;
+  // shared blocks number per block type.
+  std::map<BlockType, uint32_t> num_owned_shared_blocks_;
 
   // Sliding-window cursor for legacy callers. CompositeBlockManager keeps DSA
   // SWA block vectors in absolute logical block order and leaves expired

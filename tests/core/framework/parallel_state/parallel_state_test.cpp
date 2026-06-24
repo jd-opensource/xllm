@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -517,7 +517,7 @@ class BroadcastMultiDeviceTest : public ::testing::Test {
         params.world_size = world_size_;
         params.port = port_;
         params.host = host_;
-        params.device_index = rank % Device::device_count();
+        params.device_index = rank % Platform::device_count();
         params.numel = numel_;
         params.root_rank = root_rank;
         _exit(run_broadcast_test_child(params));

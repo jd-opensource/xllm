@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -87,6 +87,8 @@ class LLMMaster : public Master {
   bool wakeup() override;
 
   bool wakeup(const WakeupOptions& options) override;
+
+  bool update_weights(const std::string& weights_path) override;
 
   bool link_p2p(const std::vector<std::string>& remote_addrs) override;
 

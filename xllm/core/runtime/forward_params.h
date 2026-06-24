@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -149,7 +149,7 @@ struct ForwardInputBufferPlan {
         continue;
       }
       const void* ptr = base + entry.offset;
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_DCU)
       if (device.type() == torch::kCUDA) {
         *entry.target = get_tensor_from_blob(entry.host_tensor.sizes().vec(),
                                              entry.host_tensor.scalar_type(),

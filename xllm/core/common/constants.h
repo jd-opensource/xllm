@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,5 +29,9 @@ inline constexpr char kContentLength[] = "Content-Length";
 // contract uniform across attention and linear-attention layers; real
 // sequences are handed ids in [1, num_blocks - 1] only.
 inline constexpr int32_t kPaddingLinearStateId = 0;
+
+// The linear-state slot pool reserves the padding row plus one extra guard slot
+// so cache sizing and live-slot accounting keep a non-cacheable baseline.
+inline constexpr int64_t kPaddingLinearStateBlocks = 2;
 
 }  // namespace xllm

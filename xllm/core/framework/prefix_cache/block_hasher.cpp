@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -78,6 +78,39 @@ void mm_xxh3_128bits_hash(const std::vector<const uint8_t*>& mm_hash_values,
                             key_buffer.size(),
                             FLAGS_xxh3_128bits_seed);
   std::memcpy(hash_value, &mm_hash, sizeof(mm_hash));
+}
+
+std::vector<PrefixHash> compute_linear_state_prefix_hashes(
+    const Slice<int32_t>& token_ids,
+    size_t block_size,
+    size_t boundary_tokens) {
+  if (block_size == 0 || boundary_tokens == 0) {
+    return {};
+  }
+  if (boundary_tokens % block_size != 0 || boundary_tokens > token_ids.size()) {
+    return {};
+  }
+
+  const size_t boundary_blocks = boundary_tokens / block_size;
+  std::vector<PrefixHash> hashes;
+  hashes.reserve(boundary_blocks);
+  // Keep the previous block's hash in a stable local rather than a pointer into
+  // `hashes`, so the chaining stays valid regardless of vector reallocation. A
+  // null pointer (not a zero hash) marks the first block, since an all-zero
+  // hash is itself a valid digest.
+  PrefixHash previous_hash{};
+  const uint8_t* previous_hash_ptr = nullptr;
+  for (size_t block_idx = 0; block_idx < boundary_blocks; ++block_idx) {
+    PrefixHash hash{};
+    xxh3_128bits_hash(
+        previous_hash_ptr,
+        token_ids.slice(block_idx * block_size, (block_idx + 1) * block_size),
+        hash.data());
+    hashes.emplace_back(hash);
+    previous_hash = hash;
+    previous_hash_ptr = previous_hash.data();
+  }
+  return hashes;
 }
 
 std::unique_ptr<BlockHasher> BlockHasher::create(BlockHasherType type,

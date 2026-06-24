@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -45,7 +45,9 @@ class KernelConfig final {
          "enable_intralayer_addnorm",
          "enable_fused_mc2",
          "enable_interlayer_addnorm",
-         "enable_split_rmsnorm_rope"}};
+         "enable_split_rmsnorm_rope",
+         "enable_aclnn_matmul",
+         "enable_aclnn_swiglu"}};
     return kOptionCategory;
   }
 
@@ -61,6 +63,10 @@ class KernelConfig final {
   PROPERTY(bool, enable_interlayer_addnorm) = false;
 
   PROPERTY(bool, enable_split_rmsnorm_rope) = false;
+
+  PROPERTY(bool, enable_aclnn_matmul) = false;
+
+  PROPERTY(bool, enable_aclnn_swiglu) = false;
 #endif
 };
 

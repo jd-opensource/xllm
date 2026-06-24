@@ -1,4 +1,4 @@
-/* Copyright 2025-2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025-2026 The xLLM Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,7 +36,11 @@ class TileLangSplitQkvRmsnormMRopeWrapperTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() { torch_npu::init_npu("npu:0"); }
 
-  static void TearDownTestSuite() { torch_npu::finalize_npu(); }
+  static void TearDownTestSuite() {
+    torch_npu::finalize_npu();
+    aclrtResetDevice(0);
+    aclFinalize();
+  }
 };
 
 struct SplitQkvTestCase {
