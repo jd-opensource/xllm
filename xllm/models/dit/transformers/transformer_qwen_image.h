@@ -424,125 +424,95 @@ class AttentionImpl final : public torch::nn::Module {
     out_context_dim =
         out_context_dim.has_value() ? out_context_dim.value() : query_dim;
 
-    xllm::dit::SpOptions q_sp_option;
-    xllm::dit::SpOptions kv_sp_option;
-    xllm::dit::LinearType linear_type = xllm::dit::LinearType::Default;
-    if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
-      q_sp_option = xllm::dit::SpOptions(/*head_num=*/heads,
-                                         /*head_dim=*/dim_head,
-                                         /*hidden_size=*/q_dim,
-                                         /*before_attention=*/true,
-                                         /*process_group=*/sp_group_);
-
-      kv_sp_option = xllm::dit::SpOptions(
-          /*head_num=*/kv_heads.has_value() ? kv_heads.value() : heads,
-          /*head_dim=*/dim_head,
-          /*hidden_size=*/kv_dim,
-          /*before_attention=*/true,
-          /*process_group=*/sp_group_);
-      linear_type = xllm::dit::LinearType::SequenceParallel;
-    }
-
-    auto q_linear =
-        layer::AddMatmulWeightTransposed(query_dim, q_dim, bias, options_);
+    xllm::dit::SpOptions q_sp_option(
+        /*head_num=*/heads,
+        /*head_dim=*/dim_head,
+        /*hidden_size=*/q_dim,
+        /*before_attention=*/true,
+        /*process_group=*/sp_group_);
+    xllm::dit::SpOptions kv_sp_option(
+        /*head_num=*/kv_heads.has_value() ? kv_heads.value() : heads,
+        /*head_dim=*/dim_head,
+        /*hidden_size=*/kv_dim,
+        /*before_attention=*/true,
+        /*process_group=*/sp_group_);
 
     to_q_ = register_module("q_linear",
-                            xllm::dit::DiTParallelLinear(std::move(q_linear),
-                                                         /*module_name=*/"to_q",
-                                                         linear_type,
-                                                         q_sp_option));
+                            xllm::dit::DiTParallelLinear(
+                                query_dim, q_dim, bias, options_, q_sp_option));
 
     // Key-Value projections (if not only cross attention)
     if (!only_cross_attention) {
-      auto k_linear = layer::AddMatmulWeightTransposed(
-          cross_attention_dim.value(), kv_dim, bias, options_);
+      to_k_ = register_module(
+          "k_linear",
+          xllm::dit::DiTParallelLinear(cross_attention_dim.value(),
+                                       kv_dim,
+                                       bias,
+                                       options_,
+                                       kv_sp_option));
 
-      to_k_ =
-          register_module("k_linear",
-                          xllm::dit::DiTParallelLinear(std::move(k_linear),
-                                                       /*module_name=*/"to_k",
-                                                       linear_type,
-                                                       kv_sp_option));
-
-      auto v_linear = layer::AddMatmulWeightTransposed(
-          cross_attention_dim.value(), kv_dim, bias, options_);
-
-      to_v_ =
-          register_module("v_linear",
-                          xllm::dit::DiTParallelLinear(std::move(v_linear),
-                                                       /*module_name=*/"to_v",
-                                                       linear_type,
-                                                       kv_sp_option));
+      to_v_ = register_module(
+          "v_linear",
+          xllm::dit::DiTParallelLinear(cross_attention_dim.value(),
+                                       kv_dim,
+                                       bias,
+                                       options_,
+                                       kv_sp_option));
     }
 
     if (added_kv_proj_dim.has_value()) {
-      auto add_k_linear = layer::AddMatmulWeightTransposed(
-          added_kv_proj_dim.value(), kv_dim, added_proj_bias, options_);
-
       add_k_proj_ = register_module(
           "add_k_linear",
-          xllm::dit::DiTParallelLinear(std::move(add_k_linear),
-                                       /*module_name=*/"add_k_proj",
-                                       linear_type,
+          xllm::dit::DiTParallelLinear(added_kv_proj_dim.value(),
+                                       kv_dim,
+                                       added_proj_bias,
+                                       options_,
                                        kv_sp_option));
-
-      auto add_v_linear = layer::AddMatmulWeightTransposed(
-          added_kv_proj_dim.value(), kv_dim, added_proj_bias, options_);
 
       add_v_proj_ = register_module(
           "add_v_linear",
-          xllm::dit::DiTParallelLinear(std::move(add_v_linear),
-                                       /*module_name=*/"add_v_proj",
-                                       linear_type,
+          xllm::dit::DiTParallelLinear(added_kv_proj_dim.value(),
+                                       kv_dim,
+                                       added_proj_bias,
+                                       options_,
                                        kv_sp_option));
       if (context_pre_only.has_value()) {
-        auto add_q_linear = layer::AddMatmulWeightTransposed(
-            added_kv_proj_dim.value(), q_dim, added_proj_bias, options_);
-
         add_q_proj_ = register_module(
             "add_q_linear",
-            xllm::dit::DiTParallelLinear(std::move(add_q_linear),
-                                         /*module_name=*/"add_q_proj",
-                                         linear_type,
+            xllm::dit::DiTParallelLinear(added_kv_proj_dim.value(),
+                                         q_dim,
+                                         added_proj_bias,
+                                         options_,
                                          q_sp_option));
       }
     }
 
-    xllm::dit::SpOptions out_sp_option;
-    if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
-      out_sp_option = xllm::dit::SpOptions(/*head_num=*/heads,
-                                           /*head_dim=*/dim_head,
-                                           /*hidden_size=*/q_dim,
-                                           /*before_attention=*/false,
-                                           /*process_group=*/sp_group_);
-    }
+    xllm::dit::SpOptions out_sp_option(
+        /*head_num=*/heads,
+        /*head_dim=*/dim_head,
+        /*hidden_size=*/q_dim,
+        /*before_attention=*/false,
+        /*process_group=*/sp_group_);
 
     // Output projections
     if (!pre_only) {
       to_out_ = register_module("to_out", torch::nn::Sequential());
 
-      auto to_out_linear = layer::AddMatmulWeightTransposed(
-          q_dim, out_dim.value(), out_bias, options_);
-
-      to_out_->push_back(xllm::dit::DiTParallelLinear(std::move(to_out_linear),
-                                                      /*module_name=*/"out",
-                                                      linear_type,
-                                                      out_sp_option));
+      to_out_->push_back(xllm::dit::DiTParallelLinear(
+          q_dim, out_dim.value(), out_bias, options_, out_sp_option));
       to_out_->push_back(
           torch::nn::Dropout(torch::nn::DropoutOptions(dropout)));
     }
 
     // Additional output for context
     if (context_pre_only.has_value() && context_pre_only) {
-      auto to_add_out_linear = layer::AddMatmulWeightTransposed(
-          q_dim, out_context_dim.value(), out_bias, options_);
-
-      to_add_out_ = register_module(
-          "to_add_out_linear",
-          xllm::dit::DiTParallelLinear(std::move(to_add_out_linear),
-                                       /*module_name=*/"to_add_out",
-                                       linear_type,
-                                       out_sp_option));
+      to_add_out_ =
+          register_module("to_add_out_linear",
+                          xllm::dit::DiTParallelLinear(q_dim,
+                                                       out_context_dim.value(),
+                                                       out_bias,
+                                                       options_,
+                                                       out_sp_option));
     }
 
     // Added QK normalization for added KV projections
@@ -695,43 +665,6 @@ class FeedForwardImpl final : public torch::nn::Module {
 TORCH_MODULE(FeedForward);
 
 }  // namespace qwenimage
-
-inline torch::Tensor gather_sequence(const torch::Tensor& input_,
-                                     int64_t dim,
-                                     ProcessGroup* pg) {
-  int32_t group_size = pg->world_size();
-  auto input = input_.contiguous();
-  if (group_size == 1) {
-    return input;
-  }
-
-  // all gather
-  auto tensor_list = parallel_state::gather(input, pg, dim);
-
-  // concat
-  auto output = torch::cat(tensor_list, dim);
-
-  return output;
-}
-
-inline torch::Tensor split_sequence(const torch::Tensor& input,
-                                    int64_t dim,
-                                    ProcessGroup* pg) {
-  auto group_size = pg->world_size();
-  auto rank = pg->rank();
-
-  if (group_size == 1) {
-    return input;
-  }
-
-  torch::Tensor input_ = input;
-
-  int64_t dim_size = input_.size(dim);
-
-  auto tensor_list = torch::split(input_, dim_size / group_size, dim);
-  auto output = tensor_list[rank].contiguous();
-  return output;
-}
 
 // TODO: This class should be extracted from dit class and integrated into a
 // common class.
@@ -2018,16 +1951,17 @@ class QwenImageTransformer2DModelImpl : public torch::nn::Module {
     }
 
     if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
-      new_hidden_states = split_sequence(new_hidden_states,
-                                         /*dim=*/1,
-                                         parallel_args_.dit_sp_group_);
-      new_encoder_hidden_states = split_sequence(new_encoder_hidden_states,
+      new_hidden_states = dit::sp_split_sequence(new_hidden_states,
                                                  /*dim=*/1,
                                                  parallel_args_.dit_sp_group_);
+      new_encoder_hidden_states =
+          dit::sp_split_sequence(new_encoder_hidden_states,
+                                 /*dim=*/1,
+                                 parallel_args_.dit_sp_group_);
       if (modulate_index.defined()) {
-        modulate_index = split_sequence(modulate_index,
-                                        /*dim=*/1,
-                                        parallel_args_.dit_sp_group_);
+        modulate_index = dit::sp_split_sequence(modulate_index,
+                                                /*dim=*/1,
+                                                parallel_args_.dit_sp_group_);
       }
     }
 
@@ -2099,7 +2033,7 @@ class QwenImageTransformer2DModelImpl : public torch::nn::Module {
     new_hidden_states = norm_out_->forward(new_hidden_states, temb);
     new_hidden_states = proj_out_->forward(new_hidden_states);
     if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
-      new_hidden_states = gather_sequence(
+      new_hidden_states = dit::sp_gather_sequence(
           new_hidden_states, /*dim=*/1, parallel_args_.dit_sp_group_);
     }
     return new_hidden_states;
