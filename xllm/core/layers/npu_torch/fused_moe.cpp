@@ -1095,8 +1095,8 @@ torch::Tensor FusedMoEImpl::forward_expert(
         final_hidden_states =
             parallel_state::reduce(final_hidden_states, tp_pg_);
       }
-      final_hidden_states = parallel_state::reduce(final_hidden_states,
-                                                   parallel_args_.moe_ep_group_);
+      final_hidden_states = parallel_state::reduce(
+          final_hidden_states, parallel_args_.moe_ep_group_);
 
       auto reduced_shared_output = shared_output.value();
       if (tp_pg_->world_size() > 1) {
@@ -1110,8 +1110,8 @@ torch::Tensor FusedMoEImpl::forward_expert(
       final_hidden_states = parallel_state::reduce(final_hidden_states, tp_pg_);
     }
     if (parallel_args_.ep_size() > 1) {
-      final_hidden_states = parallel_state::reduce(final_hidden_states,
-                                                   parallel_args_.moe_ep_group_);
+      final_hidden_states = parallel_state::reduce(
+          final_hidden_states, parallel_args_.moe_ep_group_);
     }
   }
   return final_hidden_states;
