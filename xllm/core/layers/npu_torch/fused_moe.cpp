@@ -32,7 +32,7 @@ limitations under the License.
 #include <torch_npu/csrc/aten/NPUNativeFunctions.h>
 #endif
 
-#include "common/global_flags.h"
+#include "framework/config/eplb_config.h"
 #include "framework/config/kernel_config.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
@@ -396,7 +396,9 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   num_experts_per_rank_ = num_experts / ep_size;
   start_expert_id_ = ep_rank * num_experts_per_rank_;
   enable_ep2_dispatch_combine_ =
-      is_deepseek_v4_ && FLAGS_expert_parallel_degree == 2 && ep_size > 1;
+      is_deepseek_v4_ &&
+      ::xllm::EPLBConfig::get_instance().expert_parallel_degree() == 2 &&
+      ep_size > 1;
   if (enable_ep2_dispatch_combine_) {
     CHECK(parallel_args_.moe_ep_group_ != nullptr)
         << "DeepSeek-V4 NPU EP2 dispatch/combine requires moe_ep_group.";

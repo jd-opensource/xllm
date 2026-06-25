@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstring>
 #include <memory>
 
+#include "core/framework/config/parallel_config.h"
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model_context.h"
 #include "core/framework/request/dit_request_state.h"
@@ -511,7 +512,7 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
       torch::Tensor noise_pred;
       torch::Tensor noise_uncond;
       if (do_classifier_free_guidance) {
-        if (FLAGS_cfg_size == 2) {
+        if (ParallelConfig::get_instance().cfg_size() == 2) {
           int32_t rank = parallel_args_.dit_cfg_group_->rank();
           if (rank == 0) {
             noise_pred = current_model->forward(latent_model_input,

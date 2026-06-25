@@ -26,6 +26,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "core/framework/config/parallel_config.h"
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
@@ -252,14 +253,15 @@ class WanGELUImpl : public torch::nn::Module {
       : approximate_(approximate),
         options_(context.get_tensor_options()),
         parallel_args_(parallel_args) {
-    LinearType linear_type =
-        FLAGS_tp_size > 1 ? LinearType::TensorParallel : LinearType::Default;
+    LinearType linear_type = ParallelConfig::get_instance().tp_size() > 1
+                                 ? LinearType::TensorParallel
+                                 : LinearType::Default;
     std::optional<TpOptions> tp_options = std::nullopt;
-    if (FLAGS_tp_size > 1) {
+    if (ParallelConfig::get_instance().tp_size() > 1) {
       tp_options = TpOptions(
           /*column_parallel=*/true,
           /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-          /*tp_size=*/FLAGS_tp_size,
+          /*tp_size=*/ParallelConfig::get_instance().tp_size(),
           /*gather_output=*/false,
           /*need_scatter=*/false,
           /*process_group=*/parallel_args_.dit_tp_group_);
@@ -346,14 +348,15 @@ class WanFeedForwardImpl : public torch::nn::Module {
 
     dropout_ = register_module("dropout", torch::nn::Dropout(dropout));
 
-    LinearType linear_out_type =
-        FLAGS_tp_size > 1 ? LinearType::TensorParallel : LinearType::Default;
+    LinearType linear_out_type = ParallelConfig::get_instance().tp_size() > 1
+                                     ? LinearType::TensorParallel
+                                     : LinearType::Default;
     std::optional<TpOptions> tp_out_options = std::nullopt;
-    if (FLAGS_tp_size > 1) {
+    if (ParallelConfig::get_instance().tp_size() > 1) {
       tp_out_options = TpOptions(
           /*column_parallel=*/false,
           /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-          /*tp_size=*/FLAGS_tp_size,
+          /*tp_size=*/ParallelConfig::get_instance().tp_size(),
           /*gather_output=*/true,
           /*need_scatter=*/false,
           /*process_group=*/parallel_args_.dit_tp_group_);
@@ -490,25 +493,26 @@ class WanAttentionImpl : public torch::nn::Module {
     } else {
       kv_inner_dim_ = heads_ * dim_head_;
     }
-    LinearType linear_type =
-        FLAGS_tp_size > 1 ? LinearType::TensorParallel : LinearType::Default;
+    LinearType linear_type = ParallelConfig::get_instance().tp_size() > 1
+                                 ? LinearType::TensorParallel
+                                 : LinearType::Default;
     // ===== TP OPTIONS: to_q/to_k use gather_output=false for TP-RMSNorm =====
     // gather_output=false → Q/K stay sharded, no AllGather
     // tp_rms_norm() handles RMSNorm on sharded tensor with scalar AR (~6KB)
     std::optional<TpOptions> tp_options_qk = std::nullopt;
     std::optional<TpOptions> tp_options_v = std::nullopt;
-    if (FLAGS_tp_size > 1) {
+    if (ParallelConfig::get_instance().tp_size() > 1) {
       tp_options_qk = TpOptions(
           /*column_parallel=*/true,
           /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-          /*tp_size=*/FLAGS_tp_size,
+          /*tp_size=*/ParallelConfig::get_instance().tp_size(),
           /*gather_output=*/false,
           /*need_scatter=*/false,
           /*process_group=*/parallel_args_.dit_tp_group_);
       tp_options_v = TpOptions(
           /*column_parallel=*/true,
           /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-          /*tp_size=*/FLAGS_tp_size,
+          /*tp_size=*/ParallelConfig::get_instance().tp_size(),
           /*gather_output=*/false,
           /*need_scatter=*/false,
           /*process_group=*/parallel_args_.dit_tp_group_);
@@ -537,14 +541,15 @@ class WanAttentionImpl : public torch::nn::Module {
                                   std::nullopt,
                                   tp_options_v);
     to_v_ = register_module("to_v", to_v);
-    LinearType to_out_type =
-        FLAGS_tp_size > 1 ? LinearType::TensorParallel : LinearType::Default;
+    LinearType to_out_type = ParallelConfig::get_instance().tp_size() > 1
+                                 ? LinearType::TensorParallel
+                                 : LinearType::Default;
     std::optional<TpOptions> tp_to_out_options = std::nullopt;
-    if (FLAGS_tp_size > 1) {
+    if (ParallelConfig::get_instance().tp_size() > 1) {
       tp_to_out_options = TpOptions(
           /*column_parallel=*/false,
           /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-          /*tp_size=*/FLAGS_tp_size,
+          /*tp_size=*/ParallelConfig::get_instance().tp_size(),
           /*gather_output=*/true,
           /*need_scatter=*/false,
           /*process_group=*/parallel_args_.dit_tp_group_);
@@ -562,22 +567,23 @@ class WanAttentionImpl : public torch::nn::Module {
     norm_k_ = register_module(
         "norm_k", layer::RMSNorm(dim_head_ * heads_, eps_, options_));
     if (added_kv_proj_dim_ > 0) {
-      LinearType add_kv_type =
-          FLAGS_tp_size > 1 ? LinearType::TensorParallel : LinearType::Default;
+      LinearType add_kv_type = ParallelConfig::get_instance().tp_size() > 1
+                                   ? LinearType::TensorParallel
+                                   : LinearType::Default;
       std::optional<TpOptions> add_k_options = std::nullopt;
       std::optional<TpOptions> add_v_options = std::nullopt;
-      if (FLAGS_tp_size > 1) {
+      if (ParallelConfig::get_instance().tp_size() > 1) {
         add_k_options = TpOptions(
             /*column_parallel=*/true,
             /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-            /*tp_size=*/FLAGS_tp_size,
+            /*tp_size=*/ParallelConfig::get_instance().tp_size(),
             /*gather_output=*/false,
             /*need_scatter=*/false,
             /*process_group=*/parallel_args_.dit_tp_group_);
         add_v_options = TpOptions(
             /*column_parallel=*/true,
             /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-            /*tp_size=*/FLAGS_tp_size,
+            /*tp_size=*/ParallelConfig::get_instance().tp_size(),
             /*gather_output=*/false,
             /*need_scatter=*/false,
             /*process_group=*/parallel_args_.dit_tp_group_);
@@ -664,7 +670,7 @@ class WanAttentionImpl : public torch::nn::Module {
     torch::Tensor key = to_k_->forward(encoder_hidden_states_text);
     torch::Tensor value = to_v_->forward(encoder_hidden_states_text);
 
-    if (FLAGS_tp_size > 1) {
+    if (ParallelConfig::get_instance().tp_size() > 1) {
       query = dit::tp_rms_norm(query, norm_q_, parallel_args_.dit_tp_group_);
       key = dit::tp_rms_norm(key, norm_k_, parallel_args_.dit_tp_group_);
     } else {
@@ -674,8 +680,8 @@ class WanAttentionImpl : public torch::nn::Module {
 
     int64_t batch_size = query.size(0);
     int64_t n_heads = heads_;
-    if (FLAGS_tp_size > 1) {
-      n_heads = heads_ / FLAGS_tp_size;
+    if (ParallelConfig::get_instance().tp_size() > 1) {
+      n_heads = heads_ / ParallelConfig::get_instance().tp_size();
     }
     query = query.view({batch_size, -1, n_heads, dim_head_});
     key = key.view({batch_size, -1, n_heads, dim_head_});
@@ -693,7 +699,7 @@ class WanAttentionImpl : public torch::nn::Module {
       torch::Tensor key_img = add_k_proj_->forward(encoder_hidden_states_img);
       torch::Tensor value_img = add_v_proj_->forward(encoder_hidden_states_img);
 
-      if (FLAGS_tp_size > 1) {
+      if (ParallelConfig::get_instance().tp_size() > 1) {
         key_img = dit::tp_rms_norm(
             key_img, norm_added_k_, parallel_args_.dit_tp_group_);
       } else {

@@ -21,7 +21,6 @@ limitations under the License.
 #include <cctype>
 #include <memory>
 
-#include "common/global_flags.h"
 #include "common/metrics.h"
 #if defined(USE_MLU)
 #include "framework/kv_cache_transfer/mooncake_kv_cache_transfer.h"
@@ -509,7 +508,7 @@ void force_atb_spec_kernel_for_qwen3_5_mtp(
   if (!is_qwen3_5_target_model_type(model_type)) {
     return;
   }
-  FLAGS_enable_atb_spec_kernel = true;
+  SpeculativeConfig::get_instance().enable_atb_spec_kernel(true);
 }
 #endif
 
