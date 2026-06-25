@@ -499,7 +499,8 @@ ForwardInput WorkerImpl::prepare_inputs(Batch& batch) {
 bool WorkerImpl::can_prepare_npu_graph_decode_input(
     const ModelInputParams& input_params) const {
 #if defined(USE_NPU)
-  return FLAGS_enable_graph && enable_schedule_overlap() &&
+  return FLAGS_enable_graph && FLAGS_enable_graph_double_buffer &&
+         enable_schedule_overlap() &&
          options_.backend() == "llm" &&
          input_params.meta.batch_forward_type.has_decode();
 #else
@@ -727,7 +728,10 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
   }
 #endif
   c10::StreamGuard stream_guard = prepare_stream.set_stream_guard();
-  if (enable_schedule_overlap() && compute_stream_) {
+  if (enable_schedule_overlap() && options_.enable_speculative_decode() &&
+      compute_stream_) {
+    // MTP updates reuse shared prepare/compute streams and need this ordering;
+    // ordinary graph-decode overlap must keep prepare independent of compute.
     prepare_stream.wait_stream(*compute_stream_);
   }
   CHECK(prepare_stream.wait_event(input.metadata_ready_event))

@@ -24,6 +24,7 @@ limitations under the License.
 #include <torch_npu/torch_npu.h>
 
 #include <algorithm>
+#include <string_view>
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/execution_config.h"
@@ -45,6 +46,12 @@ namespace xllm::npu {
 namespace {
 constexpr uint64_t kSpecVerifyGraphKeyMask = 1ull << 63;
 constexpr uint64_t kSpecVerifyQMaxSeqLenShift = 32;
+
+bool is_qwen3_5_model_type(std::string_view model_type) {
+  return model_type == "qwen3_5" || model_type == "qwen3_5_moe" ||
+         model_type == "qwen3_5_text" || model_type == "qwen3_5_moe_text" ||
+         model_type.rfind("qwen3_5_", 0) == 0;
+}
 
 std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
     const std::vector<KVCache>& kv_caches) {
@@ -388,9 +395,17 @@ AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
     : model_(model), args_(args), device_(device), options_(options) {
   const bool need_update_attn_mask = model->is_hybrid_linear_attention();
   const bool is_hybrid_linear_attn = model->is_hybrid_linear_attention();
-  for (auto& slot : graph_slots_) {
-    slot.persistent_param = std::make_unique<GraphPersistentParam>(
-        args_, device_, options_, need_update_attn_mask, is_hybrid_linear_attn);
+  graph_slot_count_ = ::xllm::ExecutionConfig::get_instance()
+                          .enable_graph_double_buffer()
+                      ? 2
+                      : 1;
+  for (int32_t slot_idx = 0; slot_idx < graph_slot_count_; ++slot_idx) {
+    graph_slots_[slot_idx].persistent_param =
+        std::make_unique<GraphPersistentParam>(args_,
+                                               device_,
+                                               options_,
+                                               need_update_attn_mask,
+                                               is_hybrid_linear_attn);
   }
 }
 
@@ -531,7 +546,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   {
     std::lock_guard<std::mutex> lock(graph_slots_mutex_);
     slot_idx = next_replay_slot_;
-    next_replay_slot_ = 1 - next_replay_slot_;
+    next_replay_slot_ = (next_replay_slot_ + 1) % graph_slot_count_;
     last_started_replay_slot_ = slot_idx;
     auto& slot = graph_slots_[slot_idx];
     slot.is_prepared = false;
@@ -643,6 +658,9 @@ void AclGraphExecutorImpl::prepare_graph_input(const torch::Tensor& tokens,
   if (params.meta.kv_max_seq_len > args_.max_position_embeddings()) {
     return;
   }
+  if (graph_slot_count_ <= 1) {
+    return;
+  }
 
   uint32_t graph_num_tokens = tokens.size(/*dim=*/0);
   if (params.parallel.dp_global_token_nums.size() > 1) {
@@ -660,7 +678,8 @@ void AclGraphExecutorImpl::prepare_graph_input(const torch::Tensor& tokens,
     if (last_started_replay_slot_ < 0) {
       return;
     }
-    const int32_t prepare_slot = 1 - last_started_replay_slot_;
+    const int32_t prepare_slot =
+        (last_started_replay_slot_ + 1) % graph_slot_count_;
     auto& slot = graph_slots_[prepare_slot];
     if (slot.is_prepared) {
       return;

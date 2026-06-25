@@ -26,6 +26,13 @@ DEFINE_bool(
     "MLU Graph, or DCU Graph) to optimize decode performance by reducing "
     "kernel launch overhead and device idle time.");
 
+constexpr bool kEnableGraphDoubleBufferDefault = true;
+
+DEFINE_bool(enable_graph_double_buffer,
+            kEnableGraphDoubleBufferDefault,
+            "Whether to enable double-buffered ACL graph persistent params "
+            "and graph instances for NPU schedule-overlap decode.");
+
 DEFINE_bool(enable_graph_mode_decode_no_padding,
             false,
             "Whether to enable graph execution for decode phase without "
@@ -80,6 +87,7 @@ namespace xllm {
 
 void ExecutionConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_graph);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_graph_double_buffer);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_graph_mode_decode_no_padding);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_prefill_piecewise_graph);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_graph_vmm_pool);
@@ -94,6 +102,7 @@ void ExecutionConfig::from_flags() {
 
 void ExecutionConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_graph);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_graph_double_buffer);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_graph_mode_decode_no_padding);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_prefill_piecewise_graph);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_graph_vmm_pool);
@@ -111,6 +120,8 @@ void ExecutionConfig::append_config_json(
   const ExecutionConfig default_config;
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_graph);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_graph_double_buffer);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_graph_mode_decode_no_padding);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

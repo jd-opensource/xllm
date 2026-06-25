@@ -146,6 +146,10 @@ class AclGraphExecutorImpl : public ExecutorImpl {
                            std::vector<KVCache>& kv_caches,
                            const ModelInputParams& params) override;
 
+  [[nodiscard]] int32_t graph_slot_count_for_test() const {
+    return graph_slot_count_;
+  }
+
  private:
   // not own
   CausalLM* model_;
@@ -161,6 +165,7 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   };
   std::array<GraphSlot, 2> graph_slots_;
   std::mutex graph_slots_mutex_;
+  int32_t graph_slot_count_ = 2;
   int32_t next_replay_slot_ = 0;
   int32_t last_started_replay_slot_ = -1;
 

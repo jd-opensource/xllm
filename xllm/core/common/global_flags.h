@@ -137,6 +137,8 @@ constexpr int32_t kGraphExecutorLogVerboseLevel = 50;
 
 DECLARE_bool(enable_graph);
 
+DECLARE_bool(enable_graph_double_buffer);
+
 DECLARE_bool(enable_graph_mode_decode_no_padding);
 
 DECLARE_bool(enable_prefill_piecewise_graph);
