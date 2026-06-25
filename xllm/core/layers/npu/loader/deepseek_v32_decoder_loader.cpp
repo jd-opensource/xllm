@@ -1043,10 +1043,10 @@ void DeekseekV32DecoderLoader::preprocess_linear_for_rope() {
 
   std::vector<std::string> indexer_linear_for_rope;
   indexer_linear_for_rope.reserve(5);
-  int32_t processed_indexer_rope_tensors = 0;
   indexer_linear_for_rope.emplace_back("self_attn.indexer.wq_b.weight");
   if (is_attn_dynamic_desc(kIndexerWqBLinearIndex)) {
-    indexer_linear_for_rope.emplace_back("self_attn.indexer.wq_b.weight_offset");
+    indexer_linear_for_rope.emplace_back(
+        "self_attn.indexer.wq_b.weight_offset");
     indexer_linear_for_rope.emplace_back("self_attn.indexer.wq_b.weight_scale");
   } else {
     indexer_linear_for_rope.emplace_back("self_attn.indexer.wq_b.quant_bias");
@@ -1067,7 +1067,6 @@ void DeekseekV32DecoderLoader::preprocess_linear_for_rope() {
     if (t[index].sizes() == std::vector<int64_t>({1})) {
       continue;
     }
-    ++processed_indexer_rope_tensors;
     t[index] = view_indexer_tensor(t[index], name, true);
     t[index] = trans_front_rope_weight(t[index]);
     t[index] = view_indexer_tensor(t[index], name, false);
@@ -1149,10 +1148,8 @@ torch::Tensor DeekseekV32DecoderLoader::trans_front_rope_weight(
     torch::Tensor weight) {
   int64_t rope_dim = prefill_qkRopeHeadDim_;
   torch::Tensor output = load_to_host() ? weight.clone() : weight;
-  torch::Tensor weight_1 =
-      weight.slice(-2, 0, rope_dim, 2).contiguous();
-  torch::Tensor weight_2 =
-      weight.slice(-2, 1, rope_dim, 2).contiguous();
+  torch::Tensor weight_1 = weight.slice(-2, 0, rope_dim, 2).contiguous();
+  torch::Tensor weight_2 = weight.slice(-2, 1, rope_dim, 2).contiguous();
   torch::Tensor combined = torch::cat({weight_1, weight_2}, -2);
   output.slice(-2, 0, rope_dim).copy_(combined);
   return output.contiguous();
