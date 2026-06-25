@@ -31,8 +31,8 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "core/common/global_flags.h"
 #include "core/framework/config/execution_config.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/state_dict/utils.h"
 #include "core/layers/common/attention_metadata.h"
@@ -605,7 +605,8 @@ class DeepseekV4ModelImpl final
 
   void build_dsa_cache_info(const ModelArgs& model_args) {
     const std::vector<int32_t>& compress_ratios = model_args.compress_ratios();
-    const int32_t base_block_size = FLAGS_block_size;
+    const int32_t base_block_size =
+        ::xllm::KVCacheConfig::get_instance().block_size();
     CHECK_GT(base_block_size, 0) << "DeepSeek V4 block_size must be positive.";
 
     std::unordered_map<DSAGroupKey, int32_t, DSAGroupKeyHash> group_key_map;

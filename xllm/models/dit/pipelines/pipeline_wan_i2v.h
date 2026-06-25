@@ -540,7 +540,7 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
       };
 
       if (do_classifier_free_guidance) {
-        if (FLAGS_cfg_size == 2) {
+        if (ParallelConfig::get_instance().cfg_size() == 2) {
           int32_t rank = parallel_args_.dit_cfg_group_->rank();
           noise_pred =
               use_rolling_load_
