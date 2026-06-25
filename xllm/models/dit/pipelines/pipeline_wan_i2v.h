@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstring>
 #include <memory>
 
+#include "core/framework/config/dit_config.h"
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model_context.h"
 #include "core/framework/request/dit_request_state.h"
@@ -465,6 +466,24 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
     float boundary_timestep =
         boundary_ratio_ > 0.0f ? boundary_ratio_ * num_train_timesteps_ : -1.0f;
 
+    auto& dit_config = DiTConfig::get_instance();
+    xllm::dit::RainFusionState rf_state;
+    if (dit_config.rainfusion_enabled()) {
+      xllm::dit::RainFusionConfig rf_config;
+      rf_config.enabled = true;
+      rf_config.sparsity = static_cast<float>(dit_config.rainfusion_sparsity());
+      rf_config.pool_size = dit_config.rainfusion_pool_size();
+      rf_config.mask_refresh_interval =
+          dit_config.rainfusion_mask_refresh_interval();
+      rf_config.sparse_start_step = dit_config.rainfusion_sparse_start_step();
+      rf_config.inner_precise = dit_config.rainfusion_inner_precise();
+
+      transformer_->set_rainfusion_config(rf_config);
+      transformer_2_->set_rainfusion_config(rf_config);
+    }
+    xllm::dit::RainFusionState* rf_state_ptr =
+        dit_config.rainfusion_enabled() ? &rf_state : nullptr;
+
     for (int64_t i = 0; i < timesteps.numel(); ++i) {
       torch::Tensor t = timesteps[i];
       int64_t total_steps = timesteps.numel();
@@ -483,6 +502,8 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
         current_model = transformer_2_;
         current_guidance = guidance_scale_2;
       }
+
+      rf_state.current_step = i;
 
       torch::Tensor latent_model_input;
       torch::Tensor timestep_input;
@@ -517,12 +538,14 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
             noise_pred = current_model->forward(latent_model_input,
                                                 timestep_input,
                                                 encoded_prompt_embeds,
-                                                torch::Tensor());
+                                                torch::Tensor(),
+                                                rf_state_ptr);
           } else {
             noise_pred = current_model->forward(latent_model_input,
                                                 timestep_input,
                                                 encoded_negative_embeds,
-                                                torch::Tensor());
+                                                torch::Tensor(),
+                                                rf_state_ptr);
           }
           auto gathered = xllm::parallel_state::gather(
               noise_pred, parallel_args_.dit_cfg_group_, /*dim=*/0);
@@ -533,12 +556,14 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
           noise_pred = current_model->forward(latent_model_input,
                                               timestep_input,
                                               encoded_prompt_embeds,
-                                              torch::Tensor());
+                                              torch::Tensor(),
+                                              rf_state_ptr);
 
           noise_uncond = current_model->forward(latent_model_input,
                                                 timestep_input,
                                                 encoded_negative_embeds,
-                                                torch::Tensor());
+                                                torch::Tensor(),
+                                                rf_state_ptr);
         }
 
         noise_pred = noise_uncond.to(torch::kFloat32) +

@@ -356,6 +356,13 @@ DECLARE_int64(dit_vae_image_size);
 
 DECLARE_bool(dit_debug_print);
 
+DECLARE_bool(rainfusion_enabled);
+DECLARE_double(rainfusion_sparsity);
+DECLARE_int64(rainfusion_mask_refresh_interval);
+DECLARE_int64(rainfusion_pool_size);
+DECLARE_int64(rainfusion_sparse_start_step);
+DECLARE_int64(rainfusion_inner_precise);
+
 DECLARE_bool(use_audio_in_video);
 
 // --- kernel config ---
