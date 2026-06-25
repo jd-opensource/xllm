@@ -1085,7 +1085,7 @@ torch::Tensor FusedMoEImpl::forward_expert(
     if (parallel_args_.ep_size() == 1) {
       // reduce(a) + reduce(b) == reduce(a + b). Combining the routed and shared
       // partial outputs avoids one small TP allreduce in each MoE decode layer.
-      final_hidden_states = final_hidden_states + shared_output.value();
+      final_hidden_states.add_(shared_output.value());
       if (tp_pg_->world_size() > 1) {
         final_hidden_states =
             parallel_state::reduce(final_hidden_states, tp_pg_);
