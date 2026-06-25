@@ -19,13 +19,15 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cmath>
-#include <iostream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
@@ -37,8 +39,13 @@ limitations under the License.
 using xllm::dit::DiTParallelLinear;
 using xllm::dit::LinearType;
 using xllm::dit::TpOptions;
+#include "core/layers/npu/loader/rolling_load_manager.h"
+#include "core/layers/npu/loader/rolling_weight_buffer.h"
 #include "framework/model_context.h"
 #include "models/dit/transformers/transformer_flux.h"
+#if defined(USE_NPU)
+#include "models/dit/utils/dit_block_weight_manager.h"
+#endif
 #include "models/model_registry.h"
 #if defined(USE_NPU)
 #include "torch_npu/csrc/aten/CustomFunctions.h"
@@ -1202,6 +1209,17 @@ class WanTransformerBlockImpl : public torch::nn::Module {
                                      << prefix + "scale_shift_table";
   }
 
+#if defined(USE_NPU)
+  void build_weight_loader() { weight_loader_.build_from_module(*this); }
+
+  dit::BlockWeightLoader& weight_loader() { return weight_loader_; }
+
+  void set_rolling_buffer(std::shared_ptr<layer::RollingWeightBuffer> buf,
+                          int32_t slot_index) {
+    weight_loader_.set_rolling_buffer(std::move(buf), slot_index);
+  }
+#endif
+
  private:
   int64_t dim_;
   int64_t ffn_dim_;
@@ -1223,6 +1241,9 @@ class WanTransformerBlockImpl : public torch::nn::Module {
 
   torch::TensorOptions options_;
   ParallelArgs parallel_args_;
+#if defined(USE_NPU)
+  dit::BlockWeightLoader weight_loader_;
+#endif
 };
 TORCH_MODULE(WanTransformerBlock);
 
@@ -1287,13 +1308,21 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
         register_parameter("scale_shift_table",
                            torch::randn({1, 2, inner_dim_}, options_) /
                                std::sqrt(static_cast<float>(inner_dim_)));
+
+    if (LoadConfig::get_instance().enable_rolling_load() &&
+        ParallelConfig::get_instance().tp_size() == 1) {
+      // Free NPU memory early — weights will be streamed via rolling buffer.
+      this->to(torch::kCPU);
+    }
   }
 
   torch::Tensor forward(
       const torch::Tensor& hidden_states_in,
       const torch::Tensor& timestep,
       const torch::Tensor& encoder_hidden_states,
-      const torch::Tensor& encoder_hidden_states_image = torch::Tensor()) {
+      const torch::Tensor& encoder_hidden_states_image = torch::Tensor(),
+      std::function<void(int32_t)> before_layer_cb = nullptr,
+      std::function<void(int32_t)> after_layer_cb = nullptr) {
     int64_t batch_size = hidden_states_in.size(0);
     int64_t num_frames = hidden_states_in.size(2);
     int64_t height = hidden_states_in.size(3);
@@ -1348,11 +1377,17 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
     }
 
     for (int64_t i = 0; i < transformer_layers_.size(); ++i) {
+      if (before_layer_cb) {
+        before_layer_cb(static_cast<int32_t>(i));
+      }
       hidden_states =
           transformer_layers_[i]->forward(hidden_states,
                                           encoder_hidden_states_embedded,
                                           timestep_proj,
                                           rotary_emb);
+      if (after_layer_cb) {
+        after_layer_cb(static_cast<int32_t>(i));
+      }
     }
 
     torch::Tensor shift, scale;
@@ -1436,7 +1471,8 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
   const std::vector<int64_t>& patch_size() const { return patch_size_; }
   bool guidance_embeds() const { return false; }
 
-  void load_model(std::unique_ptr<DiTFolderLoader> loader) {
+  void load_model(std::unique_ptr<DiTFolderLoader> loader,
+                  bool rolling = false) {
     for (const auto& state_dict : loader->get_state_dicts()) {
       load_state_dict(*state_dict);
     }
@@ -1445,10 +1481,42 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
     auto freqs_cos_fp32 = rope_->get_freqs_cos().clone();
     auto freqs_sin_fp32 = rope_->get_freqs_sin().clone();
 
-    this->to(torch::kBFloat16);
+    this->to(rolling ? torch::kCPU : options_.device(), torch::kBFloat16);
     rope_->set_freqs_cos(freqs_cos_fp32);
     rope_->set_freqs_sin(freqs_sin_fp32);
+
+#if defined(USE_NPU)
+    if (rolling) {
+      for (auto& block : transformer_layers_) {
+        block->build_weight_loader();
+      }
+
+      auto device = options_.device();
+      patch_embedding_->to(device);
+      rope_->to(device);
+      rope_->set_freqs_cos(freqs_cos_fp32.to(device));
+      rope_->set_freqs_sin(freqs_sin_fp32.to(device));
+      condition_embedder_->to(device);
+      norm_out_->to(device);
+      proj_out_->to(device);
+      scale_shift_table_.set_data(scale_shift_table_.to(device));
+
+      LOG(INFO) << "WanTransformer3DModel ready for rolling load, "
+                << transformer_layers_.size() << " blocks prepared";
+    }
+#endif
   }
+
+#if defined(USE_NPU)
+  std::vector<dit::BlockWeightLoader*> get_block_weight_loaders() {
+    std::vector<dit::BlockWeightLoader*> loaders;
+    loaders.reserve(transformer_layers_.size());
+    for (auto& block : transformer_layers_) {
+      loaders.push_back(&block->weight_loader());
+    }
+    return loaders;
+  }
+#endif
 
  private:
   std::vector<int64_t> patch_size_;
