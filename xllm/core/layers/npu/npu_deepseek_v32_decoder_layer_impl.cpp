@@ -1345,44 +1345,40 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
         atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
   }
 
-  if (skip_topk || output_topk) {
-    // TODO: support DSA top-k sharing for CP prefill.
-    CHECK(!(cp_size_ > 1 && is_prefill))
-        << "DSA top-k sharing does not support CP prefill yet.";
-    if (skip_topk) {
-      CHECK(shared_topk_indices.defined())
-          << "DSA top-k sharing requires previous top-k indices.";
-      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 32) =
-          atb_speed::Utils::AtTensor2Tensor(shared_topk_indices);
-    }
+  int32_t cp_input_index = WEIGHT_COUNT_PER_LAYER + 32;
+  if (skip_topk) {
+    CHECK(shared_topk_indices.defined())
+        << "DSA top-k sharing requires previous top-k indices.";
+    node.variantPack.inTensors.at(cp_input_index++) =
+        atb_speed::Utils::AtTensor2Tensor(shared_topk_indices);
   }
 
   if (cp_size_ > 1 && is_prefill) {
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 32) =
+    node.variantPack.inTensors.at(cp_input_index++) =
         atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_o_recover_idx);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 33) =
+    node.variantPack.inTensors.at(cp_input_index++) =
         atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_kv_recover_idx);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 34) =
+    node.variantPack.inTensors.at(cp_input_index++) =
         atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_load_balance_idx);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 35) =
+    node.variantPack.inTensors.at(cp_input_index++) =
         atb_speed::Utils::AtTensor2Tensor(cp_inputs.k_gather_index_prev);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 36) =
+    node.variantPack.inTensors.at(cp_input_index++) =
         atb_speed::Utils::AtTensor2Tensor(cp_inputs.k_gather_index_next);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 37) =
+    node.variantPack.inTensors.at(cp_input_index++) =
         atb_speed::Utils::AtTensor2Tensor(
             cp_inputs.actual_seq_lengths_query_prev);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 38) =
+    node.variantPack.inTensors.at(cp_input_index++) =
         atb_speed::Utils::AtTensor2Tensor(
             cp_inputs.actual_seq_lengths_query_next);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 39) =
+    node.variantPack.inTensors.at(cp_input_index++) =
         atb_speed::Utils::AtTensor2Tensor(
             cp_inputs.actual_seq_lengths_key_prev);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 40) =
+    node.variantPack.inTensors.at(cp_input_index++) =
         atb_speed::Utils::AtTensor2Tensor(
             cp_inputs.actual_seq_lengths_key_next);
     if (::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
         ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 41) =
+      node.variantPack.inTensors.at(cp_input_index++) =
           atb_speed::Utils::AtTensor2Tensor(
               input_params.attention.device.in_prefix_slots);
     }
