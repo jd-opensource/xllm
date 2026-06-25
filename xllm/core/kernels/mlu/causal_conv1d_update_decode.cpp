@@ -30,9 +30,9 @@ namespace kernel {
 namespace mlu {
 
 torch::Tensor causal_conv1d_update_decode(
-    torch::Tensor& x,
+    const torch::Tensor& x,
     torch::Tensor& conv_state,
-    torch::Tensor& weight,
+    const torch::Tensor& weight,
     const std::optional<torch::Tensor>& bias_opt,
     const torch::Tensor& conv_state_indices,
     int32_t pad_slot_id,
@@ -42,24 +42,25 @@ torch::Tensor causal_conv1d_update_decode(
     const std::optional<torch::Tensor>& block_idx_last_scheduled_token_opt,
     const std::optional<torch::Tensor>& initial_state_idx_opt) {
   bool unsqueeze = (x.dim() == 2);
+  torch::Tensor x_input = x;
   if (unsqueeze) {
-    x = x.unsqueeze(-1);
+    x_input = x.unsqueeze(-1);
   }
 
   int32_t batch = static_cast<int32_t>(conv_state_indices.size(0));
-  int32_t dim = static_cast<int32_t>(x.size(1));
-  int32_t seqlen = static_cast<int32_t>(x.size(2));
+  int32_t dim = static_cast<int32_t>(x_input.size(1));
+  int32_t seqlen = static_cast<int32_t>(x_input.size(2));
   int32_t width = static_cast<int32_t>(weight.size(1));
   int32_t state_len = width - 1;
   int32_t num_cache_lines = static_cast<int32_t>(conv_state.size(0));
 
   // Create output tensor with same shape and dtype as x
-  torch::Tensor out = torch::empty_like(x);
+  torch::Tensor out = torch::empty_like(x_input);
 
   // Strides for x (batch, dim, seqlen)
-  int32_t stride_x_seq = static_cast<int32_t>(x.stride(0));
-  int32_t stride_x_dim = static_cast<int32_t>(x.stride(1));
-  int32_t stride_x_token = static_cast<int32_t>(x.stride(2));
+  int32_t stride_x_seq = static_cast<int32_t>(x_input.stride(0));
+  int32_t stride_x_dim = static_cast<int32_t>(x_input.stride(1));
+  int32_t stride_x_token = static_cast<int32_t>(x_input.stride(2));
   // Strides for weight (dim, width)
   int32_t stride_w_dim = static_cast<int32_t>(weight.stride(0));
   int32_t stride_w_width = static_cast<int32_t>(weight.stride(1));
@@ -76,7 +77,7 @@ torch::Tensor causal_conv1d_update_decode(
   int32_t stride_o_token = static_cast<int32_t>(out.stride(2));
 
   // Data pointers
-  void* x_ptr = x.data_ptr();
+  void* x_ptr = x_input.data_ptr();
   void* weight_ptr = weight.data_ptr();
   void* bias_ptr = bias_opt.has_value() ? bias_opt->data_ptr() : nullptr;
   void* conv_state_ptr = conv_state.data_ptr();
@@ -98,8 +99,8 @@ torch::Tensor causal_conv1d_update_decode(
 
   bool has_bias = bias_opt.has_value();
 
-  int32_t BD = 8;
-  int32_t num_feature_blocks = (dim + BD - 1) / BD;
+  constexpr int32_t kBd = 8;
+  int32_t num_feature_blocks = (dim + kBd - 1) / kBd;
   cnrtDim3_t dim_block = {static_cast<uint32_t>(num_feature_blocks),
                           static_cast<uint32_t>(batch),
                           1};
@@ -107,7 +108,7 @@ torch::Tensor causal_conv1d_update_decode(
   auto queue = torch_mlu::getCurMLUStream();
 
   // algo_id: select pre-compiled kernel variant based on dim value
-  static const std::unordered_map<int32_t, int32_t> dim_to_algo_id = {
+  static const std::unordered_map<int32_t, int32_t> kDimToAlgoId = {
       {384, 0},
       {512, 1},
       {640, 2},
@@ -125,7 +126,7 @@ torch::Tensor causal_conv1d_update_decode(
       {10240, 14},
       {12288, 15},
   };
-  int32_t algo_id = lookup_algo_id(dim_to_algo_id, dim, /*dim_name=*/"dim");
+  int32_t algo_id = lookup_algo_id(kDimToAlgoId, dim, /*dim_name=*/"dim");
 
   tmo_causal_conv1d_update_decode_kernel(queue,
                                          &dim_block,

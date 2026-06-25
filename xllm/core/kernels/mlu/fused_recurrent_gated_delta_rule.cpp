@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <glog/logging.h>
 
 #include <cmath>
 
@@ -27,10 +28,10 @@ namespace kernel {
 namespace mlu {
 
 std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
-    torch::Tensor& q,
-    torch::Tensor& k,
-    torch::Tensor& v,
-    torch::Tensor& g,
+    const torch::Tensor& q,
+    const torch::Tensor& k,
+    const torch::Tensor& v,
+    const torch::Tensor& g,
     const std::optional<torch::Tensor>& beta_opt,
     const std::optional<torch::Tensor>& initial_state_opt,
     bool inplace_final_state,
@@ -47,31 +48,27 @@ std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
   torch::Tensor num_accepted_tokens =
       num_accepted_tokens_opt.value_or(torch::Tensor());
 
-  q = q.contiguous();
-  k = k.contiguous();
-  v = v.contiguous();
-  g = g.contiguous().to(torch::kFloat32);
+  torch::Tensor q_contig = q.contiguous();
+  torch::Tensor k_contig = k.contiguous();
+  torch::Tensor v_contig = v.contiguous();
+  torch::Tensor g_contig = g.contiguous().to(torch::kFloat32);
   beta = beta.contiguous();
 
   // Set dimensions from input tensors
-  int64_t B = k.size(0);
-  int64_t T = k.size(1);
-  int64_t H = k.size(2);
-  int64_t K = k.size(3);
-  int64_t HV = v.size(2);
-  int64_t V = v.size(3);
+  int64_t B = k_contig.size(0);
+  int64_t T = k_contig.size(1);
+  int64_t H = k_contig.size(2);
+  int64_t K = k_contig.size(3);
+  int64_t HV = v_contig.size(2);
+  int64_t V = v_contig.size(3);
   int64_t N = cu_seqlens.numel() > 0 ? cu_seqlens.size(0) - 1 : B;
 
   // Calculate block sizes
-  int64_t BK = 1;
-  while (BK < K) {
-    BK <<= 1;
+  int64_t bv = 1;
+  while (bv < V) {
+    bv <<= 1;
   }
-  int64_t BV = 1;
-  while (BV < V) {
-    BV <<= 1;
-  }
-  BV = std::min(BV, static_cast<int64_t>(8));
+  bv = std::min(bv, static_cast<int64_t>(8));
 
   // Set strides for indices
   int64_t stride_indices_seq = 1;
@@ -91,33 +88,37 @@ std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
   bool is_beta_headwise = (beta.ndimension() == v.ndimension());
 
   // Create output tensor
-  torch::Tensor o = torch::empty_like(v);
+  torch::Tensor o = torch::empty_like(v_contig);
 
   // Set final state
   torch::Tensor ht;
   torch::Tensor h0;
   if (inplace_final_state && initial_state.numel() > 0) {
+    CHECK(initial_state.scalar_type() == torch::kFloat32)
+        << "In-place update requires initial_state to be float32.";
     ht = initial_state;
     h0 = initial_state;
   } else {
-    auto dtype = initial_state.numel() > 0 ? initial_state.dtype() : v.dtype();
-    ht = torch::empty({T, HV, V, K},
-                      torch::TensorOptions().dtype(dtype).device(v.device()));
+    auto dtype =
+        initial_state.numel() > 0 ? initial_state.dtype() : v_contig.dtype();
+    ht = torch::empty(
+        {T, HV, V, K},
+        torch::TensorOptions().dtype(dtype).device(v_contig.device()));
     if (initial_state.numel() > 0) {
       h0 = initial_state;
     }
+    ht = ht.to(torch::kFloat32);
   }
-  ht = ht.to(torch::kFloat32);
   h0 = h0.to(torch::kFloat32);
 
   // Set strides
   int64_t stride_init_state_token = h0.numel() > 0 ? h0.stride(0) : 0;
   int64_t stride_final_state_token = ht.stride(0);
-  float scale = 1.0f / std::sqrt(static_cast<float>(k.size(-1)));
+  float scale = 1.0f / std::sqrt(static_cast<float>(k_contig.size(-1)));
   auto queue = torch_mlu::getCurMLUStream();
 
   // Grid calculation: (NV, N * HV)
-  int64_t NV = (V + BV - 1) / BV;
+  int64_t NV = (V + bv - 1) / bv;
   int32_t num_programs_x = static_cast<int32_t>(NV);
   int32_t num_programs_y = static_cast<int32_t>(N * HV);
   cnrtDim3_t dim_block = {static_cast<uint32_t>(num_programs_x),
@@ -135,14 +136,14 @@ std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
           ? num_accepted_tokens_opt.value().data_ptr()
           : nullptr;
 
-  constexpr int32_t algo_id = 0;
+  constexpr int32_t kAlgoId = 0;
   tmo_fused_recurrent_gated_delta_rule_fwd_kernel(
       queue,
       &dim_block,
-      q.data_ptr(),
-      k.data_ptr(),
-      v.data_ptr(),
-      g.data_ptr(),
+      q_contig.data_ptr(),
+      k_contig.data_ptr(),
+      v_contig.data_ptr(),
+      g_contig.data_ptr(),
       beta_ptr,
       o.data_ptr(),
       h0.data_ptr(),
@@ -162,7 +163,7 @@ std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
       static_cast<int32_t>(stride_final_state_token),
       static_cast<int32_t>(stride_indices_seq),
       static_cast<int32_t>(stride_indices_tok),
-      algo_id);
+      kAlgoId);
 
   return std::make_pair(o, ht);
 }

@@ -22,6 +22,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Tuple
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
+from scripts.logger import logger
+
 # Import kernel definitions from separate file
 from kernel_config import (
     KernelConfig,
@@ -49,24 +52,32 @@ def _compile_single_signature(
     header_path = include_dir / f"{output_name}.h"
 
     cmd = [
-        sys.executable, "-m", "triton.tools.mlu_compile",
-        "--kernel-name", config.full_kernel_name,
-        "--device-kernel-name", device_kernel_name,
-        "--signature", sig.params,
-        "--archs", *archs,
-        "--type", "obj",
-        "--out-name", output_name,
+        sys.executable,
+        "-m",
+        "triton.tools.mlu_compile",
+        "--kernel-name",
+        config.full_kernel_name,
+        "--device-kernel-name",
+        device_kernel_name,
+        "--signature",
+        sig.params,
+        "--archs",
+        *archs,
+        "--type",
+        "obj",
+        "--out-name",
+        output_name,
         str(kernel_file),
     ]
 
     if verbose:
-        print(f"  Compiling variant {idx} ({sig.name}): {' '.join(cmd)}")
+        logger.info(f"Compiling variant {idx} ({sig.name}): {' '.join(cmd)}")
 
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(lib_dir))
     if result.returncode != 0:
-        print(f"Error compiling {kernel_key} variant {idx} ({sig.name}):")
-        print(f"  stdout: {result.stdout}")
-        print(f"  stderr: {result.stderr}")
+        logger.error(f"Error compiling {kernel_key} variant {idx} ({sig.name})")
+        logger.error(f"stdout: {result.stdout}")
+        logger.error(f"stderr: {result.stderr}")
         raise RuntimeError(f"Failed to compile {kernel_key} variant {idx}")
 
     generated_o = lib_dir / f"{output_name}.o"
@@ -76,7 +87,7 @@ def _compile_single_signature(
         generated_h.rename(header_path)
 
     if verbose:
-        print(f"    Generated: {generated_o}")
+        logger.info(f"Generated: {generated_o}")
 
     return generated_o, header_path
 
@@ -106,8 +117,15 @@ def compile_kernel(
         futures = {
             executor.submit(
                 _compile_single_signature,
-                idx, sig, kernel_key, config, kernel_file,
-                lib_dir, include_dir, archs, verbose
+                idx,
+                sig,
+                kernel_key,
+                config,
+                kernel_file,
+                lib_dir,
+                include_dir,
+                archs,
+                verbose,
             ): idx
             for idx, sig in enumerate(config.signatures)
         }
@@ -121,7 +139,9 @@ def compile_kernel(
             except Exception as e:
                 idx = futures[future]
                 sig = config.signatures[idx]
-                print(f"Error compiling {kernel_key} variant {idx} ({sig.name}): {e}")
+                logger.error(
+                    f"Error compiling {kernel_key} variant {idx} ({sig.name}): {e}"
+                )
                 raise
 
     for idx in sorted(results.keys()):
@@ -148,37 +168,40 @@ def link_kernels(
     output_name = include_dir / config.device_kernel_name
 
     cmd = [
-        sys.executable, "-m", "triton.tools.mlu_link",
+        sys.executable,
+        "-m",
+        "triton.tools.mlu_link",
         *[str(h) for h in header_files],
-        "-o", str(output_name),
+        "-o",
+        str(output_name),
     ]
 
     if verbose:
-        print(f"  Linking headers: {' '.join(cmd)}")
+        logger.info(f"Linking headers: {' '.join(cmd)}")
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"Error linking {kernel_key}:")
-        print(f"  stdout: {result.stdout}")
-        print(f"  stderr: {result.stderr}")
+        logger.error(f"Error linking {kernel_key}")
+        logger.error(f"stdout: {result.stdout}")
+        logger.error(f"stderr: {result.stderr}")
         raise RuntimeError(f"Failed to link {kernel_key}")
 
     if verbose:
-        print(f"    Linked to: {output_name}.h and {output_name}.c")
+        logger.info(f"Linked to: {output_name}.h and {output_name}.c")
 
     for header_file in header_files:
         if header_file.exists():
             header_file.unlink()
             if verbose:
-                print(f"    Removed: {header_file}")
+                logger.info(f"Removed: {header_file}")
 
 
-def generate_cmake_config(output_dir: Path, verbose: bool = False):
+def generate_cmake_config(output_dir: Path, verbose: bool = False) -> List[str]:
     """Generate CMake configuration file with expected kernel object files."""
     lib_dir = output_dir / "lib"
     include_dir = output_dir / "include"
     cmake_file = lib_dir / "kernel_objects.cmake"
-    
+
     # Calculate expected object files based on registered kernels
     object_files = []
     gen_c_files = []
@@ -188,11 +211,11 @@ def generate_cmake_config(output_dir: Path, verbose: bool = False):
             output_name = f"{config.device_kernel_name}_cc_{idx}"
             obj_file = lib_dir / f"{output_name}.o"
             object_files.append(str(obj_file))
-        
+
         # Add generated .c file for this kernel (from link_kernels)
         gen_c_file = include_dir / f"{config.device_kernel_name}.c"
         gen_c_files.append(str(gen_c_file))
-    
+
     # Write CMake config file
     with open(cmake_file, "w") as f:
         f.write("# Auto-generated by compile_kernel.py\n")
@@ -207,41 +230,37 @@ def generate_cmake_config(output_dir: Path, verbose: bool = False):
         for gen_c_file in gen_c_files:
             f.write(f"    {gen_c_file}\n")
         f.write(")\n")
-    
+
     if verbose:
-        print(f"Generated CMake config: {cmake_file}")
-        print(f"Expected {len(object_files)} object files")
-        print(f"Expected {len(gen_c_files)} generated .c files")
-    
+        logger.info(f"Generated CMake config: {cmake_file}")
+        logger.info(f"Expected {len(object_files)} object files")
+        logger.info(f"Expected {len(gen_c_files)} generated .c files")
+
     return object_files
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compile Triton kernels for xllm MLU backend"
     )
     parser.add_argument(
-        "--kernels", "-k",
+        "--kernels",
+        "-k",
         nargs="+",
         default=list(get_kernel_configs().keys()),
-        help="Kernels to compile"
+        help="Kernels to compile",
     )
     parser.add_argument(
-        "--output-dir", "-o",
-        default=None,
-        help="Output directory for compiled kernels"
+        "--output-dir", "-o", default=None, help="Output directory for compiled kernels"
     )
     parser.add_argument(
-        "--archs",
-        nargs="+",
-        default=DEFAULT_ARCHS,
-        help="Target architectures"
+        "--archs", nargs="+", default=DEFAULT_ARCHS, help="Target architectures"
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument(
         "--generate-cmake-only",
         action="store_true",
-        help="Only generate CMake config without compiling"
+        help="Only generate CMake config without compiling",
     )
     args = parser.parse_args()
 
@@ -262,25 +281,24 @@ def main():
     generate_cmake_config(output_dir, args.verbose)
 
     if args.generate_cmake_only:
-        print("CMake config generated. Exiting without compilation.")
+        logger.info("CMake config generated. Exiting without compilation.")
         return
 
-    print("=== Triton Kernel Compilation for xllm MLU ===")
-    print(f"Script dir: {script_dir}")
-    print(f"Output dir: {output_dir}")
-    print(f"Target architectures: {args.archs}")
-    print()
+    logger.info("=== Triton Kernel Compilation for xllm MLU ===")
+    logger.info(f"Script dir: {script_dir}")
+    logger.info(f"Output dir: {output_dir}")
+    logger.info(f"Target architectures: {args.archs}")
 
     compiled = {}
     for kernel_key in args.kernels:
         if kernel_key not in get_kernel_configs():
-            print(f"Warning: Unknown kernel '{kernel_key}', skipping")
+            logger.warning(f"Unknown kernel '{kernel_key}', skipping")
             continue
 
         config = get_kernel_configs()[kernel_key]
-        print(f"Compiling {kernel_key}...")
-        print(f"  File: {config.kernel_file}")
-        print(f"  Variants: {', '.join(sig.name for sig in config.signatures)}")
+        logger.info(f"Compiling {kernel_key}")
+        logger.info(f"File: {config.kernel_file}")
+        logger.info(f"Variants: {', '.join(sig.name for sig in config.signatures)}")
 
         try:
             files, headers = compile_kernel(
@@ -292,22 +310,21 @@ def main():
                 args.verbose,
             )
             compiled[kernel_key] = files
-            print(f"  Generated {len(files)} variant(s)")
+            logger.info(f"Generated {len(files)} variant(s)")
 
             if len(headers) > 0:
-                print(f"  Linking {len(headers)} header files...")
+                logger.info(f"Linking {len(headers)} header files")
                 link_kernels(kernel_key, config, headers, output_dir, args.verbose)
         except Exception as e:
-            print(f"  Error: {e}")
+            logger.error(f"Error: {e}")
             if args.verbose:
-                import traceback
-                traceback.print_exc()
+                logger.exception(f"Failed to compile {kernel_key}")
 
-    print("\n=== Compilation Summary ===")
+    logger.info("=== Compilation Summary ===")
     total_files = sum(len(f) for f in compiled.values())
-    print(f"Total kernels compiled: {len(compiled)}")
-    print(f"Total object files: {total_files}")
-    print(f"Output directory: {output_dir}")
+    logger.info(f"Total kernels compiled: {len(compiled)}")
+    logger.info(f"Total object files: {total_files}")
+    logger.info(f"Output directory: {output_dir}")
 
 
 if __name__ == "__main__":

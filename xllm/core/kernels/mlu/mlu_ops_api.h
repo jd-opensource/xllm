@@ -490,10 +490,10 @@ torch::Tensor causal_conv1d_fn(
     bool inplace_final_state = true);
 
 std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
-    torch::Tensor& q,
-    torch::Tensor& k,
-    torch::Tensor& v,
-    torch::Tensor& g,
+    const torch::Tensor& q,
+    const torch::Tensor& k,
+    const torch::Tensor& v,
+    const torch::Tensor& g,
     const std::optional<torch::Tensor>& beta_opt = std::nullopt,
     const std::optional<torch::Tensor>& initial_state_opt = std::nullopt,
     bool inplace_final_state = true,
@@ -504,9 +504,9 @@ std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
 
 std::pair<torch::Tensor, torch::Tensor>
 fused_recurrent_gated_delta_rule_packed_decode(
-    torch::Tensor& mixed_qkv,
-    torch::Tensor& a,
-    torch::Tensor& b,
+    const torch::Tensor& mixed_qkv,
+    const torch::Tensor& a,
+    const torch::Tensor& b,
     const torch::Tensor& A_log,
     const torch::Tensor& dt_bias,
     double scale,
@@ -523,9 +523,9 @@ torch::Tensor causal_conv1d_update(
     int32_t pad_slot_id = -1);
 
 torch::Tensor causal_conv1d_update_decode(
-    torch::Tensor& x,
+    const torch::Tensor& x,
     torch::Tensor& conv_state,
-    torch::Tensor& weight,
+    const torch::Tensor& weight,
     const std::optional<torch::Tensor>& bias_opt,
     const torch::Tensor& conv_state_indices,
     int32_t pad_slot_id = -1,

@@ -41,7 +41,7 @@ ChunkGatedDeltaRuleImpl::ChunkGatedDeltaRuleImpl(int64_t num_k_heads,
   auto device_prop = torch_mlu::getDeviceProperties(device);
   total_core_num_ =
       device_prop->cluster_count * device_prop->core_num_per_cluster;
-  static const std::unordered_map<int64_t, int32_t> num_v_head_to_idx = {
+  static const std::unordered_map<int64_t, int32_t> kNumVHeadToIdx = {
       {1, 0},
       {2, 1},
       {4, 2},
@@ -54,7 +54,7 @@ ChunkGatedDeltaRuleImpl::ChunkGatedDeltaRuleImpl(int64_t num_k_heads,
       {48, 9},
       {64, 10},
   };
-  static const std::unordered_map<int64_t, int32_t> num_k_head_to_idx = {
+  static const std::unordered_map<int64_t, int32_t> kNumKHeadToIdx = {
       {1, 0},
       {2, 11},
       {4, 22},
@@ -62,13 +62,13 @@ ChunkGatedDeltaRuleImpl::ChunkGatedDeltaRuleImpl(int64_t num_k_heads,
       {16, 44},
       {32, 55},
   };
-  algo_id_ = lookup_algo_id(num_k_head_to_idx,
+  algo_id_ = lookup_algo_id(kNumKHeadToIdx,
                             num_k_heads_,
                             /*dim_name=*/"num_k_heads") +
-             lookup_algo_id(num_v_head_to_idx,
+             lookup_algo_id(kNumVHeadToIdx,
                             num_v_heads_,
                             /*dim_name=*/"num_v_heads");
-  chunk_algo_id_ = lookup_algo_id(num_v_head_to_idx,
+  chunk_algo_id_ = lookup_algo_id(kNumVHeadToIdx,
                                   num_v_heads_,
                                   /*dim_name=*/"num_v_heads");
 }
@@ -98,7 +98,7 @@ std::tuple<torch::Tensor, torch::Tensor> ChunkGatedDeltaRuleImpl::forward(
     k = l2norm(k, -1);
   }
   float scale = 1.0f / std::sqrt(static_cast<float>(k.size(-1)));
-  constexpr int64_t chunk_size = k_default_chunk_size;
+  constexpr int64_t chunk_size = kDefaultChunkSize;
 
   // Step 1: Chunk preparation
   torch::Tensor g_cumsum = chunk_local_cumsum(
@@ -380,7 +380,7 @@ ChunkGatedDeltaRuleImpl::chunk_gated_delta_rule_fwd_h(
     v_new = torch::empty_like(u);
   }
 
-  int64_t NV = ceil_div(V, k_bv);
+  int64_t NV = ceil_div(V, kBv);
   cnrtDim3_t dim_block = {
       static_cast<uint32_t>(NV), static_cast<uint32_t>(N * H), 1};
   auto queue = torch_mlu::getCurMLUStream();
@@ -419,7 +419,7 @@ torch::Tensor ChunkGatedDeltaRuleImpl::chunk_fwd_o(
   int64_t B = q.size(0);
   int64_t T = q.size(1);
   int64_t H = v.size(-2);
-  int64_t BT = k_default_chunk_size;
+  int64_t BT = kDefaultChunkSize;
   int64_t NT;
   if (!cu_seqlens.has_value()) {
     NT = ceil_div(T, BT);

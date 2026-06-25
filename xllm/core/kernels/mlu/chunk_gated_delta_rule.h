@@ -28,9 +28,9 @@ namespace mlu {
 class ChunkGatedDeltaRuleImpl : public torch::nn::Module {
  public:
   // Default chunk size used throughout the computation
-  static constexpr int64_t k_default_chunk_size = 64;
+  static constexpr int64_t kDefaultChunkSize = 64;
   // Vector block size for h computation
-  static constexpr int64_t k_bv = 64;
+  static constexpr int64_t kBv = 64;
 
   ChunkGatedDeltaRuleImpl(int64_t num_k_heads, int64_t num_v_heads);
   ~ChunkGatedDeltaRuleImpl() = default;

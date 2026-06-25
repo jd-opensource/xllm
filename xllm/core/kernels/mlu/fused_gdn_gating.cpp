@@ -53,8 +53,8 @@ std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
   int32_t core_count = static_cast<int32_t>(device_prop->cluster_count *
                                             device_prop->core_num_per_cluster);
 
-  int32_t BLK_HEADS = 8;
-  int32_t num_head_blocks = (num_heads + BLK_HEADS - 1) / BLK_HEADS;
+  constexpr int32_t kBlkHeads = 8;
+  int32_t num_head_blocks = (num_heads + kBlkHeads - 1) / kBlkHeads;
 
   // Grid: (core_count, seq_len, num_head_blocks) — matches original
   //   grid = (TOTAL_CORE_NUM, seq_len, triton.cdiv(num_heads, 8))
@@ -69,7 +69,7 @@ std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
   //   core_num=32  → offset 0:  (4,0), (8,1), (12,2), (16,3), (24,4), (32,5),
   //   (48,6), (64,7) core_num=64 → offset 8:  (4,8), (8,9), (12,10), (16,11),
   //   (24,12), (32,13), (48,14), (64,15)
-  static const std::unordered_map<int32_t, int32_t> num_heads_to_idx = {
+  static const std::unordered_map<int32_t, int32_t> kNumHeadsToIdx = {
       {4, 0},
       {8, 1},
       {12, 2},
@@ -79,14 +79,13 @@ std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
       {48, 6},
       {64, 7},
   };
-  static const std::unordered_map<int32_t, int32_t> core_num_to_offset = {
+  static const std::unordered_map<int32_t, int32_t> kCoreNumToOffset = {
       {32, 0},
       {64, 8},
   };
   int32_t algo_id =
-      lookup_algo_id(
-          core_num_to_offset, core_count, /*dim_name=*/"core_count") +
-      lookup_algo_id(num_heads_to_idx, num_heads, /*dim_name=*/"num_heads");
+      lookup_algo_id(kCoreNumToOffset, core_count, /*dim_name=*/"core_count") +
+      lookup_algo_id(kNumHeadsToIdx, num_heads, /*dim_name=*/"num_heads");
 
   // Signature: *fp32, *bf16, *bf16, *bf16, *bf16, *bf16, i32, i32,
   //            {NUM_HEADS}, 1.0, 20.0, 8, {core_num}

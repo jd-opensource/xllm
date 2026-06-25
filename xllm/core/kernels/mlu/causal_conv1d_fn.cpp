@@ -81,11 +81,12 @@ torch::Tensor causal_conv1d_fn(
   void* out_ptr = out.data_ptr();
 
   // grid
-  int num_programs = static_cast<int>(std::min(nt, static_cast<int32_t>(8)));
+  int32_t num_programs =
+      static_cast<int32_t>(std::min(nt, static_cast<int32_t>(8)));
   cnrtDim3_t dim_block = {static_cast<uint32_t>(num_programs), 1, 1};
   auto queue = torch_mlu::getCurMLUStream();
 
-  static const std::unordered_map<int32_t, int32_t> dim_to_algo_id = {
+  static const std::unordered_map<int32_t, int32_t> kDimToAlgoId = {
       {384, 0},
       {512, 1},
       {640, 2},
@@ -103,7 +104,7 @@ torch::Tensor causal_conv1d_fn(
       {10240, 14},
       {12288, 15},
   };
-  int32_t algo_id = lookup_algo_id(dim_to_algo_id,
+  int32_t algo_id = lookup_algo_id(kDimToAlgoId,
                                    static_cast<int32_t>(x.size(0)),
                                    /*dim_name=*/"dim");
   tmo_causal_conv1d_fwd_vllm_kernel(queue,

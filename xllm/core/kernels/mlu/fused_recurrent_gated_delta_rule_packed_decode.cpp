@@ -29,48 +29,45 @@ namespace mlu {
 
 std::pair<torch::Tensor, torch::Tensor>
 fused_recurrent_gated_delta_rule_packed_decode(
-    torch::Tensor& mixed_qkv,
-    torch::Tensor& a,
-    torch::Tensor& b,
+    const torch::Tensor& mixed_qkv,
+    const torch::Tensor& a,
+    const torch::Tensor& b,
     const torch::Tensor& A_log,
     const torch::Tensor& dt_bias,
     double scale,
     torch::Tensor& ssm_cache,
     const torch::Tensor& ssm_state_indices,
     bool use_qk_l2norm_in_kernel) {
-  mixed_qkv = mixed_qkv.contiguous();
-  a = a.contiguous();
-  b = b.contiguous();
+  torch::Tensor mixed_qkv_contig = mixed_qkv.contiguous();
+  torch::Tensor a_contig = a.contiguous();
+  torch::Tensor b_contig = b.contiguous();
 
-  int64_t B = mixed_qkv.size(0);
-  int64_t qkv_dim = mixed_qkv.size(1);
+  int64_t B = mixed_qkv_contig.size(0);
+  int64_t qkv_dim = mixed_qkv_contig.size(1);
   int64_t HV = ssm_cache.size(1);
   int64_t V = ssm_cache.size(2);
   int64_t K = ssm_cache.size(3);
   int64_t qk_dim = qkv_dim - HV * V;
   int64_t H = qk_dim / (2 * K);
 
-  int64_t BK = 1;
-  while (BK < K) {
-    BK <<= 1;
-  }
-  BK = std::min(BK, static_cast<int64_t>(128));
-  int64_t BV = 128;
+  constexpr int64_t kBlockSizeV = 128;
+  int64_t bv = kBlockSizeV;
 
   // Create output tensor: [B, 1, HV, V] in same dtype as mixed_qkv
   torch::Tensor out =
-      torch::empty({B, 1, HV, V}, mixed_qkv.options().dtype(mixed_qkv.dtype()));
+      torch::empty({B, 1, HV, V},
+                   mixed_qkv_contig.options().dtype(mixed_qkv_contig.dtype()));
 
   // Strides
-  int64_t stride_mixed_qkv_tok = mixed_qkv.stride(0);
-  int64_t stride_a_tok = a.stride(0);
-  int64_t stride_b_tok = b.stride(0);
+  int64_t stride_mixed_qkv_tok = mixed_qkv_contig.stride(0);
+  int64_t stride_a_tok = a_contig.stride(0);
+  int64_t stride_b_tok = b_contig.stride(0);
   int64_t stride_init_state_token = ssm_cache.stride(0);
   int64_t stride_final_state_token = ssm_cache.stride(0);
   int64_t stride_indices_seq = ssm_state_indices.stride(0);
 
   // Grid: (NV, B * HV)
-  int64_t NV = (V + BV - 1) / BV;
+  int64_t NV = (V + bv - 1) / bv;
   int32_t num_programs_x = static_cast<int32_t>(NV);
   int32_t num_programs_y = static_cast<int32_t>(B * HV);
   cnrtDim3_t dim_block = {static_cast<uint32_t>(num_programs_x),
@@ -79,14 +76,14 @@ fused_recurrent_gated_delta_rule_packed_decode(
 
   auto queue = torch_mlu::getCurMLUStream();
 
-  constexpr int32_t algo_id = 0;
+  constexpr int32_t kAlgoId = 0;
 
   tmo_fused_recurrent_gated_delta_rule_packed_decode_kernel(
       queue,
       &dim_block,
-      mixed_qkv.data_ptr(),
-      a.data_ptr(),
-      b.data_ptr(),
+      mixed_qkv_contig.data_ptr(),
+      a_contig.data_ptr(),
+      b_contig.data_ptr(),
       A_log.data_ptr(),
       dt_bias.data_ptr(),
       out.data_ptr(),
@@ -104,7 +101,7 @@ fused_recurrent_gated_delta_rule_packed_decode(
       static_cast<int32_t>(HV),
       static_cast<int32_t>(K),
       static_cast<int32_t>(V),
-      algo_id);
+      kAlgoId);
 
   return std::make_pair(out, ssm_cache);
 }
