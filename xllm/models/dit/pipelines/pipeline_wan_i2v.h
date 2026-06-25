@@ -522,11 +522,11 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
       }
       torch::Tensor noise_pred;
       torch::Tensor noise_uncond;
+#if defined(USE_NPU)
       auto& rolling = (current_model.get() == transformer_.get())
                           ? rolling_transformer_
                           : rolling_transformer_2_;
       auto rolling_forward = [&](const torch::Tensor& embeds) {
-#if defined(USE_NPU)
         return current_model->forward(
             latent_model_input,
             timestep_input,
@@ -534,10 +534,13 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
             torch::Tensor(),
             [&rolling](int32_t i) { rolling.wait_h2d(i); },
             [&rolling](int32_t i) { rolling.schedule_next_h2d(i); });
-#else
-        LOG(FATAL) << "Rolling load requires USE_NPU";
-#endif
       };
+#else
+      auto rolling_forward = [&](const torch::Tensor& /*embeds*/) {
+        LOG(FATAL) << "Rolling load requires USE_NPU";
+        return torch::Tensor{};
+      };
+#endif
 
       if (do_classifier_free_guidance) {
         if (ParallelConfig::get_instance().cfg_size() == 2) {
