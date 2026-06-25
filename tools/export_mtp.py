@@ -239,11 +239,11 @@ def get_mtp_layer_count(config: ConfigView, model_type: str) -> int:
     )
 
 
-def is_dsa_mtp_model(model_type: str) -> bool:
+def _is_dsa_mtp_model(model_type: str) -> bool:
     return model_type in {"deepseek_v32", "glm_moe_dsa"}
 
 
-def has_dsa_indexer(config: ConfigView) -> bool:
+def _has_dsa_indexer(config: ConfigView) -> bool:
     return (
         _is_positive_config_value(config.get("index_n_heads"))
         and _is_positive_config_value(config.get("index_head_dim"))
@@ -251,12 +251,12 @@ def has_dsa_indexer(config: ConfigView) -> bool:
     )
 
 
-def update_mtp_dsa_topk_config(
+def _update_mtp_dsa_topk_config(
     updates: dict[str, Any],
     config: ConfigView,
     model_type: str,
 ) -> None:
-    if not is_dsa_mtp_model(model_type) or not has_dsa_indexer(config):
+    if not _is_dsa_mtp_model(model_type) or not _has_dsa_indexer(config):
         return
 
     if not bool(config.get("index_share_for_mtp_iteration", False)):
@@ -296,7 +296,7 @@ def update_and_save_config(config: ConfigView, output_dir: str, model_type: str,
     if model_type in QWEN3_5_EXPORT_MODEL_TYPES:
         updates["mtp_num_hidden_layers"] = mtp_layer_count
 
-    update_mtp_dsa_topk_config(updates, config, model_type)
+    _update_mtp_dsa_topk_config(updates, config, model_type)
 
     new_config.update(updates)
 
