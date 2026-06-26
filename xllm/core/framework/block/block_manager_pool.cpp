@@ -17,13 +17,14 @@ limitations under the License.
 
 #include <algorithm>
 #include <limits>
+#include <utility>
 
 #include "block_manager_impl.h"
-#include "common/global_flags.h"
 #include "composite_block_manager.h"
 #include "concurrent_block_manager_impl.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/service_config.h"
+#include "framework/model/model_input_params.h"
 #include "framework/xtensor/page_allocator.h"
 #include "framework/xtensor/phy_page_pool.h"
 #include "framework/xtensor/xtensor_block_manager_impl.h"
@@ -35,6 +36,12 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
   CHECK(dp_size > 0) << "dp_size must be greater than 0";
   block_managers_.reserve(dp_size);
   single_block_managers_.reserve(dp_size);
+  const uint32_t default_max_single_block_sequences =
+      options_.max_concurrent_requests() > 0
+          ? options_.max_concurrent_requests()
+          : static_cast<uint32_t>(std::max(
+                ::xllm::ServiceConfig::get_instance().max_concurrent_requests(),
+                0));
 
   BlockManager::Options block_options;
   block_options.num_blocks(options_.num_blocks())
@@ -49,14 +56,17 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
       .max_seqs_per_batch(options_.max_seqs_per_batch())
       .hasher_type(options_.hasher_type());
 
-  const uint32_t max_single_block_sequences =
-      options_.max_concurrent_requests() > 0
-          ? options_.max_concurrent_requests()
-          : static_cast<uint32_t>(std::max(
-                ::xllm::ServiceConfig::get_instance().max_concurrent_requests(),
-                0));
-  const uint32_t num_single_blocks = std::max<uint32_t>(
-      options_.num_single_blocks(), max_single_block_sequences + 2);
+  uint32_t num_single_blocks = std::max<uint32_t>(
+      options_.num_single_blocks(), default_max_single_block_sequences + 2);
+  if (options_.enable_linear_state() && options_.single_block_capacity() > 0) {
+    // A single block is held for the whole lifetime of a sequence (it backs the
+    // per-sequence embedding / linear-state id), so the pool must cover the
+    // number of concurrently live sequences -- bounded by max_concurrent
+    // requests, not the per-step batch size. The default above already encodes
+    // that; only an explicit capacity (e.g. tests deliberately exercising
+    // exhaustion) overrides it.
+    num_single_blocks = options_.single_block_capacity();
+  }
   CHECK_GT(num_single_blocks, 0u) << "num_single_blocks must be positive";
 
   for (int32_t i = 0; i < dp_size; ++i) {
@@ -97,6 +107,18 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
         /*resource_name=*/"single block",
         /*exhaustion_message=*/"No more single-block ids available"));
   }
+
+  if (options_.enable_linear_state()) {
+    CHECK_GT(options_.linear_state_num_slots(), 0)
+        << "linear_state_num_slots must be set when linear state is enabled";
+    LinearStateCacheManager::Options lsc_options;
+    lsc_options.num_slots(options_.linear_state_num_slots());
+    lsc_options.dp_size(dp_size);
+    lsc_options.block_size(options_.block_size());
+    linear_state_cache_manager_ =
+        std::make_unique<LinearStateCacheManager>(lsc_options);
+  }
+
   swap_block_transfer_infos_.clear();
   swap_block_transfer_infos_.resize(block_managers_.size());
 }
@@ -108,8 +130,16 @@ int32_t BlockManagerPool::get_manager_with_max_free_blocks() const {
 
   size_t max_index = 0;
   size_t max_free = block_managers_[0]->num_free_blocks();
+  if (linear_state_cache_manager_ &&
+      single_block_managers_[0]->num_free_blocks() == 0) {
+    max_free = 0;
+  }
 
   for (size_t i = 1; i < block_managers_.size(); ++i) {
+    if (linear_state_cache_manager_ &&
+        single_block_managers_[i]->num_free_blocks() == 0) {
+      continue;
+    }
     const size_t current_free = block_managers_[i]->num_free_blocks();
     if (current_free > max_free) {
       max_free = current_free;
@@ -136,6 +166,8 @@ bool BlockManagerPool::allocate_single_block(Sequence* sequence,
   CHECK_GE(dp_rank, 0);
   CHECK_LT(static_cast<size_t>(dp_rank), single_block_managers_.size());
   if (sequence->get_single_block_id() >= 0) {
+    // Both per-sequence slots are acquired together; if one is held the other
+    // must be too.
     return true;
   }
 
@@ -151,6 +183,14 @@ bool BlockManagerPool::allocate_single_block(Sequence* sequence,
     return false;
   }
   sequence->add_blocks(BlockType::SINGLE, single_blocks);
+
+  if (linear_state_cache_manager_ &&
+      !linear_state_cache_manager_->allocate_slot(sequence, dp_rank)) {
+    // Roll back the single block so the pair stays consistent.
+    single_block_managers_[dp_rank]->deallocate(single_blocks);
+    sequence->kv_state().erase_blocks(BlockType::SINGLE);
+    return false;
+  }
   return true;
 }
 
@@ -159,12 +199,45 @@ void BlockManagerPool::deallocate_single_block(Sequence* sequence,
   DCHECK(sequence != nullptr);
   CHECK_GE(dp_rank, 0);
   CHECK_LT(static_cast<size_t>(dp_rank), single_block_managers_.size());
+  if (linear_state_cache_manager_) {
+    linear_state_cache_manager_->release_slot(sequence);
+  }
   const Slice<Block> single = sequence->kv_state().blocks(BlockType::SINGLE);
   if (single.empty()) {
     return;
   }
   single_block_managers_[dp_rank]->deallocate(single);
   sequence->kv_state().erase_blocks(BlockType::SINGLE);
+}
+
+LinearStatePrefixCache* BlockManagerPool::linear_state_prefix_cache(
+    int32_t dp_rank) {
+  return linear_state_cache_manager_
+             ? linear_state_cache_manager_->prefix_cache(dp_rank)
+             : nullptr;
+}
+
+LinearStateCheckpointReservations
+BlockManagerPool::resolve_linear_state_cache_ops(
+    int32_t dp_rank,
+    std::vector<LinearStateCacheOp>* cache_ops,
+    const std::vector<Sequence*>& sequences) {
+  if (!linear_state_cache_manager_) {
+    LinearStateCheckpointReservations empty;
+    empty.dp_rank = dp_rank;
+    return empty;
+  }
+  return linear_state_cache_manager_->resolve_cache_ops(
+      dp_rank, cache_ops, sequences);
+}
+
+void BlockManagerPool::commit_linear_state_reservations(
+    LinearStateCheckpointReservations&& checkpoint_reservations) {
+  if (!linear_state_cache_manager_) {
+    return;
+  }
+  linear_state_cache_manager_->commit_reservations(
+      std::move(checkpoint_reservations));
 }
 
 void BlockManagerPool::deallocate(Request* request) {
@@ -332,7 +405,11 @@ bool BlockManagerPool::try_allocate(Sequence* sequence) {
                                                   existed_shared_blocks,
                                                   sequence->mm_data(),
                                                   sequence->block_hashes());
-
+    trim_shared_blocks_to_linear_state(
+        dp_rank,
+        sequence,
+        sequence->kv_state().shared_blocks_num(BlockType::KV),
+        &shared_blocks);
     if (!shared_blocks.empty()) {
       sequence->add_blocks(BlockType::KV, shared_blocks);
       sequence->kv_state().incr_shared_blocks_num(BlockType::KV,
@@ -409,6 +486,11 @@ void BlockManagerPool::allocate_shared(Sequence* sequence) {
                                                   existed_shared_blocks,
                                                   sequence->mm_data(),
                                                   sequence->block_hashes());
+    trim_shared_blocks_to_linear_state(
+        dp_rank,
+        sequence,
+        sequence->kv_state().shared_blocks_num(BlockType::KV),
+        &shared_blocks);
     sequence->add_shared_blocks(BlockType::KV, std::move(shared_blocks));
   }
 }
@@ -529,6 +611,27 @@ std::vector<size_t> BlockManagerPool::num_used_blocks() const {
 double BlockManagerPool::kv_cache_utilization() const {
   int32_t dp_rank = get_manager_with_max_free_blocks();
   return block_managers_[dp_rank]->kv_cache_utilization();
+}
+
+void BlockManagerPool::trim_shared_blocks_to_linear_state(
+    int32_t dp_rank,
+    Sequence* sequence,
+    size_t existed_shared_blocks_num,
+    std::vector<Block>* shared_blocks) {
+  if (!linear_state_cache_manager_ || shared_blocks->empty()) {
+    return;
+  }
+  CHECK(sequence != nullptr);
+  const size_t safe_count =
+      linear_state_cache_manager_->compute_safe_shared_prefix_length(
+          dp_rank, sequence, existed_shared_blocks_num, shared_blocks->size());
+  DCHECK_LE(safe_count, shared_blocks->size());
+  if (safe_count == shared_blocks->size()) {
+    return;
+  }
+  block_managers_[dp_rank]->deallocate(
+      Slice<Block>(*shared_blocks).slice(safe_count));
+  shared_blocks->resize(safe_count);
 }
 
 // currently use only for profile, which not need prefix cache.

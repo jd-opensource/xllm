@@ -859,9 +859,13 @@ struct LinearStateCacheOp {
   // -> `linear_state_id`.
   LinearStatePrefixHash restore_prefix_hash{};
   int32_t restore_src_slot_id = -1;
-  // Save: prefix hash to checkpoint, and the checkpoint slot the scheduler
-  // allocated for it. The worker copies `linear_state_id` ->
-  // `save_dst_slot_id`.
+  // Save (zero-copy promotion handled by the scheduler):
+  // - `save_prefix_hash` is the prefix hash the scheduler proposes to
+  //   checkpoint; non-zero means "save was requested at build time".
+  // - `save_dst_slot_id` is set by the scheduler in `resolve_cache_ops` to the
+  //   sequence's current live slot id iff a Promotion was actually reserved
+  //   (post-dedup, post-`can_promote_*` checks). It functions as a boolean
+  //   marker on the worker side; no device copy is performed for a save.
   LinearStatePrefixHash save_prefix_hash{};
   int32_t save_dst_slot_id = -1;
 };

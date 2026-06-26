@@ -15,6 +15,7 @@ cc_test(
     :config
     :scheduler
     :xllm_server
+    :linear_state_prefix_cache
     GTest::gtest_main
     $<$<BOOL:${USE_NPU}>:nnopbase>
 )

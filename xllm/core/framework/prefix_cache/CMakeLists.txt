@@ -23,6 +23,20 @@ cc_library(
     torch
 )
 
+cc_library(
+  NAME
+    linear_state_prefix_cache
+  HDRS
+    linear_state_prefix_cache.h
+  SRCS
+    linear_state_prefix_cache.cpp
+  DEPS
+    :block
+    :request
+    :common
+    glog::glog
+)
+
 
 
 

@@ -25,6 +25,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
+#include "core/common/constants.h"
 #include "util/tensor_helper.h"
 
 #if defined(USE_NPU)
@@ -147,6 +148,9 @@ bool is_linear_attention_layer(int64_t layer_idx,
 
 // Whether NPU KV cache should use FRACTAL_NZ layout for a model type.
 bool use_npu_nz_kv_cache_layout(const std::string& model_type);
+
+int64_t calculate_linear_state_live_slots(int64_t num_linear_state_blocks,
+                                          int64_t max_running_requests);
 
 KVCacheTensors create_kv_cache_tensors(
     const KVCacheShape& kv_cache_shape,

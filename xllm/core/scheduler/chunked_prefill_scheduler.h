@@ -37,6 +37,10 @@ class ChunkedPrefillScheduler : public ContinuousScheduler {
   virtual ~ChunkedPrefillScheduler();
 
  protected:
+  // Returns 0 when no safe boundary can make forward progress.
+  size_t get_linear_state_safe_prefill_tokens(Sequence* sequence,
+                                              size_t token_budget) const;
+
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch() override;
   // 1. for prefill sequence: the allocated_tokens will be within
