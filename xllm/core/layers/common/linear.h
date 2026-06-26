@@ -170,6 +170,14 @@ class QKVParallelLinearImpl : public torch::nn::Module {
   torch::Tensor weight() const { return weight_; }
   bool is_weight_loaded() const { return weight_is_loaded_; }
 
+  // Accessors for W8A8 dynamic quantization parameters.
+  // Used by attention layers to reorder weight_scale/weight_offset
+  // when attn_output_gate is enabled.
+  torch::Tensor weight_scale() const { return weight_scale_; }
+  torch::Tensor weight_offset() const { return weight_offset_; }
+  bool is_weight_scale_loaded() const { return weight_scale_is_loaded_; }
+  bool is_weight_offset_loaded() const { return weight_offset_is_loaded_; }
+
   // Get FP8 input scale for fused RMSNorm+FP8 quantization
   // For QKV, returns max of Q/K/V scales (per-tensor)
   std::optional<torch::Tensor> get_input_scale() const;
