@@ -129,7 +129,8 @@ REGISTER_MODEL_ARGS(glm_moe_dsa_mtp, [&] {
       index_share_for_mtp_iteration, "index_share_for_mtp_iteration", false);
 
   LOAD_ARG_OR(use_qk_norm, "use_qk_norm", true);
-  LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
+  LOAD_ARG_OR(rope_theta, "rope_parameters.rope_theta", 1000000.0f);
+  LOAD_ARG_OR(rope_theta, "rope_theta", args->rope_theta());
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
 
   SET_ARG(head_dim, args->qk_nope_head_dim() + args->qk_rope_head_dim());
