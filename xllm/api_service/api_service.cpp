@@ -584,9 +584,10 @@ void handle_text_embedding_request(
       ctrl, done_guard.release(), req_pb, resp_pb, arena != nullptr);
 
   if (is_batch) {
-    embedding_service_impl_->process_batch_async(call, std::move(inputs));
+    embedding_service_impl_->process_batch_async(std::move(call),
+                                                 std::move(inputs));
   } else {
-    embedding_service_impl_->process_async(call);
+    embedding_service_impl_->process_async(std::move(call));
   }
 }
 }  // namespace

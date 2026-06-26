@@ -30,7 +30,7 @@ namespace xllm {
 using EmbeddingCall =
     NonStreamCall<proto::EmbeddingRequest, proto::EmbeddingResponse>;
 
-class BatchEmbeddingContext {
+class BatchEmbeddingContext final {
  public:
   BatchEmbeddingContext(std::shared_ptr<EmbeddingCall> call,
                         std::string model,

@@ -89,13 +89,14 @@ void BatchEmbeddingContext::on_complete(size_t index, RequestOutput output) {
 }
 
 void BatchEmbeddingContext::finalize() {
-  auto& response = call_->response();
+  auto call = std::move(call_);
+  auto& response = call->response();
   response.set_object("list");
   response.set_id(request_id_);
   response.set_created(created_time_);
   response.set_model(model_);
 
-  std::string encoding_format = call_->request().encoding_format();
+  std::string encoding_format = call->request().encoding_format();
   bool use_binary_format = encoding_format == "binary";
   EmbeddingOutputBuilder mm_embeddings_output_builder(use_binary_format, false);
   std::string binary_payload;
@@ -111,7 +112,7 @@ void BatchEmbeddingContext::finalize() {
     if (req_output.status.has_value()) {
       const auto& status = req_output.status.value();
       if (!status.ok()) {
-        call_->finish_with_error(status.code(), status.message());
+        call->finish_with_error(status.code(), status.message());
         return;
       }
     }
@@ -126,7 +127,7 @@ void BatchEmbeddingContext::finalize() {
             output.embeddings->data() + output.embeddings->size());
       }
       if (output.mm_embeddings.has_value()) {
-        call_->set_bytes_to_base64(true);
+        call->set_bytes_to_base64(true);
         mm_embeddings_output_builder.build_repeated_embedding_output(
             *output.mm_embeddings,
             *(data->mutable_mm_embeddings()),
@@ -149,7 +150,7 @@ void BatchEmbeddingContext::finalize() {
     proto_usage->set_total_tokens(total_tokens);
   }
 
-  call_->write_and_finish(response, binary_payload);
+  call->write_and_finish(response, binary_payload);
 }
 
 EmbeddingServiceImpl::EmbeddingServiceImpl(
@@ -206,7 +207,7 @@ void EmbeddingServiceImpl::process_batch_async(
     std::shared_ptr<EmbeddingCall> call,
     std::vector<std::string> inputs) {
   const auto& rpc_request = call->request();
-  const auto& model = rpc_request.model();
+  std::string model = rpc_request.model();
   if (!models_.contains(model)) {
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
@@ -221,7 +222,11 @@ void EmbeddingServiceImpl::process_batch_async(
   std::vector<RequestParams> sps(num_requests, request_params);
 
   auto ctx = std::make_shared<BatchEmbeddingContext>(
-      call, model, request_id, created_time, num_requests);
+      std::move(call),
+      std::move(model),
+      std::move(request_id),
+      created_time,
+      num_requests);
 
   auto batch_callback = [ctx](size_t index, RequestOutput output) -> bool {
     ctx->on_complete(index, std::move(output));
