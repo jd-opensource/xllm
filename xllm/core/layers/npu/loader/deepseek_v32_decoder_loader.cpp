@@ -347,7 +347,7 @@ void DeekseekV32DecoderLoader::reset_skipped_indexer_weights() {
     return;
   }
   auto& t = working_tensors();
-  for (int index = IN_INDEXER_WQ_B_WEIGHT;
+  for (int32_t index = IN_INDEXER_WQ_B_WEIGHT;
        index <= IN_INDEXER_PROJ_COMPRESS_IDX;
        ++index) {
     t[index] = tensor_placeholder_;
@@ -376,8 +376,8 @@ void DeekseekV32DecoderLoader::process_expert_weights(
                              (absl::EndsWith(suffix, "weight_scale_second") ||
                               absl::EndsWith(suffix, "weight_offset") ||
                               absl::EndsWith(suffix, "scale_bias"));
-  int index = -1;
-  int shard_dim = -1;
+  int32_t index = -1;
+  int32_t shard_dim = -1;
   if (is_w4a8_extra) {
     shard_dim = get_w4a8_expert_shard_dim(suffix);
   } else {
@@ -483,7 +483,7 @@ void DeekseekV32DecoderLoader::initialize_weight_tensors(
 
 void DeekseekV32DecoderLoader::convert_offsets_to_int8() {
   auto& t = working_tensors();
-  auto convert_to_int8 = [this, &t](int index) {
+  auto convert_to_int8 = [this, &t](int32_t index) {
     t[index] = t[index].to(torch::kInt8);
     if (!load_to_host()) {
       t[index] = t[index].to(target_device());
@@ -819,9 +819,9 @@ torch::Tensor DeekseekV32DecoderLoader::merge_experts_weights(
   for (size_t i = 0; i < experts_up.size(); ++i) {
     experts_gate[i] = cat_with_debug(
         {experts_gate[i], experts_up[i]},
-        0,
+        /*dim=*/0,
         {"gate expert " + std::to_string(i), "up expert " + std::to_string(i)},
-        "routed gateup expert",
+        /*cat_name=*/"routed gateup expert",
         layer_id_);
   }
 
@@ -1004,13 +1004,13 @@ void DeekseekV32DecoderLoader::preprocess_linear_for_rope() {
     linear_for_rope.emplace_back("self_attn.kv_a_proj_with_mqa.quant_bias");
     linear_for_rope.emplace_back("self_attn.kv_a_proj_with_mqa.deq_scale");
   }
-  for (const auto& name : linear_for_rope) {
+  for (const std::string& name : linear_for_rope) {
     if (!use_quant_weight_mapping()) {
       if (!absl::EndsWith(name, "weight")) {
         continue;
       }
     }
-    int index = WEIGHT_MAPPING_W8A8.at(name);
+    int32_t index = WEIGHT_MAPPING_W8A8.at(name);
     if (is_placeholder_tensor(t[index])) {
       continue;
     }
@@ -1052,7 +1052,7 @@ void DeekseekV32DecoderLoader::preprocess_linear_for_rope() {
     }
     indexer_linear_for_rope.emplace_back("self_attn.indexer.wk.weight");
 
-    for (const auto& name : indexer_linear_for_rope) {
+    for (const std::string& name : indexer_linear_for_rope) {
       if (!use_quant_weight_mapping() && !absl::EndsWith(name, "weight")) {
         continue;
       }
@@ -1182,7 +1182,7 @@ torch::Tensor DeekseekV32DecoderLoader::convert_fp16_to_int64(
 
 void DeekseekV32DecoderLoader::convert_descaled_weights_to_float() {
   auto& t = working_tensors();
-  auto convert_to_float = [&t](int index) {
+  auto convert_to_float = [&t](int32_t index) {
     t[index] = t[index].to(torch::kFloat32);
   };
   if (!is_attn_dynamic_desc(kQProjALinearIndex)) {
@@ -1229,7 +1229,7 @@ void DeekseekV32DecoderLoader::reserve_experts_weights(
     weight_names.emplace_back("down_proj.scale_bias");
   }
   std::lock_guard<std::mutex> lock(experts_mutex_);
-  for (const auto& weight_name : weight_names) {
+  for (const std::string& weight_name : weight_names) {
     experts_weights_[weight_name] =
         std::vector<torch::Tensor>(num_of_device_experts);
   }
@@ -1247,7 +1247,7 @@ std::string DeekseekV32DecoderLoader::get_expert_shm_key(
 
 void DeekseekV32DecoderLoader::merge_shared_experts_weights() {
   auto& t = working_tensors();
-  auto merge_and_clear = [this, &t](int index,
+  auto merge_and_clear = [this, &t](int32_t index,
                                     const std::string& gate_name,
                                     torch::Tensor& shared_experts_gate,
                                     const std::string& up_name,
@@ -1259,16 +1259,16 @@ void DeekseekV32DecoderLoader::merge_shared_experts_weights() {
         << "GLM/DeepSeekV32 layer " << layer_id_
         << " missing shared expert tensor: " << up_name;
     t[index] = cat_with_debug({shared_experts_gate, shared_experts_up},
-                              0,
+                              /*dim=*/0,
                               {gate_name, up_name},
-                              "shared gateup",
+                              /*cat_name=*/"shared gateup",
                               layer_id_)
                    .to(target_device())
                    .contiguous();
     shared_experts_gate = tensor_placeholder_;
     shared_experts_up = tensor_placeholder_;
   };
-  auto maybe_merge_and_clear = [&](int index,
+  auto maybe_merge_and_clear = [&](int32_t index,
                                    const std::string& gate_name,
                                    torch::Tensor& shared_experts_gate,
                                    const std::string& up_name,
@@ -1366,19 +1366,19 @@ void DeekseekV32DecoderLoader::merge_host_at_weights() {
   t[IN_Q_PROJ_A_WEIGHT] =
       cat_with_debug(
           {t[IN_KV_PROJ_WITH_MQA_WEIGHT], t[IN_Q_PROJ_A_WEIGHT]},
-          0,
+          /*dim=*/0,
           {"self_attn.kv_a_proj_with_mqa.weight", "self_attn.q_a_proj.weight"},
-          "q_a_kv_a.weight",
+          /*cat_name=*/"q_a_kv_a.weight",
           layer_id_)
           .contiguous();
   if (use_quant_weight_mapping()) {
     if (is_attn_dynamic_desc(kQProjALinearIndex)) {
       t[IN_Q_PROJ_A_SCALE] =
           cat_with_debug({t[IN_KV_PROJ_WITH_MQA_SCALE], t[IN_Q_PROJ_A_SCALE]},
-                         0,
+                         /*dim=*/0,
                          {"self_attn.kv_a_proj_with_mqa.weight_scale",
                           "self_attn.q_a_proj.weight_scale"},
-                         "q_a_kv_a.scale",
+                         /*cat_name=*/"q_a_kv_a.scale",
                          layer_id_)
               .flatten()
               .contiguous();
@@ -1387,10 +1387,10 @@ void DeekseekV32DecoderLoader::merge_host_at_weights() {
         t[IN_Q_PROJ_A_OFFSET] =
             cat_with_debug(
                 {t[IN_KV_PROJ_WITH_MQA_OFFSET], t[IN_Q_PROJ_A_OFFSET]},
-                0,
+                /*dim=*/0,
                 {"self_attn.kv_a_proj_with_mqa.weight_offset",
                  "self_attn.q_a_proj.weight_offset"},
-                "q_a_kv_a.offset",
+                /*cat_name=*/"q_a_kv_a.offset",
                 layer_id_)
                 .flatten()
                 .contiguous();
@@ -1398,19 +1398,19 @@ void DeekseekV32DecoderLoader::merge_host_at_weights() {
     } else {
       t[IN_Q_PROJ_A_BIAS] =
           cat_with_debug({t[IN_KV_PROJ_WITH_MQA_BIAS], t[IN_Q_PROJ_A_BIAS]},
-                         0,
+                         /*dim=*/0,
                          {"self_attn.kv_a_proj_with_mqa.quant_bias",
                           "self_attn.q_a_proj.quant_bias"},
-                         "q_a_kv_a.bias",
+                         /*cat_name=*/"q_a_kv_a.bias",
                          layer_id_)
               .contiguous();
       t[IN_Q_PROJ_A_DESCALE] =
           cat_with_debug(
               {t[IN_KV_PROJ_WITH_MQA_DESCALE], t[IN_Q_PROJ_A_DESCALE]},
-              0,
+              /*dim=*/0,
               {"self_attn.kv_a_proj_with_mqa.deq_scale",
                "self_attn.q_a_proj.deq_scale"},
-              "q_a_kv_a.descale",
+              /*cat_name=*/"q_a_kv_a.descale",
               layer_id_)
               .contiguous();
     }
@@ -1455,7 +1455,7 @@ void DeekseekV32DecoderLoader::merge_host_at_weights() {
   }
 
   auto cast_attn_weight =
-      [this](torch::Tensor tensor, int weight_index, int linear_index) {
+      [this](torch::Tensor tensor, int32_t weight_index, int32_t linear_index) {
         if (is_attn_dynamic_desc(linear_index)) {
           return tensor.contiguous();
         }

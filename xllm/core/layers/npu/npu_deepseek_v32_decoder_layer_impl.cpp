@@ -64,7 +64,7 @@ std::optional<std::string> get_layer_quant_desc(
       "model.layers." + std::to_string(layer_id) + ".";
   std::optional<std::pair<std::string, std::string>> resolved;
   std::optional<std::string> unresolved_prefix;
-  for (const auto& local_prefix : local_prefixes) {
+  for (const std::string& local_prefix : local_prefixes) {
     const std::string prefix = layer_prefix + local_prefix;
     auto quant_desc = quant_args.get_quant_method(prefix, "weight");
     if (!quant_desc.has_value()) {
