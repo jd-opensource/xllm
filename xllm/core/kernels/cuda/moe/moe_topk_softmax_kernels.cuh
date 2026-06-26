@@ -23,7 +23,7 @@ limitations under the License.
 
 #include <cub/util_type.cuh>
 
-#if !defined(USE_DCU) and !defined(USE_MACA)
+#if !defined(USE_DCU) && !defined(USE_MACA)
 #include <cuda/functional>
 #endif
 

@@ -112,18 +112,6 @@ std::string get_batch_prefill_uri(const std::string& backend,
                                   bool use_logits_soft_cap,
                                   bool use_fp16_qk_reduction);
 
-std::string get_batch_prefill_tvm_ffi_uri(const std::string& backend,
-                                          torch::ScalarType dtype_q,
-                                          torch::ScalarType dtype_kv,
-                                          torch::ScalarType dtype_o,
-                                          torch::ScalarType dtype_idx,
-                                          int64_t head_dim_qk,
-                                          int64_t head_dim_vo,
-                                          int64_t pos_encoding_mode,
-                                          bool use_sliding_window,
-                                          bool use_logits_soft_cap,
-                                          bool use_fp16_qk_reduction);
-
 std::string get_batch_decode_uri(torch::ScalarType dtype_q,
                                  torch::ScalarType dtype_kv,
                                  torch::ScalarType dtype_o,
@@ -133,16 +121,6 @@ std::string get_batch_decode_uri(torch::ScalarType dtype_q,
                                  int64_t pos_encoding_mode,
                                  bool use_sliding_window,
                                  bool use_logits_soft_cap);
-
-std::string get_batch_decode_tvm_ffi_uri(torch::ScalarType dtype_q,
-                                         torch::ScalarType dtype_kv,
-                                         torch::ScalarType dtype_o,
-                                         torch::ScalarType dtype_idx,
-                                         int64_t head_dim_qk,
-                                         int64_t head_dim_vo,
-                                         int64_t pos_encoding_mode,
-                                         bool use_sliding_window,
-                                         bool use_logits_soft_cap);
 
 std::tuple<torch::Tensor, double> split_scale_param(const torch::Tensor& scale);
 

@@ -1280,8 +1280,8 @@ template <typename T>
 __device__ __forceinline__ T negativeInfinity() {
   return -INFINITY;
 }
-#if defined(USE_MACA) and !defined(CUDART_INF_FP16)
-  #define CUDART_INF_FP16 __float2half_rn(INFINITY)
+#if defined(USE_MACA) && !defined(CUDART_INF_FP16)
+#define CUDART_INF_FP16 __float2half_rn(INFINITY)
 #endif
 template <>
 __device__ __forceinline__ half negativeInfinity<half>() {
@@ -1292,8 +1292,8 @@ __device__ __forceinline__ half negativeInfinity<half>() {
 #endif
 }
 
-#if defined(USE_MACA) and !defined(CUDART_INF_BF16)
-  #define CUDART_INF_BF16 __ushort_as_bfloat16(0x7F80)
+#if defined(USE_MACA) && !defined(CUDART_INF_BF16)
+#define CUDART_INF_BF16 __ushort_as_bfloat16(0x7F80)
 #endif
 
 #if !defined(USE_DCU)
