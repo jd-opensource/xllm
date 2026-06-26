@@ -558,7 +558,7 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
   }
   xllm::kernel::npu::replace_token(inputs.token_ids,
                                    last_step_output_.sample_output.next_tokens,
-                                   /*synchronize_stream=*/false);
+                                   /*synchronize_stream=*/true);
 #else
   auto& flatten_tokens = inputs.token_ids;
   auto neg_mask = (flatten_tokens < 0);
