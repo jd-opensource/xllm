@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <limits>
+#include <mutex>
 
 #include "block_manager_impl.h"
 #include "common/global_flags.h"
@@ -29,6 +30,11 @@ limitations under the License.
 #include "framework/xtensor/xtensor_block_manager_impl.h"
 
 namespace xllm {
+namespace {
+
+constexpr size_t kMaxStickyPrefixRoutes = 65536;
+
+}  // namespace
 
 BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
     : options_(options) {
@@ -124,10 +130,99 @@ int32_t BlockManagerPool::get_dp_rank(Sequence* sequence) const {
   if (sequence->dp_rank() >= 0) {
     dp_rank = sequence->dp_rank();
   } else {
-    dp_rank = get_manager_with_max_free_blocks();
+    dp_rank = find_sticky_dp_rank(sequence);
+    if (dp_rank < 0) {
+      dp_rank = get_manager_with_max_free_blocks();
+    }
     sequence->set_dp_rank(dp_rank);
   }
   return dp_rank;
+}
+
+int32_t BlockManagerPool::find_sticky_dp_rank(Sequence* sequence) const {
+  if (!options_.enable_prefix_cache() || options_.enable_xtensor() ||
+      !options_.manager_types().empty() || block_managers_.empty()) {
+    return -1;
+  }
+
+  sequence->update_block_hashes(static_cast<uint32_t>(options_.block_size()),
+                                options_.hasher_type());
+  const Slice<XXH3Key> block_hashes = sequence->block_hashes();
+  std::shared_lock<std::shared_mutex> lock(sticky_prefix_routes_mutex_);
+  for (size_t i = block_hashes.size(); i > 0; --i) {
+    const auto it = sticky_prefix_routes_.find(block_hashes[i - 1]);
+    if (it != sticky_prefix_routes_.end() && it->second.dp_rank_ >= 0 &&
+        static_cast<size_t>(it->second.dp_rank_) < block_managers_.size()) {
+      return it->second.dp_rank_;
+    }
+  }
+  return -1;
+}
+
+void BlockManagerPool::update_sticky_prefix_routes(Sequence* sequence,
+                                                   int32_t dp_rank) {
+  if (!options_.enable_prefix_cache() || options_.enable_xtensor() ||
+      !options_.manager_types().empty() || dp_rank < 0 ||
+      static_cast<size_t>(dp_rank) >= block_managers_.size()) {
+    return;
+  }
+
+  sequence->update_block_hashes(static_cast<uint32_t>(options_.block_size()),
+                                options_.hasher_type());
+  const Slice<XXH3Key> block_hashes = sequence->block_hashes();
+  const size_t block_size = static_cast<size_t>(options_.block_size());
+  if (block_size == 0) {
+    return;
+  }
+  const size_t route_blocks =
+      std::min(block_hashes.size(),
+               std::min(sequence->cached_tokens().size() / block_size,
+                        sequence->kv_state().num_blocks(BlockType::KV)));
+  std::unique_lock<std::shared_mutex> lock(sticky_prefix_routes_mutex_);
+  const size_t route_limit = max_sticky_prefix_routes();
+  if (route_limit == 0) {
+    return;
+  }
+  if (sticky_prefix_route_slots_.size() != route_limit) {
+    sticky_prefix_routes_.clear();
+    sticky_prefix_route_slots_.assign(route_limit, StickyPrefixRouteSlot{});
+    sticky_prefix_route_cursor_ = 0;
+    sticky_prefix_route_generation_ = 0;
+  }
+
+  for (size_t i = 0; i < route_blocks; ++i) {
+    auto it = sticky_prefix_routes_.find(block_hashes[i]);
+    if (it != sticky_prefix_routes_.end()) {
+      it->second.dp_rank_ = dp_rank;
+      continue;
+    }
+
+    StickyPrefixRouteSlot& slot =
+        sticky_prefix_route_slots_[sticky_prefix_route_cursor_];
+    if (slot.occupied_) {
+      auto old_it = sticky_prefix_routes_.find(slot.key_);
+      if (old_it != sticky_prefix_routes_.end() &&
+          old_it->second.slot_ == sticky_prefix_route_cursor_ &&
+          old_it->second.generation_ == slot.generation_) {
+        sticky_prefix_routes_.erase(old_it);
+      }
+    }
+
+    const uint64_t generation = ++sticky_prefix_route_generation_;
+    slot.key_ = block_hashes[i];
+    slot.generation_ = generation;
+    slot.occupied_ = true;
+    sticky_prefix_routes_[block_hashes[i]] =
+        StickyPrefixRoute{dp_rank, sticky_prefix_route_cursor_, generation};
+    sticky_prefix_route_cursor_ =
+        (sticky_prefix_route_cursor_ + 1) % route_limit;
+  }
+}
+
+size_t BlockManagerPool::max_sticky_prefix_routes() const {
+  const size_t total_blocks =
+      block_managers_.size() * static_cast<size_t>(options_.num_blocks());
+  return std::min(total_blocks, kMaxStickyPrefixRoutes);
 }
 
 bool BlockManagerPool::allocate_single_block(Sequence* sequence,
@@ -430,6 +525,7 @@ void BlockManagerPool::cache(Sequence* sequence) {
                                   existed_shared_blocks_num,
                                   sequence->mm_data(),
                                   sequence->block_hashes());
+  update_sticky_prefix_routes(sequence, dp_rank);
 }
 
 void BlockManagerPool::cache(Sequence* sequence, size_t num_tokens) {
