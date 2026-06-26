@@ -30,6 +30,8 @@ limitations under the License.
 #include "framework/block/block.h"
 #include "framework/block/block_manager_impl.h"
 #include "framework/block/block_manager_pool.h"
+#include "framework/block/block_utils.h"
+#include "framework/block/composite_block_manager.h"
 #include "framework/config/beam_search_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
@@ -133,6 +135,31 @@ Sequence make_basic_sequence(const std::vector<int32_t>& prompt_token_ids) {
   seq_params.echo = false;
   seq_params.logprobs = false;
   seq_params.enable_schedule_overlap = false;
+
+  IncrementalDecoder decoder(/*prompt=*/"",
+                             /*num_prompt_tokens=*/prompt_token_ids.size(),
+                             /*echo=*/false,
+                             /*skip_special_tokens=*/true);
+  return Sequence(/*index=*/0,
+                  prompt_token_ids,
+                  /*input_embedding=*/torch::Tensor(),
+                  /*mm_data=*/MMData(),
+                  decoder,
+                  seq_params);
+}
+
+Sequence make_overlap_sequence(const std::vector<int32_t>& prompt_token_ids,
+                               size_t seq_capacity,
+                               RequestSamplingParam* sampling_param,
+                               StoppingChecker* stopping_checker) {
+  SequenceParams seq_params;
+  seq_params.seq_capacity = seq_capacity;
+  seq_params.stopping_checker = stopping_checker;
+  seq_params.sampling_param = sampling_param;
+  seq_params.skip_special_tokens = true;
+  seq_params.echo = false;
+  seq_params.logprobs = false;
+  seq_params.enable_schedule_overlap = true;
 
   IncrementalDecoder decoder(/*prompt=*/"",
                              /*num_prompt_tokens=*/prompt_token_ids.size(),
@@ -1736,6 +1763,71 @@ TEST(BatchTest, OverlapMTPReplacementSkipsPreemptedSequenceWithoutKVBlocks) {
       batch.process_sample_output(real_output, /*replace_fake_token=*/true));
   EXPECT_EQ(seq.num_generated_tokens(), 1);
   EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens()], 101);
+
+  SchedulerConfig::get_instance().enable_schedule_overlap(
+      old_enable_schedule_overlap);
+}
+
+TEST(BatchTest, OverlapMTPReplacementKeepsCompositeKvBlocks) {
+  const bool old_enable_schedule_overlap =
+      SchedulerConfig::get_instance().enable_schedule_overlap();
+  SchedulerConfig::get_instance().enable_schedule_overlap(true);
+
+  const uint32_t base_block_size = 128;
+  const uint32_t base_num_blocks = 4096;
+  const uint32_t window_size = 128;
+  const uint32_t max_seqs_per_batch = 4;
+
+  BlockManager::Options options;
+  options.num_blocks(base_num_blocks)
+      .block_size(base_block_size)
+      .sliding_window_size(window_size)
+      .swa_blocks_per_seq(static_cast<uint32_t>(
+          get_swa_blocks_per_seq(window_size, base_block_size)))
+      .max_tokens_per_batch(1280)
+      .max_seqs_per_batch(max_seqs_per_batch)
+      .manager_types({1, 0, 0})
+      .compress_ratios({0, 4, 128});
+  CompositeBlockManager manager(options);
+
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(8);
+
+  Sequence seq = make_overlap_sequence(
+      {1, 10, 11}, /*seq_capacity=*/128, &sampling_param, &stopping_checker);
+  ASSERT_TRUE(manager.allocate_for_sequence(&seq, seq.num_prompt_tokens()));
+  ASSERT_EQ(seq.kv_state().num_kv_blocks(), 0u);
+  ASSERT_GT(seq.kv_state().current_max_tokens_capacity(), 0u);
+  seq.kv_state().incr_kv_cache_tokens_num(seq.num_prompt_tokens() - 1);
+
+  Batch batch({&seq});
+  batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+
+  RawForwardOutput fake_output;
+  RawSampleOutput fake_sample_output;
+  RawToken fake_token;
+  fake_token.id = -1;
+  fake_sample_output.tokens.push_back(fake_token);
+  fake_output.outputs.push_back(std::move(fake_sample_output));
+  batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
+
+  RawForwardOutput real_output;
+  RawSampleOutput real_sample_output;
+  RawToken real_token_0;
+  real_token_0.id = 101;
+  real_sample_output.tokens.push_back(real_token_0);
+  RawToken real_token_1;
+  real_token_1.id = 102;
+  real_sample_output.tokens.push_back(real_token_1);
+  real_output.outputs.push_back(std::move(real_sample_output));
+  batch.process_sample_output(real_output, /*replace_fake_token=*/true);
+
+  ASSERT_EQ(seq.num_generated_tokens(), 2);
+  EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens()], 101);
+  EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens() + 1], 102);
+  EXPECT_EQ(seq.kv_state().kv_cache_tokens_num(), seq.num_prompt_tokens() + 1);
 
   SchedulerConfig::get_instance().enable_schedule_overlap(
       old_enable_schedule_overlap);
