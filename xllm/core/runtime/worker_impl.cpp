@@ -727,10 +727,14 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
   }
 #endif
   c10::StreamGuard stream_guard = prepare_stream.set_stream_guard();
-  if (enable_schedule_overlap() && options_.enable_speculative_decode() &&
+  const bool can_prepare_graph_decode_independently =
+      can_prepare_npu_graph_decode_input(input.input_params);
+  if (enable_schedule_overlap() &&
+      (options_.enable_speculative_decode() ||
+       !can_prepare_graph_decode_independently) &&
       compute_stream_) {
     // MTP updates reuse shared prepare/compute streams and need this ordering;
-    // ordinary graph-decode overlap must keep prepare independent of compute.
+    // only graph double-buffer decode can prepare the next slot independently.
     prepare_stream.wait_stream(*compute_stream_);
   }
   CHECK(prepare_stream.wait_event(input.metadata_ready_event))
