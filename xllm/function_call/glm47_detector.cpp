@@ -154,7 +154,12 @@ std::string Glm47Detector::extract_normal_text(
   }
 
   if (last_end < text.length()) {
-    normal_text.append(text, last_end, std::string::npos);
+    size_t trailing_bot = text.find(bot_token_, last_end);
+    if (trailing_bot == std::string::npos) {
+      normal_text.append(text, last_end, std::string::npos);
+    } else if (trailing_bot > last_end) {
+      normal_text.append(text, last_end, trailing_bot - last_end);
+    }
   }
 
   return trim_whitespace(normal_text);

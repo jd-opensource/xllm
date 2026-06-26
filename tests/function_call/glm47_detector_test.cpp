@@ -229,6 +229,21 @@ TEST_F(Glm47DetectorTest, KeepsNormalTextBetweenAndAfterToolCalls) {
   EXPECT_EQ(result.calls[1].name.value(), "calculate");
 }
 
+TEST_F(Glm47DetectorTest, DropsTrailingIncompleteToolCallFromNormalText) {
+  std::string text =
+      "First "
+      "<tool_call>get_weather<arg_key>city</arg_key><arg_value>Beijing</"
+      "arg_value></tool_call>"
+      " after "
+      "<tool_call>calculate<arg_key>expression</arg_key><arg_value>1 +";
+
+  auto result = detector_->detect_and_parse(text, tools_);
+
+  EXPECT_EQ(result.normal_text, "First  after");
+  ASSERT_EQ(result.calls.size(), 1);
+  EXPECT_EQ(result.calls[0].name.value(), "get_weather");
+}
+
 // Test number type coercion
 TEST_F(Glm47DetectorTest, NumberTypeCoercion) {
   std::string text =
