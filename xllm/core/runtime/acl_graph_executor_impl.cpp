@@ -24,7 +24,6 @@ limitations under the License.
 #include <torch_npu/torch_npu.h>
 
 #include <algorithm>
-#include <string_view>
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/execution_config.h"
@@ -46,12 +45,6 @@ namespace xllm::npu {
 namespace {
 constexpr uint64_t kSpecVerifyGraphKeyMask = 1ull << 63;
 constexpr uint64_t kSpecVerifyQMaxSeqLenShift = 32;
-
-bool is_qwen3_5_model_type(std::string_view model_type) {
-  return model_type == "qwen3_5" || model_type == "qwen3_5_moe" ||
-         model_type == "qwen3_5_text" || model_type == "qwen3_5_moe_text" ||
-         model_type.rfind("qwen3_5_", 0) == 0;
-}
 
 std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
     const std::vector<KVCache>& kv_caches) {
@@ -640,7 +633,7 @@ void AclGraphExecutorImpl::prepare_graph_input(const torch::Tensor& tokens,
   if (model_->requires_graph_forward_metadata()) {
     return;
   }
-  if (in_spec_verify_phase && !is_qwen3_5_model_type(args_.model_type())) {
+  if (in_spec_verify_phase && !model_->is_hybrid_linear_attention()) {
     return;
   }
   if (in_decoding_phase && params.parallel.dp_global_token_nums.size() > 1) {
