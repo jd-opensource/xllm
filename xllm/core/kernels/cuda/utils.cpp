@@ -414,6 +414,35 @@ std::string get_batch_prefill_uri(const std::string& backend,
   return oss.str();
 }
 
+std::string get_batch_prefill_tvm_ffi_uri(const std::string& backend,
+                                          torch::ScalarType dtype_q,
+                                          torch::ScalarType dtype_kv,
+                                          torch::ScalarType dtype_o,
+                                          torch::ScalarType dtype_idx,
+                                          int64_t head_dim_qk,
+                                          int64_t head_dim_vo,
+                                          int64_t pos_encoding_mode,
+                                          bool use_sliding_window,
+                                          bool use_logits_soft_cap,
+                                          bool use_fp16_qk_reduction) {
+  std::ostringstream oss;
+  oss << "batch_prefill_tvm_ffi_with_kv_cache_"
+      << "dtype_q_" << filename_safe_dtype_map.at(dtype_q) << "_"
+      << "dtype_kv_" << filename_safe_dtype_map.at(dtype_kv) << "_"
+      << "dtype_o_" << filename_safe_dtype_map.at(dtype_o) << "_"
+      << "dtype_idx_" << filename_safe_dtype_map.at(dtype_idx) << "_"
+      << "head_dim_qk_" << head_dim_qk << "_"
+      << "head_dim_vo_" << head_dim_vo << "_"
+      << "posenc_" << pos_encoding_mode << "_"
+      << "use_swa_" << (use_sliding_window ? "True" : "False") << "_"
+      << "use_logits_cap_" << (use_logits_soft_cap ? "True" : "False") << "_"
+      << "f16qk_" << (use_fp16_qk_reduction ? "True" : "False");
+
+  if (backend == "fa3") oss << "_sm90";
+
+  return oss.str();
+}
+
 std::string get_batch_decode_uri(torch::ScalarType dtype_q,
                                  torch::ScalarType dtype_kv,
                                  torch::ScalarType dtype_o,
@@ -425,6 +454,30 @@ std::string get_batch_decode_uri(torch::ScalarType dtype_q,
                                  bool use_logits_soft_cap) {
   std::ostringstream oss;
   oss << "batch_decode_with_kv_cache_"
+      << "dtype_q_" << filename_safe_dtype_map.at(dtype_q) << "_"
+      << "dtype_kv_" << filename_safe_dtype_map.at(dtype_kv) << "_"
+      << "dtype_o_" << filename_safe_dtype_map.at(dtype_o) << "_"
+      << "dtype_idx_" << filename_safe_dtype_map.at(dtype_idx) << "_"
+      << "head_dim_qk_" << head_dim_qk << "_"
+      << "head_dim_vo_" << head_dim_vo << "_"
+      << "posenc_" << pos_encoding_mode << "_"
+      << "use_swa_" << (use_sliding_window ? "True" : "False") << "_"
+      << "use_logits_cap_" << (use_logits_soft_cap ? "True" : "False");
+
+  return oss.str();
+}
+
+std::string get_batch_decode_tvm_ffi_uri(torch::ScalarType dtype_q,
+                                         torch::ScalarType dtype_kv,
+                                         torch::ScalarType dtype_o,
+                                         torch::ScalarType dtype_idx,
+                                         int64_t head_dim_qk,
+                                         int64_t head_dim_vo,
+                                         int64_t pos_encoding_mode,
+                                         bool use_sliding_window,
+                                         bool use_logits_soft_cap) {
+  std::ostringstream oss;
+  oss << "batch_decode_tvm_ffi_with_kv_cache_"
       << "dtype_q_" << filename_safe_dtype_map.at(dtype_q) << "_"
       << "dtype_kv_" << filename_safe_dtype_map.at(dtype_kv) << "_"
       << "dtype_o_" << filename_safe_dtype_map.at(dtype_o) << "_"

@@ -101,7 +101,20 @@ void update_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
   auto page_locked_int_workspace_buffer =
       to_ffi_tensor(FlashinferWorkspace::get_instance()
                         .get_page_locked_int_workspace_buffer());
-
+#if defined(USE_MACA)
+  plan_info->uri =
+      get_batch_prefill_tvm_ffi_uri(backend,
+                                    query_dtype,
+                                    key_dtype,
+                                    output_dtype,
+                                    attn_meta.q_cu_seq_lens.scalar_type(),
+                                    head_dim_qk,
+                                    head_dim_vo,
+                                    /*pos_encoding_mode=*/0,
+                                    /*use_sliding_window=*/false,
+                                    /*use_logits_soft_cap=*/false,
+                                    /*use_fp16_qk_reduction=*/false);
+#else
   plan_info->uri = get_batch_prefill_uri(backend,
                                          query_dtype,
                                          key_dtype,
@@ -113,6 +126,7 @@ void update_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
                                          /*use_sliding_window=*/false,
                                          /*use_logits_soft_cap=*/false,
                                          /*use_fp16_qk_reduction=*/false);
+#endif
 
   torch::Tensor qo_indptr_host = attn_meta.q_cu_seq_lens.to(torch::kCPU);
   torch::Tensor kv_cu_seq_lens_host = attn_meta.kv_cu_seq_lens.to(torch::kCPU);
@@ -198,7 +212,20 @@ void update_chunked_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
   auto page_locked_int_workspace_buffer =
       to_ffi_tensor(FlashinferWorkspace::get_instance()
                         .get_page_locked_int_workspace_buffer());
-
+#if defined(USE_MACA)
+  plan_info->uri =
+      get_batch_prefill_tvm_ffi_uri(backend,
+                                    query_dtype,
+                                    key_dtype,
+                                    output_dtype,
+                                    attn_meta.paged_kv_indptr.scalar_type(),
+                                    head_dim_qk,
+                                    head_dim_vo,
+                                    /*pos_encoding_mode=*/0,
+                                    /*use_sliding_window=*/false,
+                                    /*use_logits_soft_cap=*/false,
+                                    /*use_fp16_qk_reduction=*/false);
+#else
   plan_info->uri =
       get_batch_prefill_uri(backend,
                             query_dtype,
@@ -211,6 +238,7 @@ void update_chunked_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
                             /*use_sliding_window=*/false,
                             /*use_logits_soft_cap=*/false,
                             /*use_fp16_qk_reduction=*/false);
+#endif
   const int64_t batch_size = attn_meta.paged_kv_last_page_len.size(0);
   torch::Tensor qo_indptr_host;
   if (causal) {
