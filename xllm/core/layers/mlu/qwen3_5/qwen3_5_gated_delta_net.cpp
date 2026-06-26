@@ -10,10 +10,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "qwen3_5_gated_delta_net.h"
+#include "layers/mlu/qwen3_5/qwen3_5_gated_delta_net.h"
 
 #include <glog/logging.h>
 
+#include "framework/state_dict/utils.h"
 #include "kernels/mlu/mlu_ops_api.h"
 
 namespace xllm {
@@ -41,8 +42,8 @@ Qwen3_5GatedDeltaNetImpl::Qwen3_5GatedDeltaNetImpl(
   conv1d_ = register_module("conv1d",
                             ColumnParallelLinear(args.linear_conv_kernel_dim(),
                                                  k_size_ * 2 + v_size_,
-                                                 false,
-                                                 false,
+                                                 /*bias=*/false,
+                                                 /*gather_output=*/false,
                                                  no_quant_args,
                                                  parallel_args.tp_group_,
                                                  options));
@@ -50,8 +51,8 @@ Qwen3_5GatedDeltaNetImpl::Qwen3_5GatedDeltaNetImpl(
   in_proj_qkv_ = register_module("in_proj_qkv",
                                  ColumnParallelLinear(args.hidden_size(),
                                                       k_size_ * 2 + v_size_,
-                                                      false,
-                                                      false,
+                                                      /*bias=*/false,
+                                                      /*gather_output=*/false,
                                                       no_quant_args,
                                                       parallel_args.tp_group_,
                                                       options));
@@ -59,8 +60,8 @@ Qwen3_5GatedDeltaNetImpl::Qwen3_5GatedDeltaNetImpl(
   in_proj_z_ = register_module("in_proj_z",
                                ColumnParallelLinear(args.hidden_size(),
                                                     v_size_,
-                                                    false,
-                                                    false,
+                                                    /*bias=*/false,
+                                                    /*gather_output=*/false,
                                                     no_quant_args,
                                                     parallel_args.tp_group_,
                                                     options));
@@ -68,8 +69,8 @@ Qwen3_5GatedDeltaNetImpl::Qwen3_5GatedDeltaNetImpl(
   in_proj_b_ = register_module("in_proj_b",
                                ColumnParallelLinear(args.hidden_size(),
                                                     num_v_heads_,
-                                                    false,
-                                                    false,
+                                                    /*bias=*/false,
+                                                    /*gather_output=*/false,
                                                     no_quant_args,
                                                     parallel_args.tp_group_,
                                                     options));
@@ -77,25 +78,27 @@ Qwen3_5GatedDeltaNetImpl::Qwen3_5GatedDeltaNetImpl(
   in_proj_a_ = register_module("in_proj_a",
                                ColumnParallelLinear(args.hidden_size(),
                                                     num_v_heads_,
-                                                    false,
-                                                    false,
+                                                    /*bias=*/false,
+                                                    /*gather_output=*/false,
                                                     no_quant_args,
                                                     parallel_args.tp_group_,
                                                     options));
 
   auto opts = options.dtype(torch::kBFloat16);
-  dt_bias_ = register_parameter(
-      "dt_bias", torch::ones({num_v_heads_ / tp_size_}, opts), false);
+  dt_bias_ = register_parameter("dt_bias",
+                                torch::ones({num_v_heads_ / tp_size_}, opts),
+                                /*requires_grad=*/false);
 
-  A_log_ = register_parameter(
-      "A_log", torch::empty({num_v_heads_ / tp_size_}, opts), false);
+  A_log_ = register_parameter("A_log",
+                              torch::empty({num_v_heads_ / tp_size_}, opts),
+                              /*requires_grad=*/false);
 
   o_proj_ = register_module("out_proj",
                             RowParallelLinear(v_size_,
                                               args.hidden_size(),
-                                              false,
-                                              true,
-                                              true,
+                                              /*bias=*/false,
+                                              /*input_is_parallelized=*/true,
+                                              /*enable_result_reduction=*/true,
                                               no_quant_args,
                                               parallel_args.tp_group_,
                                               options));
@@ -111,8 +114,6 @@ Qwen3_5GatedDeltaNetImpl::Qwen3_5GatedDeltaNetImpl(
 }
 
 void Qwen3_5GatedDeltaNetImpl::load_state_dict(const StateDict& state_dict) {
-  const int64_t rank = rank_;
-  const int64_t world_size = tp_size_;
   const int32_t shard_tensor_count = 3;
   const std::vector<int64_t> shard_sizes = {
       k_size_ / tp_size_, k_size_ / tp_size_, v_size_ / tp_size_};
@@ -147,8 +148,20 @@ void Qwen3_5GatedDeltaNetImpl::load_state_dict(const StateDict& state_dict) {
   if (auto w = state_dict.get_tensor("norm.weight"); w.defined()) {
     norm_->load_state_dict(StateDict({{"weight", w}}));
   }
-  LOAD_SHARDED_WEIGHT(dt_bias, 0);
-  LOAD_SHARDED_WEIGHT(A_log, 0);
+  weight::load_sharded_weight(state_dict,
+                              "dt_bias",
+                              /*dim=*/0,
+                              static_cast<int32_t>(rank_),
+                              static_cast<int32_t>(tp_size_),
+                              dt_bias_,
+                              dt_bias_is_loaded_);
+  weight::load_sharded_weight(state_dict,
+                              "A_log",
+                              /*dim=*/0,
+                              static_cast<int32_t>(rank_),
+                              static_cast<int32_t>(tp_size_),
+                              A_log_,
+                              A_log_is_loaded_);
 }
 
 void Qwen3_5GatedDeltaNetImpl::verify_loaded_weights(
@@ -239,9 +252,9 @@ torch::Tensor Qwen3_5GatedDeltaNetImpl::forward(
                                             attn_metadata.has_initial_states,
                                             initial_state_idx,
                                             num_accepted_tokens,
-                                            true);
+                                            /*inplace_final_state=*/true);
     auto [g, beta] = xllm::kernel::mlu::fused_gdn_gating(
-        A_log_, a, b, dt_bias_, 1.0f, 20.0f);
+        A_log_, a, b, dt_bias_, /*beta=*/1.0f, /*threshold=*/20.0f);
     mixed_qkv = mixed_qkv.transpose(0, 1);
     int64_t split_size = k_size_ / tp_size_;
     auto q_conv = mixed_qkv.slice(-1, 0, split_size);
@@ -267,14 +280,19 @@ torch::Tensor Qwen3_5GatedDeltaNetImpl::forward(
                                          initial_state,
                                          cu_seqlens,
                                          chunk_indices,
-                                         true,
-                                         true);
+                                         /*output_final_state=*/true,
+                                         /*use_qk_l2norm_in_kernel=*/true);
     ssm_cache.index_put_(
         {state_indices},
         last_recurrent_state.to(ssm_cache.dtype()).transpose(2, 3));
   } else {
-    mixed_qkv = xllm::kernel::mlu::causal_conv1d_update_decode(
-        mixed_qkv, conv_cache, conv_weight, std::nullopt, state_indices, -1);
+    mixed_qkv =
+        xllm::kernel::mlu::causal_conv1d_update_decode(mixed_qkv,
+                                                       conv_cache,
+                                                       conv_weight,
+                                                       std::nullopt,
+                                                       state_indices,
+                                                       /*pad_slot_id=*/-1);
 
     double scale = 1.0 / std::sqrt(static_cast<double>(head_k_dim_));
     std::tie(core_attn_out, last_recurrent_state) =
@@ -287,7 +305,7 @@ torch::Tensor Qwen3_5GatedDeltaNetImpl::forward(
             scale,
             ssm_cache,
             state_indices,
-            true);
+            /*use_qk_l2norm_in_kernel=*/true);
   }
 
   // ============================================================

@@ -109,6 +109,7 @@ ConvBatchMeta MakeConvBatchMeta(const torch::Tensor& q_cu_seq_lens,
       torch::full({max_num_programs}, pad_slot_id, opts);
 
   std::vector<torch::Tensor> vec;
+  vec.reserve(nums.size(0));
   for (int64_t i = 0; i < nums.size(0); ++i) {
     vec.emplace_back(torch::arange(nums[i].item<int64_t>(), nums.options()));
   }
@@ -131,12 +132,15 @@ torch::Tensor MakeChunkIndices(const torch::Tensor& cu_seqlens,
   int64_t total = cumsum[-1].item<int64_t>();
   torch::Tensor arange_total = torch::arange(total, cu_seqlens.options());
   torch::Tensor zeros = torch::zeros({1}, cumsum.options());
-  torch::Tensor prefix = torch::cat({zeros, cumsum.slice(0, 0, -1)});
+  torch::Tensor prefix =
+      torch::cat({zeros, cumsum.slice(/*dim=*/0, /*start=*/0, /*end=*/-1)});
   torch::Tensor repeats_prefix = torch::repeat_interleave(prefix, num_chunks);
   torch::Tensor indices = arange_total - repeats_prefix;
   torch::Tensor mask = indices == 0;
   torch::Tensor col0 = mask.cumsum(0) - 1;
-  return torch::stack({col0, indices}, 1).to(cu_seqlens).to(torch::kInt32);
+  return torch::stack({col0, indices}, /*dim=*/1)
+      .to(cu_seqlens)
+      .to(torch::kInt32);
 }
 
 // ===========================================================================
@@ -153,7 +157,8 @@ TEST_F(Qwen3_5GatedDeltaNetOpsTest, FusedGdnGatingShapeAndDeterminism) {
   auto a_log = MakeNoise("gdn_gating.A_log", {num_heads}, 0.02f);
   auto dt_bias = MakeOnes({num_heads}, torch::kBFloat16);
 
-  auto [g, beta] = fused_gdn_gating(a_log, a, b, dt_bias, 1.0f, 20.0f);
+  auto [g, beta] = fused_gdn_gating(
+      a_log, a, b, dt_bias, /*beta=*/1.0f, /*threshold=*/20.0f);
   Sync();
 
   // g: [1, num_tokens, num_heads] fp32, beta: [1, num_tokens, num_heads] bf16.
@@ -166,7 +171,8 @@ TEST_F(Qwen3_5GatedDeltaNetOpsTest, FusedGdnGatingShapeAndDeterminism) {
   EXPECT_TRUE(torch::isfinite(g_cpu).all().item<bool>()) << "g must be finite";
 
   // Determinism: same inputs -> same outputs.
-  auto [g2, beta2] = fused_gdn_gating(a_log, a, b, dt_bias, 1.0f, 20.0f);
+  auto [g2, beta2] = fused_gdn_gating(
+      a_log, a, b, dt_bias, /*beta=*/1.0f, /*threshold=*/20.0f);
   Sync();
   EXPECT_TRUE(torch::allclose(g, g2, /*rtol=*/1e-5, /*atol=*/1e-6));
   EXPECT_TRUE(torch::allclose(beta, beta2, /*rtol=*/1e-3, /*atol=*/1e-4));

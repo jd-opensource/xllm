@@ -153,6 +153,7 @@ class Qwen3_5GatedDeltaNetTest : public ::testing::Test {
     torch::Tensor token_block_offset_ptr =
         torch::full({max_num_programs}, pad_slot_id, opts);
     std::vector<torch::Tensor> vec;
+    vec.reserve(nums.size(0));
     for (int64_t i = 0; i < nums.size(0); ++i) {
       vec.emplace_back(torch::arange(nums[i].item<int64_t>(), nums.options()));
     }
@@ -172,12 +173,15 @@ class Qwen3_5GatedDeltaNetTest : public ::testing::Test {
     int64_t total = cumsum[-1].item<int64_t>();
     torch::Tensor arange_total = torch::arange(total, cu_seqlens.options());
     torch::Tensor zeros = torch::zeros({1}, cumsum.options());
-    torch::Tensor prefix = torch::cat({zeros, cumsum.slice(0, 0, -1)});
+    torch::Tensor prefix =
+        torch::cat({zeros, cumsum.slice(/*dim=*/0, /*start=*/0, /*end=*/-1)});
     torch::Tensor repeats_prefix = torch::repeat_interleave(prefix, num_chunks);
     torch::Tensor indices = arange_total - repeats_prefix;
     torch::Tensor mask = indices == 0;
     torch::Tensor col0 = mask.cumsum(0) - 1;
-    return torch::stack({col0, indices}, 1).to(cu_seqlens).to(torch::kInt32);
+    return torch::stack({col0, indices}, /*dim=*/1)
+        .to(cu_seqlens)
+        .to(torch::kInt32);
   }
 
   AttentionMetadata MakePrefillMetadata(int64_t batch_size, int64_t seq_len) {
