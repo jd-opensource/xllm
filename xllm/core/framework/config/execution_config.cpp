@@ -26,10 +26,8 @@ DEFINE_bool(
     "MLU Graph, or DCU Graph) to optimize decode performance by reducing "
     "kernel launch overhead and device idle time.");
 
-constexpr bool kEnableGraphDoubleBufferDefault = true;
-
 DEFINE_bool(enable_graph_double_buffer,
-            kEnableGraphDoubleBufferDefault,
+            true,
             "Whether to enable double-buffered ACL graph persistent params "
             "and graph instances for NPU schedule-overlap decode.");
 
