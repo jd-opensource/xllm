@@ -177,7 +177,8 @@ class Qwen3_5ModelImpl final
   layer::AttentionMetadata get_attention_metadata(
       const ModelInputParams& params,
       const torch::Tensor& h) {
-    auto attn_metadata = layer::AttentionMetadataBuilder::build(params, false);
+    auto attn_metadata =
+        layer::AttentionMetadataBuilder::build(params, /*enable_mla=*/false);
     // Init batch and token_block_offset for GDN attention
     if (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill) {
       constexpr int32_t block_size = 8;
@@ -203,7 +204,8 @@ class Qwen3_5ModelImpl final
                       torch::dtype(torch::kInt32).device(seqlens.device()));
 
       std::vector<torch::Tensor> vec;
-      for (size_t i = 0; i < nums.size(0); i++) {
+      vec.reserve(nums.size(0));
+      for (int64_t i = 0; i < nums.size(0); ++i) {
         vec.emplace_back(
             torch::arange(nums[i].item<int64_t>(), nums.options()));
       }
@@ -221,13 +223,14 @@ class Qwen3_5ModelImpl final
         torch::Tensor arange_total =
             torch::arange(total_chunks, attn_metadata.q_cu_seq_lens.options());
         torch::Tensor zeros = torch::zeros({1}, cumsum.options());
-        torch::Tensor prefix = torch::cat({zeros, cumsum.slice(0, 0, -1)});
+        torch::Tensor prefix = torch::cat(
+            {zeros, cumsum.slice(/*dim=*/0, /*start=*/0, /*end=*/-1)});
         torch::Tensor repeats_prefix =
             torch::repeat_interleave(prefix, num_chunks);
         torch::Tensor indices = arange_total - repeats_prefix;
         torch::Tensor mask = indices == 0;
         torch::Tensor col0 = mask.cumsum(0) - 1;
-        attn_metadata.chunk_indices = torch::stack({col0, indices}, 1)
+        attn_metadata.chunk_indices = torch::stack({col0, indices}, /*dim=*/1)
                                           .to(attn_metadata.q_cu_seq_lens)
                                           .to(torch::kInt32);
       }
