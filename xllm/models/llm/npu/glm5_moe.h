@@ -15,6 +15,10 @@ limitations under the License.
 
 #pragma once
 
+#include <string>
+#include <unordered_set>
+#include <vector>
+
 #include "core/layers/npu/npu_deepseek_v32_decoder_layer_impl.h"
 #include "deepseek_v32.h"
 
@@ -387,4 +391,16 @@ REGISTER_MODEL_ARGS(
               std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
                                           args->eos_token_id_vec().end()));
     }));
+
+REGISTER_TOKENIZER_ARGS(glm_moe_dsa, [&] {
+  const std::vector<std::string> parser_visible_special_tokens({"<tool_call>",
+                                                                "</tool_call>",
+                                                                "<arg_key>",
+                                                                "</arg_key>",
+                                                                "<arg_value>",
+                                                                "</arg_value>",
+                                                                "<think>",
+                                                                "</think>"});
+  SET_ARG(visible_special_tokens, parser_visible_special_tokens);
+});
 }  // namespace xllm::npu::model
