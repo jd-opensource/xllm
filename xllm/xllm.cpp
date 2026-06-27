@@ -128,6 +128,8 @@ Options create_options(const std::string& instance_name, bool is_local) {
       .max_cache_size(kv_cache_config.max_cache_size())
       .max_memory_utilization(kv_cache_config.max_memory_utilization())
       .enable_prefix_cache(kv_cache_config.enable_prefix_cache())
+      .max_linear_state_cache_slots(
+          kv_cache_config.max_linear_state_cache_slots())
       .max_tokens_per_batch(scheduler_config.max_tokens_per_batch())
       .max_seqs_per_batch(scheduler_config.max_seqs_per_batch())
       .max_tokens_per_chunk_for_prefill(
@@ -503,6 +505,7 @@ int main(int argc, char** argv) {
   FLAGS_minloglevel = 0;
   google::ParseCommandLineFlags(&argc, &argv, true);
   google::InitGoogleLogging("xllm");
+  google::InstallFailureSignalHandler();
   initialize_configs();
 
   // Check if model path is provided

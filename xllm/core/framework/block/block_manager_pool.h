@@ -20,9 +20,12 @@ limitations under the License.
 
 #include "block_manager.h"
 #include "framework/block/kv_cache_manager.h"
+#include "framework/block/linear_state_block_manager.h"
 #include "framework/block/single_block_manager.h"
 
 namespace xllm {
+
+struct LinearStateCacheOp;
 
 class BlockManagerPool : public KVCacheManager {
  public:
@@ -30,7 +33,11 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(uint32_t, num_blocks) = 0;
     PROPERTY(uint32_t, host_num_blocks) = 0;
     PROPERTY(int32_t, block_size) = 0;
+    PROPERTY(uint32_t, single_block_capacity) = 0;
     PROPERTY(bool, enable_linear_state) = false;
+    // Total physical linear-state slots [0, N) for the unified slot pool
+    // (= num_linear_state_blocks). Only used when enable_linear_state is true.
+    PROPERTY(int32_t, linear_state_num_slots) = 0;
     PROPERTY(bool, enable_prefix_cache) = true;
     PROPERTY(bool, enable_disagg_pd) = false;
     PROPERTY(bool, enable_kvcache_store) = false;
@@ -87,6 +94,26 @@ class BlockManagerPool : public KVCacheManager {
 
   virtual float get_gpu_cache_usage_perc() const;
 
+  // Linear-state leaf for the given dp rank, or nullptr when linear state is
+  // disabled. Returned pointer is owned by the composite; do not delete.
+  LinearStateBlockManager* linear_state_prefix_cache(int32_t dp_rank);
+
+  // Resolve linear-state checkpoint copy plans through the per-dp-rank linear
+  // leaf. Restores are matched before saves reserve slots, so save-side
+  // eviction cannot reclaim checkpoints needed by this batch's restores. The
+  // returned reservations must be committed only after the worker's save copy
+  // completes.
+  LinearStateCheckpointReservations resolve_linear_state_cache_ops(
+      int32_t dp_rank,
+      std::vector<LinearStateCacheOp>* cache_ops,
+      const std::vector<Sequence*>& sequences = {});
+
+  // Commit this batch's promotions into the linear-state prefix cache. Must
+  // be called only after the worker's save has completed, so the frozen
+  // slots' end-of-step contents are stable.
+  void commit_linear_state_reservations(
+      LinearStateCheckpointReservations&& reservations);
+
   virtual uint32_t num_blocks() const override;
   virtual int32_t block_size() const override;
   void reset_prefix_cache() override;
@@ -109,6 +136,10 @@ class BlockManagerPool : public KVCacheManager {
   bool process_beam_search(Sequence* sequence, bool need_swap = false);
 
  private:
+  // Look up the LINEAR leaf for the given dp rank, or nullptr when linear
+  // state is disabled / not configured for that rank.
+  LinearStateBlockManager* linear_leaf_for(int32_t dp_rank) const;
+
   std::vector<std::vector<BlockTransferInfo>> swap_block_transfer_infos_;
 
  protected:

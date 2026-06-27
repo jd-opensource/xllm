@@ -106,6 +106,20 @@ bool use_npu_nz_kv_cache_layout(const std::string& model_type) {
          ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
 }
 
+int64_t calculate_linear_state_live_slots(int64_t num_linear_state_blocks,
+                                          int64_t max_running_requests) {
+  CHECK_GE(num_linear_state_blocks, 0);
+  CHECK_GE(max_running_requests, 0);
+  if (num_linear_state_blocks <= kPaddingLinearStateBlocks) {
+    return num_linear_state_blocks;
+  }
+
+  const int64_t active_slot_limit = max_running_requests + 1;
+  const int64_t cacheable_slot_limit =
+      num_linear_state_blocks - kPaddingLinearStateBlocks;
+  return std::min(active_slot_limit, cacheable_slot_limit);
+}
+
 KVCacheTensors create_kv_cache_tensors(
     const KVCacheShape& kv_cache_shape,
     const KVCacheCreateOptions& create_options) {
