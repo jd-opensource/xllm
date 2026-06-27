@@ -1651,19 +1651,25 @@ struct ChunkGatedDeltaRuleParams {
 };
 
 struct MegaChunkGdnParams {
-  // Query tensor. Shape: [B, T, Hqk, K]. Dtype: bfloat16.
+  // Query tensor. Shape: [B, T, Hqk, K]. Dtype: bfloat16 input, converted to
+  // float16 before aclnnMegaChunkGdn.
   torch::Tensor q;
-  // Key tensor. Shape: [B, T, Hqk, K]. Dtype: bfloat16.
+  // Key tensor. Shape: [B, T, Hqk, K]. Dtype: bfloat16 input, converted to
+  // float16 before aclnnMegaChunkGdn.
   torch::Tensor k;
-  // Value tensor. Shape: [B, T, H, V]. Dtype: bfloat16.
+  // Value tensor. Shape: [B, T, H, V]. Dtype: bfloat16 input, converted to
+  // float16 before aclnnMegaChunkGdn.
   torch::Tensor v;
   // Gating tensor. Shape: [B, T, H]. Dtype: float32 or bfloat16.
   torch::Tensor g;
-  // Beta tensor. Shape: [B, T, H]. Dtype: float32 or bfloat16.
+  // Beta tensor. Shape: [B, T, H]. Dtype: float32 or bfloat16 input, converted
+  // to float16 before aclnnMegaChunkGdn.
   torch::Tensor beta;
   // Optional scale factor for attention. Default: K^(-0.5).
   std::optional<float> scale = std::nullopt;
-  // Optional initial state tensor. Shape: [N, H, K, V]. Dtype: bfloat16.
+  // Optional initial state tensor. Shape: [N, H, K, V]. Converted to float16
+  // before aclnnMegaChunkGdn; the wrapper receives final_state in a float16
+  // buffer and casts it back to float32 for callers.
   std::optional<torch::Tensor> initial_state = std::nullopt;
   // Whether to output the final state.
   bool output_final_state = false;

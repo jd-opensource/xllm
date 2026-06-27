@@ -21,6 +21,7 @@ limitations under the License.
 
 #include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
 #include "core/kernels/npu/xllm_ops/xllm_ops_api.h"
+#include "triton_npu/torch_api/triton_ops_api.h"
 
 namespace xllm::kernel::npu {
 
@@ -72,20 +73,13 @@ std::pair<torch::Tensor, torch::Tensor> npu_mega_chunk_gdn(
     bool output_final_state,
     const std::optional<torch::Tensor>& cu_seqlens,
     bool use_qk_l2norm_in_kernel) {
-  const auto input_dtype = q.scalar_type();
-  const auto k_dtype = k.scalar_type();
-  const auto v_dtype = v.scalar_type();
+  const torch::ScalarType input_dtype = q.scalar_type();
 
-  // Apply L2 normalization to q and k if requested
   torch::Tensor q_normalized = q;
   torch::Tensor k_normalized = k;
   if (use_qk_l2norm_in_kernel) {
-    auto q_norm =
-        torch::linalg_norm(q, /*ord=*/2, /*dim=*/-1, /*keepdim=*/true);
-    q_normalized = q / q_norm.clamp_min(1e-6);
-    auto k_norm =
-        torch::linalg_norm(k, /*ord=*/2, /*dim=*/-1, /*keepdim=*/true);
-    k_normalized = k / k_norm.clamp_min(1e-6);
+    q_normalized = npu_l2norm_last_dim(q);
+    k_normalized = npu_l2norm_last_dim(k);
   }
 
   auto q_fp16 = q_normalized.to(torch::kFloat16);
@@ -122,7 +116,6 @@ std::pair<torch::Tensor, torch::Tensor> npu_mega_chunk_gdn(
 
   const int64_t B = q.size(0);
   const int64_t T = q.size(1);
-  const int64_t Hqk = k.size(2);
   const int64_t K = q.size(3);
   const int64_t H = v.size(2);
   const int64_t V = v.size(3);
