@@ -15,6 +15,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "kernels/mlu/chunk_gated_delta_rule.h"
 #include "kernels/mlu/mlu_ops_api.h"
 
 namespace xllm {
@@ -100,6 +101,29 @@ std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(const torch::Tensor&,
                                                          float,
                                                          float) {
   fail_mlu_triton_aot_skipped("fused_gdn_gating");
+  return {};
+}
+
+ChunkGatedDeltaRuleImpl::ChunkGatedDeltaRuleImpl(int64_t num_k_heads,
+                                                 int64_t num_v_heads)
+    : total_core_num_(0),
+      num_k_heads_(num_k_heads),
+      num_v_heads_(num_v_heads),
+      algo_id_(0),
+      chunk_algo_id_(0) {}
+
+std::tuple<torch::Tensor, torch::Tensor> ChunkGatedDeltaRuleImpl::forward(
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    bool,
+    bool) {
+  fail_mlu_triton_aot_skipped("ChunkGatedDeltaRuleImpl::forward");
   return {};
 }
 
