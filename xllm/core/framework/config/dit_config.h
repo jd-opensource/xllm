@@ -60,7 +60,7 @@ class DiTConfig final {
 
   PROPERTY(int32_t, max_requests_per_batch) = 1;
 
-  PROPERTY(std::string, dit_cache_policy) = "TaylorSeer";
+  PROPERTY(std::string, dit_cache_policy) = "None";
 
   PROPERTY(int64_t, dit_cache_warmup_steps) = 0;
 

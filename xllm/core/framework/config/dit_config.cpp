@@ -21,7 +21,7 @@ limitations under the License.
 DEFINE_int32(max_requests_per_batch, 1, "Max number of request per batch.");
 
 DEFINE_string(dit_cache_policy,
-              "TaylorSeer",
+              "None",
               "The policy of dit cache(e.g. None, FBCache, TaylorSeer, "
               "FBCacheTaylorSeer, ResidualCache).");
 
