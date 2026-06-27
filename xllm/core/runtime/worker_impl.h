@@ -115,11 +115,19 @@ class WorkerImpl {
   void prepare_work_before_execute_on_stream(const ForwardInput& input,
                                              ForwardInput& processed_input,
                                              Stream& prepare_stream);
+  // Prepares ACL graph replay inputs for regular worker decode.  MTP validate
+  // fills target tokens later from draft outputs, so that path prepares graph
+  // input in MTPWorkerImpl after fill_validate_input_from_draft_outputs().
+  void prepare_npu_graph_decode_input(const ForwardInput& input);
 
   // Internal helper shared by worker pipelines before model execution.
   virtual void apply_kv_block_swaps(const ModelInputParams& input_params);
 
   virtual std::optional<ForwardOutput> step(const ForwardInput& inputs) = 0;
+
+  virtual std::optional<ForwardOutput> execute_no_sync_on_stream(
+      const ForwardInput& input,
+      Stream& compute_stream);
 
   virtual void process_group_test();
 
@@ -184,6 +192,41 @@ class WorkerImpl {
 
   int32_t hidden_size() const {
     return context_.get_model_args().hidden_size();
+  }
+
+#if defined(USE_NPU)
+  virtual layer::NpuLmHead get_npu_lm_head() {
+    return model_->get_npu_lm_head();
+  }
+
+  virtual void set_npu_lm_head(layer::NpuLmHead& head) {
+    model_->set_npu_lm_head(head);
+  }
+
+  virtual layer::NpuWordEmbedding get_npu_word_embedding() {
+    return model_->get_npu_word_embedding();
+  }
+
+  virtual void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) {
+    model_->set_npu_word_embedding(embedding);
+  }
+
+  virtual void set_restored_npu_word_embedding(
+      layer::NpuWordEmbedding& embedding) {
+    model_->set_restored_npu_word_embedding(embedding);
+  }
+#endif
+
+  virtual layer::LmHead get_lm_head() { return model_->get_lm_head(); }
+
+  virtual void set_lm_head(layer::LmHead& head) { model_->set_lm_head(head); }
+
+  virtual layer::WordEmbedding get_word_embedding() {
+    return model_->get_word_embedding();
+  }
+
+  virtual void set_word_embedding(layer::WordEmbedding& embedding) {
+    model_->set_word_embedding(embedding);
   }
 
   bool enable_schedule_overlap() const {
