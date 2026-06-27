@@ -222,14 +222,6 @@ bool should_reuse_mtp_topk_indices(const ModelArgs& model_args,
   const bool reuse_enabled = model_args.index_share_for_mtp_iteration() &&
                              model_args.index_n_heads() > 0 &&
                              model_args.index_topk() > 0;
-  if (enable_schedule_overlap && reuse_enabled) {
-    LOG_FIRST_N(WARNING, 1)
-        << "Disable MTP DSA top-k reuse across draft steps when "
-           "schedule overlap is enabled. The draft model will recompute top-k "
-           "for sharing layers to avoid using stale asynchronous top-k "
-           "buffers.";
-    return false;
-  }
   return reuse_enabled;
 }
 
