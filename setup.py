@@ -256,13 +256,21 @@ class ExtBuild(build_ext):
                 if dcu_arch:
                     cmake_args += [f"-DCMAKE_HIP_ARCHITECTURES={dcu_arch}"]
 
+                set_dcu_envs()
+
                 # Pass FLASH_ATTENTION_LIB to CMake so the DCU layers can
                 # link against libflash_attention.so (prefix prefill/decode).
                 flash_attn_lib = os.getenv("FLASH_ATTENTION_LIB")
                 if flash_attn_lib:
                     cmake_args += [f"-DFLASH_ATTENTION_LIB={flash_attn_lib}"]
 
-                set_dcu_envs()
+                flash_mla_lib = os.getenv("FLASH_MLA_LIB")
+                if flash_mla_lib:
+                    cmake_args += [f"-DFLASH_MLA_LIB={flash_mla_lib}"]
+
+                aiter_cpp_api_lib = os.getenv("AITER_CPP_API_LIB")
+                if aiter_cpp_api_lib:
+                    cmake_args += [f"-DAITER_CPP_API_LIB={aiter_cpp_api_lib}"]
             else:
                 raise RuntimeError(
                     "DCU build requires a HIP/ROCm PyTorch environment. "
