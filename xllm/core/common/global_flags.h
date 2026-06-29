@@ -110,6 +110,8 @@ DECLARE_int64(sp_size);
 
 DECLARE_int64(cfg_size);
 
+DECLARE_int64(vae_size);
+
 DECLARE_bool(enable_prefill_sp);
 
 DECLARE_bool(enable_mm_encoder_dp);
@@ -136,6 +138,8 @@ DECLARE_string(rank_tablefile);
 constexpr int32_t kGraphExecutorLogVerboseLevel = 50;
 
 DECLARE_bool(enable_graph);
+
+DECLARE_bool(enable_graph_double_buffer);
 
 DECLARE_bool(enable_graph_mode_decode_no_padding);
 
@@ -348,13 +352,15 @@ DECLARE_int64(dit_cache_start_blocks);
 
 DECLARE_int64(dit_cache_end_blocks);
 
-DECLARE_int64(dit_sp_communication_overlap);
+DECLARE_bool(dit_sp_communication_overlap);
 
 DECLARE_int64(dit_generation_image_area_max);
 
 DECLARE_int64(dit_vae_image_size);
 
 DECLARE_bool(dit_debug_print);
+
+DECLARE_bool(dit_enable_vae_tiling);
 
 DECLARE_bool(use_audio_in_video);
 

@@ -559,6 +559,32 @@ GraphPersistentParam::update_expanded_spec_decode_attention(
   return expanded_kv_seq_lens_vec;
 }
 
+void GraphPersistentParam::update_tokens(const torch::Tensor& tokens,
+                                         const ModelInputParams& params,
+                                         uint32_t actual_num_tokens,
+                                         uint32_t padded_num_tokens) {
+  CHECK_GT(padded_num_tokens, 0) << "padded_num_tokens must be > 0";
+  const torch::Tensor& graph_tokens =
+      params.graph.input_tokens_override.defined()
+          ? params.graph.input_tokens_override
+          : tokens;
+  CHECK(graph_tokens.defined()) << "graph tokens must be defined";
+  CHECK_GE(graph_tokens.size(0), static_cast<int64_t>(actual_num_tokens))
+      << "graph token override is shorter than actual decode tokens";
+  if (actual_num_tokens > 0) {
+    persistent_tokens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+        .copy_(graph_tokens.slice(/*dim=*/0,
+                                  /*start=*/0,
+                                  /*end=*/actual_num_tokens),
+               /*non_blocking=*/true);
+  }
+  if (padded_num_tokens > actual_num_tokens) {
+    zero_tensor_tail(persistent_tokens_,
+                     actual_num_tokens,
+                     static_cast<int64_t>(padded_num_tokens));
+  }
+}
+
 std::optional<ModelInputParams> GraphPersistentParam::update(
     const torch::Tensor& tokens,
     const torch::Tensor& k_cache,
@@ -566,7 +592,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     const torch::Tensor& positions,
     const ModelInputParams& params,
     uint32_t padded_num_tokens,
-    bool return_capture_params) {
+    bool return_capture_params,
+    bool skip_token_update) {
   CHECK_GT(padded_num_tokens, 0) << "padded_num_tokens must be > 0";
   const uint32_t actual_num_tokens = tokens.size(0);
   const bool is_decode = params.meta.batch_forward_type.is_decode();
@@ -605,15 +632,11 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
           ? 0
           : (is_chunked_prefill ? actual_batch_size : actual_num_tokens);
 
-  // Copy data from input parameters to persistent graph tensors
-  if (actual_num_tokens > 0) {
-    persistent_tokens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
-        .copy_(tokens, /*non_blocking=*/true);
-  }
-  if (padded_num_tokens > actual_num_tokens) {
-    zero_tensor_tail(persistent_tokens_,
-                     actual_num_tokens,
-                     static_cast<int64_t>(padded_num_tokens));
+  // Copy data from input parameters to persistent graph tensors.
+  // Schedule-overlap prepare can defer token copy until replay because tokens
+  // are replaced asynchronously from the previous step output.
+  if (!skip_token_update) {
+    update_tokens(tokens, params, actual_num_tokens, padded_num_tokens);
   }
   // mRoPE positions have shape [3, num_tokens], slice on dim 1
   if (actual_num_tokens > 0) {

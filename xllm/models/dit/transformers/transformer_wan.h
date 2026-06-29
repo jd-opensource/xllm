@@ -37,7 +37,7 @@ limitations under the License.
 #include "models/dit/utils/dit_parallel_linear.h"
 
 using xllm::dit::DiTParallelLinear;
-using xllm::dit::LinearType;
+using xllm::dit::SpOptions;
 using xllm::dit::TpOptions;
 #include "core/layers/npu/loader/rolling_load_manager.h"
 #include "core/layers/npu/loader/rolling_weight_buffer.h"
@@ -70,6 +70,64 @@ inline torch::Tensor wan_apply_rotary_emb(const torch::Tensor& hidden_states,
   auto out = torch::stack({out1, out2}, -1).flatten(-2, -1);
 
   return out.to(input_dtype);
+}
+
+inline int64_t sp_pad_sequence(
+    torch::Tensor& hidden_states,
+    torch::Tensor& freqs_cos,
+    torch::Tensor& freqs_sin,
+    std::pair<torch::Tensor, torch::Tensor>& rotary_emb,
+    ProcessGroup* sp_group) {
+  if (!sp_group || sp_group->world_size() <= 1) {
+    return hidden_states.size(1);
+  }
+  auto group_size = sp_group->world_size();
+  int64_t seq_len = hidden_states.size(1);
+  if (seq_len % group_size == 0) {
+    return seq_len;
+  }
+  int64_t pad_seq_len = ((seq_len + group_size - 1) / group_size) * group_size;
+  hidden_states = torch::nn::functional::pad(
+      hidden_states,
+      torch::nn::functional::PadFuncOptions({0, 0, 0, pad_seq_len - seq_len}));
+  freqs_cos =
+      torch::nn::functional::pad(freqs_cos,
+                                 torch::nn::functional::PadFuncOptions(
+                                     {0, 0, 0, 0, 0, pad_seq_len - seq_len}));
+  freqs_sin =
+      torch::nn::functional::pad(freqs_sin,
+                                 torch::nn::functional::PadFuncOptions(
+                                     {0, 0, 0, 0, 0, pad_seq_len - seq_len}));
+  rotary_emb = std::make_pair(freqs_cos, freqs_sin);
+  return pad_seq_len;
+}
+
+inline torch::Tensor sp_all_to_all(const torch::Tensor& input,
+                                   int64_t heads,
+                                   int64_t dim_head,
+                                   int64_t tp_size,
+                                   ProcessGroup* sp_group) {
+  auto fn = parallel_state::all_to_all_4D(
+      input.view({input.size(0), -1, heads / tp_size, dim_head}),
+      /*scatter_dim=*/2,
+      /*gather_dim=*/1,
+      /*async=*/false,
+      sp_group);
+  return fn().view({input.size(0),
+                    -1,
+                    heads * dim_head / (tp_size * sp_group->world_size())});
+}
+
+inline torch::Tensor sp_slice_heads(const torch::Tensor& input,
+                                    int64_t heads,
+                                    int64_t dim_head,
+                                    int64_t tp_size,
+                                    ProcessGroup* sp_group) {
+  int64_t n_heads = heads / (tp_size * sp_group->world_size());
+  return input
+      .view({input.size(0), -1, n_heads * sp_group->world_size(), dim_head})
+      .slice(2, sp_group->rank() * n_heads, (sp_group->rank() + 1) * n_heads)
+      .flatten(2, 3);
 }
 
 class FP32LayerNormImpl : public torch::nn::Module {
@@ -259,26 +317,17 @@ class WanGELUImpl : public torch::nn::Module {
       : approximate_(approximate),
         options_(context.get_tensor_options()),
         parallel_args_(parallel_args) {
-    LinearType linear_type = ParallelConfig::get_instance().tp_size() > 1
-                                 ? LinearType::TensorParallel
-                                 : LinearType::Default;
-    std::optional<TpOptions> tp_options = std::nullopt;
-    if (ParallelConfig::get_instance().tp_size() > 1) {
-      tp_options = TpOptions(
-          /*column_parallel=*/true,
-          /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-          /*tp_size=*/ParallelConfig::get_instance().tp_size(),
-          /*gather_output=*/false,
-          /*need_scatter=*/false,
-          /*process_group=*/parallel_args_.dit_tp_group_);
+    std::optional<TpOptions> tp = std::nullopt;
+    if (::xllm::ParallelConfig::get_instance().tp_size() > 1) {
+      tp = TpOptions::col(parallel_args_.dit_tp_group_,
+                          /*gather_output=*/false);
     }
     auto proj = DiTParallelLinear(dim_in,
                                   dim_out,
                                   with_bias,
                                   options_,
-                                  linear_type,
-                                  std::nullopt,
-                                  tp_options);
+                                  /*sp=*/std::nullopt,
+                                  tp);
     proj_ = register_module("proj", proj);
   }
 
@@ -354,26 +403,14 @@ class WanFeedForwardImpl : public torch::nn::Module {
 
     dropout_ = register_module("dropout", torch::nn::Dropout(dropout));
 
-    LinearType linear_out_type = ParallelConfig::get_instance().tp_size() > 1
-                                     ? LinearType::TensorParallel
-                                     : LinearType::Default;
-    std::optional<TpOptions> tp_out_options = std::nullopt;
-    if (ParallelConfig::get_instance().tp_size() > 1) {
-      tp_out_options = TpOptions(
-          /*column_parallel=*/false,
-          /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-          /*tp_size=*/ParallelConfig::get_instance().tp_size(),
-          /*gather_output=*/true,
-          /*need_scatter=*/false,
-          /*process_group=*/parallel_args_.dit_tp_group_);
-    }
+    auto tp_out = TpOptions::row(parallel_args_.dit_tp_group_,
+                                 /*gather_output=*/true);
     auto proj_out = DiTParallelLinear(actual_inner_dim,
                                       actual_dim_out,
                                       with_bias,
                                       options_,
-                                      linear_out_type,
-                                      std::nullopt,
-                                      tp_out_options);
+                                      /*sp=*/std::nullopt,
+                                      tp_out);
     proj_out_ = register_module("proj_out", proj_out);
 
     if (final_dropout) {
@@ -499,116 +536,79 @@ class WanAttentionImpl : public torch::nn::Module {
     } else {
       kv_inner_dim_ = heads_ * dim_head_;
     }
-    LinearType linear_type = ParallelConfig::get_instance().tp_size() > 1
-                                 ? LinearType::TensorParallel
-                                 : LinearType::Default;
-    // ===== TP OPTIONS: to_q/to_k use gather_output=false for TP-RMSNorm =====
-    // gather_output=false → Q/K stay sharded, no AllGather
-    // tp_rms_norm() handles RMSNorm on sharded tensor with scalar AR (~6KB)
-    std::optional<TpOptions> tp_options_qk = std::nullopt;
-    std::optional<TpOptions> tp_options_v = std::nullopt;
-    if (ParallelConfig::get_instance().tp_size() > 1) {
-      tp_options_qk = TpOptions(
-          /*column_parallel=*/true,
-          /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-          /*tp_size=*/ParallelConfig::get_instance().tp_size(),
-          /*gather_output=*/false,
-          /*need_scatter=*/false,
-          /*process_group=*/parallel_args_.dit_tp_group_);
-      tp_options_v = TpOptions(
-          /*column_parallel=*/true,
-          /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-          /*tp_size=*/ParallelConfig::get_instance().tp_size(),
-          /*gather_output=*/false,
-          /*need_scatter=*/false,
-          /*process_group=*/parallel_args_.dit_tp_group_);
-    }
-    auto to_q = DiTParallelLinear(dim_,
-                                  heads_ * dim_head_,
-                                  true,
-                                  options_,
-                                  linear_type,
-                                  std::nullopt,
-                                  tp_options_qk);
-    to_q_ = register_module("to_q", to_q);
-    auto to_k = DiTParallelLinear(dim_,
-                                  kv_inner_dim_,
-                                  true,
-                                  options_,
-                                  linear_type,
-                                  std::nullopt,
-                                  tp_options_qk);
-    to_k_ = register_module("to_k", to_k);
-    auto to_v = DiTParallelLinear(dim_,
-                                  kv_inner_dim_,
-                                  true,
-                                  options_,
-                                  linear_type,
-                                  std::nullopt,
-                                  tp_options_v);
-    to_v_ = register_module("to_v", to_v);
-    LinearType to_out_type = ParallelConfig::get_instance().tp_size() > 1
-                                 ? LinearType::TensorParallel
-                                 : LinearType::Default;
-    std::optional<TpOptions> tp_to_out_options = std::nullopt;
-    if (ParallelConfig::get_instance().tp_size() > 1) {
-      tp_to_out_options = TpOptions(
-          /*column_parallel=*/false,
-          /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-          /*tp_size=*/ParallelConfig::get_instance().tp_size(),
-          /*gather_output=*/true,
-          /*need_scatter=*/false,
-          /*process_group=*/parallel_args_.dit_tp_group_);
-    }
-    auto to_out = DiTParallelLinear(heads_ * dim_head_,
-                                    dim_,
-                                    true,
-                                    options_,
-                                    to_out_type,
-                                    std::nullopt,
-                                    tp_to_out_options);
-    to_out_ = register_module("to_out", to_out);
+    // Pre-build options that get reused
+    auto tp_qk = TpOptions::col(parallel_args_.dit_tp_group_,
+                                /*gather_output=*/false);
+    auto tp_v = TpOptions::col(parallel_args_.dit_tp_group_,
+                               /*gather_output=*/false);
+    auto tp_out = TpOptions::row(parallel_args_.dit_tp_group_,
+                                 /*gather_output=*/true);
+
+    auto sp_before = SpOptions(heads_,
+                               dim_head_,
+                               dim_,
+                               /*before_attention=*/true,
+                               parallel_args_.dit_sp_group_);
+    auto sp_after = SpOptions(heads_,
+                              dim_head_,
+                              dim_,
+                              /*before_attention=*/false,
+                              parallel_args_.dit_sp_group_);
+
+    // Q/K: TP only (SP handled in forward() due to norm ordering)
+    to_q_ = register_module("to_q",
+                            DiTParallelLinear(dim_,
+                                              heads_ * dim_head_,
+                                              true,
+                                              options_,
+                                              /*sp=*/std::nullopt,
+                                              tp_qk));
+    to_k_ = register_module("to_k",
+                            DiTParallelLinear(dim_,
+                                              kv_inner_dim_,
+                                              true,
+                                              options_,
+                                              /*sp=*/std::nullopt,
+                                              tp_qk));
+
+    // V: TP+SP for self-attention, TP only for cross-attention
+    bool is_self_attn = cross_attention_dim_head <= 0;
+    to_v_ = register_module(
+        "to_v",
+        DiTParallelLinear(dim_,
+                          kv_inner_dim_,
+                          true,
+                          options_,
+                          is_self_attn ? sp_before : std::optional<SpOptions>{},
+                          tp_v));
+
+    // to_out: TP+SP row parallel
+    to_out_ = register_module(
+        "to_out",
+        DiTParallelLinear(
+            heads_ * dim_head_, dim_, true, options_, sp_after, tp_out));
     norm_q_ = register_module(
         "norm_q", layer::RMSNorm(dim_head_ * heads_, eps_, options_));
     norm_k_ = register_module(
         "norm_k", layer::RMSNorm(dim_head_ * heads_, eps_, options_));
     if (added_kv_proj_dim_ > 0) {
-      LinearType add_kv_type = ParallelConfig::get_instance().tp_size() > 1
-                                   ? LinearType::TensorParallel
-                                   : LinearType::Default;
-      std::optional<TpOptions> add_k_options = std::nullopt;
-      std::optional<TpOptions> add_v_options = std::nullopt;
-      if (ParallelConfig::get_instance().tp_size() > 1) {
-        add_k_options = TpOptions(
-            /*column_parallel=*/true,
-            /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-            /*tp_size=*/ParallelConfig::get_instance().tp_size(),
-            /*gather_output=*/false,
-            /*need_scatter=*/false,
-            /*process_group=*/parallel_args_.dit_tp_group_);
-        add_v_options = TpOptions(
-            /*column_parallel=*/true,
-            /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
-            /*tp_size=*/ParallelConfig::get_instance().tp_size(),
-            /*gather_output=*/false,
-            /*need_scatter=*/false,
-            /*process_group=*/parallel_args_.dit_tp_group_);
-      }
+      auto add_k_tp = TpOptions::col(parallel_args_.dit_tp_group_,
+                                     /*gather_output=*/false);
+      auto add_v_tp = TpOptions::col(parallel_args_.dit_tp_group_,
+                                     /*gather_output=*/false);
       auto add_k_proj = DiTParallelLinear(added_kv_proj_dim_,
                                           heads_ * dim_head_,
                                           true,
                                           options_,
-                                          add_kv_type,
-                                          std::nullopt,
-                                          add_k_options);
+                                          /*sp=*/std::nullopt,
+                                          add_k_tp);
       add_k_proj_ = register_module("add_k_proj", add_k_proj);
       auto add_v_proj = DiTParallelLinear(added_kv_proj_dim_,
                                           heads_ * dim_head_,
                                           true,
                                           options_,
-                                          add_kv_type,
-                                          std::nullopt,
-                                          add_v_options);
+                                          /*sp=*/std::nullopt,
+                                          add_v_tp);
       add_v_proj_ = register_module("add_v_proj", add_v_proj);
       norm_added_k_ = register_module(
           "norm_added_k", layer::RMSNorm(dim_head_ * heads_, eps_, options_));
@@ -645,7 +645,7 @@ class WanAttentionImpl : public torch::nn::Module {
     attn_weights = torch::softmax(attn_weights, -1);
     torch::Tensor out = torch::matmul(attn_weights, v_t).transpose(1, 2);
 #endif
-    return out.flatten(2, 3).to(q.dtype());
+    return out.flatten(2, 3);
   }
 
   torch::Tensor forward(
@@ -672,11 +672,13 @@ class WanAttentionImpl : public torch::nn::Module {
           encoder_hidden_states_text.slice(1, image_context_length);
     }
 
+    // ── Step 1: Linear projections ──
     torch::Tensor query = to_q_->forward(hidden_states);
     torch::Tensor key = to_k_->forward(encoder_hidden_states_text);
     torch::Tensor value = to_v_->forward(encoder_hidden_states_text);
 
-    if (ParallelConfig::get_instance().tp_size() > 1) {
+    // ── Step 2: Norm on TP-sharded Q/K ──
+    if (::xllm::ParallelConfig::get_instance().tp_size() > 1) {
       query = dit::tp_rms_norm(query, norm_q_, parallel_args_.dit_tp_group_);
       key = dit::tp_rms_norm(key, norm_k_, parallel_args_.dit_tp_group_);
     } else {
@@ -684,11 +686,40 @@ class WanAttentionImpl : public torch::nn::Module {
       key = std::get<0>(norm_k_->forward(key));
     }
 
+    // ── Step 3: SP all2all for Q/K (V already done in layer) ──
     int64_t batch_size = query.size(0);
     int64_t n_heads = heads_;
-    if (ParallelConfig::get_instance().tp_size() > 1) {
-      n_heads = heads_ / ParallelConfig::get_instance().tp_size();
+    if (::xllm::ParallelConfig::get_instance().tp_size() > 1) {
+      n_heads = heads_ / ::xllm::ParallelConfig::get_instance().tp_size();
     }
+    if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
+      query = sp_all_to_all(query,
+                            heads_,
+                            dim_head_,
+                            ::xllm::ParallelConfig::get_instance().tp_size(),
+                            parallel_args_.dit_sp_group_);
+      if (is_self_attention) {
+        key = sp_all_to_all(key,
+                            heads_,
+                            dim_head_,
+                            ::xllm::ParallelConfig::get_instance().tp_size(),
+                            parallel_args_.dit_sp_group_);
+      } else {
+        key = sp_slice_heads(key,
+                             heads_,
+                             dim_head_,
+                             ::xllm::ParallelConfig::get_instance().tp_size(),
+                             parallel_args_.dit_sp_group_);
+        value = sp_slice_heads(value,
+                               heads_,
+                               dim_head_,
+                               ::xllm::ParallelConfig::get_instance().tp_size(),
+                               parallel_args_.dit_sp_group_);
+      }
+      n_heads = n_heads / ::xllm::ParallelConfig::get_instance().sp_size();
+    }
+
+    // ── Step 4: Reshape → RoPE → Attention → to_out ──
     query = query.view({batch_size, -1, n_heads, dim_head_});
     key = key.view({batch_size, -1, n_heads, dim_head_});
     value = value.view({batch_size, -1, n_heads, dim_head_});
@@ -705,11 +736,25 @@ class WanAttentionImpl : public torch::nn::Module {
       torch::Tensor key_img = add_k_proj_->forward(encoder_hidden_states_img);
       torch::Tensor value_img = add_v_proj_->forward(encoder_hidden_states_img);
 
-      if (ParallelConfig::get_instance().tp_size() > 1) {
+      if (::xllm::ParallelConfig::get_instance().tp_size() > 1) {
         key_img = dit::tp_rms_norm(
             key_img, norm_added_k_, parallel_args_.dit_tp_group_);
       } else {
         key_img = std::get<0>(norm_added_k_->forward(key_img));
+      }
+      if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
+        key_img =
+            sp_slice_heads(key_img,
+                           heads_,
+                           dim_head_,
+                           ::xllm::ParallelConfig::get_instance().tp_size(),
+                           parallel_args_.dit_sp_group_);
+        value_img =
+            sp_slice_heads(value_img,
+                           heads_,
+                           dim_head_,
+                           ::xllm::ParallelConfig::get_instance().tp_size(),
+                           parallel_args_.dit_sp_group_);
       }
 
       key_img = key_img.view({batch_size, -1, n_heads, dim_head_});
@@ -720,7 +765,6 @@ class WanAttentionImpl : public torch::nn::Module {
     if (hidden_states_img.defined()) {
       hidden_states = hidden_states + hidden_states_img;
     }
-
     hidden_states = to_out_->forward(hidden_states);
 
     return hidden_states;
@@ -1258,6 +1302,7 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
+    sp_group_ = parallel_args.dit_sp_group_;
     patch_size_ = model_args.wan_patch_size();
     num_attention_heads_ = model_args.n_heads();
     attention_head_dim_ = model_args.head_dim();
@@ -1288,7 +1333,6 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
                 {patch_size_[0], patch_size_[1], patch_size_[2]})
                 .stride({patch_size_[0], patch_size_[1], patch_size_[2]})
                 .padding(0)));
-
     patch_embedding_->to(options_.dtype().toScalarType());
     condition_embedder_ = register_module("condition_embedder",
                                           WanTimeTextImageEmbedding(context));
@@ -1350,6 +1394,10 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
         hidden_states.to(patch_embedding_->weight.dtype()));
     hidden_states = hidden_states.flatten(2).transpose(1, 2);
 
+    int64_t seq_len = hidden_states.size(1);
+    int64_t pad_seq_len = sp_pad_sequence(
+        hidden_states, freqs_cos, freqs_sin, rotary_emb, sp_group_);
+
     torch::Tensor timestep_input = timestep;
     int64_t ts_seq_len_val = hidden_states.size(1);
     std::optional<int64_t> ts_seq_len = ts_seq_len_val;
@@ -1381,6 +1429,15 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
                      1);
     }
 
+    if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
+      hidden_states =
+          dit::sp_split_sequence(hidden_states, /*dim=*/1, sp_group_);
+      if (timestep_proj.dim() == 4) {
+        timestep_proj =
+            dit::sp_split_sequence(timestep_proj, /*dim=*/1, sp_group_);
+      }
+    }
+
     for (int64_t i = 0; i < transformer_layers_.size(); ++i) {
       if (before_layer_cb) {
         before_layer_cb(static_cast<int32_t>(i));
@@ -1393,6 +1450,11 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
       if (after_layer_cb) {
         after_layer_cb(static_cast<int32_t>(i));
       }
+    }
+
+    if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
+      hidden_states =
+          dit::sp_gather_sequence(hidden_states, /*dim=*/1, sp_group_);
     }
 
     torch::Tensor shift, scale;
@@ -1419,6 +1481,10 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
     auto norm_out = norm_result * one_plus_scale + shift_fp32;
     hidden_states = norm_out.to(hidden_states.dtype());
 
+    if (::xllm::ParallelConfig::get_instance().sp_size() > 1 &&
+        seq_len != pad_seq_len) {
+      hidden_states = hidden_states.slice(1, 0, seq_len);
+    }
     hidden_states = proj_out_->forward(hidden_states);
     hidden_states = hidden_states.view({batch_size,
                                         post_patch_num_frames,
@@ -1540,7 +1606,7 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
   int64_t inner_dim_;
   bool cross_attn_norm_;
   std::string qk_norm_;
-
+  ProcessGroup* sp_group_ = nullptr;
   torch::nn::Conv3d patch_embedding_{nullptr};
   WanTimeTextImageEmbedding condition_embedder_{nullptr};
   WanRotaryPosEmbed rope_{nullptr};

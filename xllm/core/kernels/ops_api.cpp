@@ -1112,7 +1112,14 @@ std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
 
 std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
     FusedGdnGatingParams& params) {
-#if defined(USE_NPU)
+#if defined(USE_MLU)
+  return mlu::fused_gdn_gating(params.A_log,
+                               params.a,
+                               params.b,
+                               params.dt_bias,
+                               params.beta,
+                               params.threshold);
+#elif defined(USE_NPU)
   return npu::tilelang::fused_gdn_gating(params.A_log,
                                          params.a,
                                          params.b,
@@ -1836,6 +1843,24 @@ std::pair<torch::Tensor, torch::Tensor> chunk_gated_delta_rule(
 
   return {out.to(input_dtype),
           params.output_final_state ? final_state : torch::Tensor()};
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::pair<torch::Tensor, torch::Tensor> mega_chunk_gdn(
+    MegaChunkGdnParams& params) {
+#if defined(USE_NPU)
+  return npu::npu_mega_chunk_gdn(params.q,
+                                 params.k,
+                                 params.v,
+                                 params.g,
+                                 params.beta,
+                                 params.scale,
+                                 params.initial_state,
+                                 params.output_final_state,
+                                 params.cu_seqlens,
+                                 params.use_qk_l2norm_in_kernel);
 #else
   NOT_IMPLEMENTED();
 #endif

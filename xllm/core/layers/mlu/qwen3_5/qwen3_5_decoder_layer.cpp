@@ -74,7 +74,9 @@ Qwen3_5DecoderLayerImpl::Qwen3_5DecoderLayerImpl(const ModelContext& context,
   }
 
   if (layer_type_ == "linear_attention") {
-    // TODO: support linear attention
+    linear_attention_ = register_module(
+        "linear_attn",
+        Qwen3_5GatedDeltaNet(model_args, quant_args, parallel_args_, options));
   } else {
     full_attention_ = register_module(
         "self_attn",
@@ -115,7 +117,8 @@ Qwen3_5DecoderLayerImpl::Qwen3_5DecoderLayerImpl(const ModelContext& context,
 
 void Qwen3_5DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   if (layer_type_ == "linear_attention") {
-    // TODO: support linear attention
+    linear_attention_->load_state_dict(
+        state_dict.get_dict_with_prefix("linear_attn."));
   } else {
     full_attention_->load_state_dict(
         state_dict.get_dict_with_prefix("self_attn."));
@@ -175,7 +178,7 @@ torch::Tensor Qwen3_5DecoderLayerImpl::forward(
   if (full_attention_) {
     x = full_attention_->forward(positions, x, attn_metadata, kv_cache);
   } else {
-    // TODO: support linear attention
+    x = linear_attention_->forward(x, attn_metadata, kv_cache, input_params);
   }
 
   auto orig_dtype = x.dtype();

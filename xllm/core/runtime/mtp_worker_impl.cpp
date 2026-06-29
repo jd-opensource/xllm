@@ -924,6 +924,7 @@ void MTPWorkerImpl::prepare_prefill_inputs(const ForwardInput& input,
                                            ForwardInput& prefill_input) {
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
   prefill_input = input.to(device_, dtype_);
+  prefill_input.sampling_params.return_probs = true;
   clear_ready_events(prefill_input);
   auto& input_params = prefill_input.input_params;
   if (options_.cp_size() > 1) {
@@ -1487,6 +1488,7 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
     ForwardInput& extend_input) {
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
   extend_input = base_input;
+  extend_input.sampling_params.return_probs = true;
   clear_ready_events(extend_input);
   extend_input.device_tensors_ready = false;
   auto& input_params = extend_input.input_params;
@@ -1701,6 +1703,7 @@ void MTPWorkerImpl::prepare_draft_inputs(const ForwardInput& input,
                                          int32_t position_offset) {
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
   draft_input = input;
+  draft_input.sampling_params.return_probs = true;
   clear_ready_events(draft_input);
   draft_input.device_tensors_ready = false;
 

@@ -17,9 +17,11 @@ limitations under the License.
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <thread>
 #include <vector>
 
+#include "block_manager_impl.h"
 #include "concurrent_block_manager_impl.h"
 #include "framework/prefix_cache/prefix_cache.h"
 
@@ -39,7 +41,8 @@ TEST(ConcurrentBlockManagerTest, ContinuesPrefixCacheFromExistingBlocks) {
   const uint32_t block_size = 2;
   BlockManager::Options options;
   options.num_blocks(5).block_size(block_size).enable_prefix_cache(true);
-  ConcurrentBlockManagerImpl manager(options);
+  ConcurrentBlockManagerImpl manager(
+      std::make_unique<BlockManagerImpl>(options));
 
   std::vector<int32_t> token_ids = {11, 12, 13, 14};
   std::vector<Block> seed_blocks = manager.allocate(/*num_blocks=*/2);
@@ -85,7 +88,8 @@ TEST(ConcurrentBlockManagerTest, ContinuesPrefixCacheFromExistingBlocks) {
 TEST(ConcurrentBlockManagerTest, AllocatesWhileBlocksReleaseConcurrently) {
   BlockManager::Options options;
   options.num_blocks(65).block_size(2).enable_prefix_cache(false);
-  ConcurrentBlockManagerImpl manager(options);
+  ConcurrentBlockManagerImpl manager(
+      std::make_unique<BlockManagerImpl>(options));
 
   constexpr int32_t kNumThreads = 8;
   constexpr int32_t kNumIterations = 10000;
