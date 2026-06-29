@@ -54,7 +54,7 @@ jobs:
           fetch-depth: 0  # Ensure we can compare commits
 
       - name: Install jq
-        run: yum install -y jq
+        run: sudo yum install -y jq
 
       - name: Check if sensitive files were changed
         id: check_sensitive
@@ -130,4 +130,4 @@ jobs:
       timeout-minutes: 60
       run: |
         chmod +x ./cibuild/build_npu.sh
-        bash cibuild/build_npu.sh 'pip install pre-commit -i http://mirrors.aliyun.com/pypi/simple; python setup.py bdist_wheel; pip install dist/* --force-reinstall; cd /tmp && python /export/home/actions-runner/_work/xllm/xllm/examples/generate.py --model="/export/home/models/Qwen2-7B-Instruct" --devices="npu:7"'
+        sudo bash cibuild/build_npu.sh 'pip install pre-commit -i http://mirrors.aliyun.com/pypi/simple; python setup.py bdist_wheel; pip install dist/* --force-reinstall; cd /tmp && python /export/home/actions-runner/_work/xllm/xllm/examples/generate.py --model="/export/home/models/Qwen2-7B-Instruct" --devices="npu:7"'
