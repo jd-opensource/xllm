@@ -16,16 +16,15 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache_utils.h"
 
 #include <glog/logging.h>
+#include <sys/mman.h>
 
+#include <cerrno>
 #include <limits>
 
 #include "core/framework/config/kv_cache_config.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #if defined(USE_MLU)
 #include "platform/mlu/mlu_tensor_alloc.h"
-#endif
-#if defined(USE_NPU)
-#include "acl/acl.h"
 #endif
 
 namespace xllm {
@@ -298,5 +297,60 @@ aclFormat get_npu_kv_cache_format(const std::string& model_type) {
                                                 : ACL_FORMAT_ND;
 }
 #endif
+
+HostPageAlignedRegion::HostPageAlignedRegion(size_t bytes) {
+  if (bytes == 0) {
+    return;
+  }
+  size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  total_bytes = ((bytes + page_size - 1) / page_size) * page_size;
+  base_ptr = mmap(nullptr,
+                  total_bytes,
+                  PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS,
+                  -1,
+                  0);
+  CHECK(base_ptr != MAP_FAILED)
+      << "Failed to mmap host memory, size=" << total_bytes;
+  int ret = mlock(base_ptr, total_bytes);
+  if (ret != 0) {
+    munmap(base_ptr, total_bytes);
+    base_ptr = nullptr;
+    total_bytes = 0;
+    LOG(FATAL) << "mlock failed, errno=" << errno
+               << ". Run: ulimit -l unlimited";
+  }
+}
+
+HostPageAlignedRegion::HostPageAlignedRegion(
+    HostPageAlignedRegion&& other) noexcept
+    : base_ptr(other.base_ptr), total_bytes(other.total_bytes) {
+  other.base_ptr = nullptr;
+  other.total_bytes = 0;
+}
+
+HostPageAlignedRegion& HostPageAlignedRegion::operator=(
+    HostPageAlignedRegion&& other) noexcept {
+  if (this != &other) {
+    if (base_ptr != nullptr) {
+      munlock(base_ptr, total_bytes);
+      munmap(base_ptr, total_bytes);
+    }
+    base_ptr = other.base_ptr;
+    total_bytes = other.total_bytes;
+    other.base_ptr = nullptr;
+    other.total_bytes = 0;
+  }
+  return *this;
+}
+
+HostPageAlignedRegion::~HostPageAlignedRegion() {
+  if (base_ptr != nullptr) {
+    munlock(base_ptr, total_bytes);
+    munmap(base_ptr, total_bytes);
+    base_ptr = nullptr;
+    total_bytes = 0;
+  }
+}
 
 }  // namespace xllm
