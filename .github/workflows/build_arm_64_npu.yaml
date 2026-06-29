@@ -1,4 +1,4 @@
-name: xLLM Build ARM64 NPU
+name: xLLM Build arm_64 NPU
 
 on: 
   workflow_dispatch:
@@ -111,7 +111,6 @@ jobs:
     steps:
     - name: Prepare submodule checkout
       run: |
-        sudo chown -R admin:admin /home/admin/actions-runner/_work/xllm/xllm/
         if [ -d .git/modules ]; then
           find .git/modules -type f -name '*.lock' -print -delete || true
         fi
@@ -132,6 +131,7 @@ jobs:
       run: |
         chmod +x /export/home/tools/build_npu.sh
         sudo bash /export/home/tools/build_npu.sh 'git config --global --add safe.directory /workspace; pip install pre-commit -i http://mirrors.aliyun.com/pypi/simple; python setup.py bdist_wheel;'
+        sudo chown -R admin:admin /home/admin/actions-runner/_work/xllm/xllm/
 
     - name: SmokeTest
       if: ${{ success() }}
