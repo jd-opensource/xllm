@@ -112,7 +112,7 @@ jobs:
     - name: Prepare submodule checkout
       run: |
         if [ -d .git/modules ]; then
-          find .git/modules -type f -name '*.lock' -print -delete || true
+          sudo find .git/modules -type f -name '*.lock' -print -delete || true
         fi
 
     - name: Checkout Code
@@ -123,7 +123,7 @@ jobs:
         submodules: recursive
 
     - name: Clean submodules
-      run: git submodule foreach --recursive git clean -ffdx
+      run: sudo git submodule foreach --recursive git clean -ffdx
 
     - name: Build
       if: ${{ success() }}
