@@ -83,7 +83,7 @@ def get_torch_musa_root_path() -> Optional[str]:
         return None
 
 
-def find_dcu_so(package: str, pattern: str) -> Optional[str]:
+def _find_dcu_so(package: str, pattern: str) -> Optional[str]:
     try:
         import glob
         import importlib.util
@@ -229,11 +229,11 @@ def set_dcu_envs() -> None:
     set_common_envs()
     os.environ["DCU_PATH"] = get_dcu_root_path() or ""
     if not os.getenv("FLASH_MLA_LIB"):
-        flash_mla_lib = find_dcu_so("flash_mla", "cuda*.so")
+        flash_mla_lib = _find_dcu_so("flash_mla", "cuda*.so")
         if flash_mla_lib:
             os.environ["FLASH_MLA_LIB"] = flash_mla_lib
     if not os.getenv("AITER_CPP_API_LIB"):
-        aiter_cpp_api_lib = find_dcu_so("aiter", "jit/module_cpp_api.so")
+        aiter_cpp_api_lib = _find_dcu_so("aiter", "jit/module_cpp_api.so")
         if aiter_cpp_api_lib:
             os.environ["AITER_CPP_API_LIB"] = aiter_cpp_api_lib
 

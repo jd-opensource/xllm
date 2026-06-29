@@ -126,12 +126,16 @@ void apply_rotary(RotaryParams& params) {
     pos_ids = params.position_ids.value().to(torch::kInt64);
 #if defined(USE_DCU)
     if (pos_ids.dim() == 2 && params.q.dim() == 3) {
-      CHECK(params.cu_query_lens.has_value())
-          << "apply_rotary: cu_query_lens is required to pack 2D "
-             "position_ids for packed query, position_ids: "
-          << pos_ids.sizes() << ", query: " << params.q.sizes();
-      pos_ids =
-          pack_2d_position_ids(pos_ids, params.cu_query_lens.value(), params.q);
+      if (pos_ids.numel() == params.q.size(0)) {
+        pos_ids = pos_ids.reshape({-1}).contiguous();
+      } else {
+        CHECK(params.cu_query_lens.has_value())
+            << "apply_rotary: cu_query_lens is required to pack 2D "
+               "position_ids for packed query, position_ids: "
+            << pos_ids.sizes() << ", query: " << params.q.sizes();
+        pos_ids = pack_2d_position_ids(
+            pos_ids, params.cu_query_lens.value(), params.q);
+      }
     } else {
       pos_ids = pos_ids.contiguous();
     }
