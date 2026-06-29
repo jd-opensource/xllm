@@ -20,9 +20,10 @@ cc_library(
     deepseek_v32_sp_plan.h
     moe_gate.h
     fused_moe.h
-    qwen3_5_fused_moe.h
-    qwen3_5_attention.h
-    qwen3_5_decoder_layer.h
+    qwen3_5/qwen3_5_fused_moe.h
+    qwen3_5/qwen3_5_attention.h
+    qwen3_5/qwen3_5_decoder_layer.h
+    qwen3_5/qwen3_5_gated_delta_net.h
     moe_softplus_topk.h
   SRCS
     attention.cpp
@@ -41,9 +42,10 @@ cc_library(
     fused_moe.cpp
     fused_moe_base.cpp
     fused_moe_all2all.cpp
-    qwen3_5_fused_moe.cpp
-    qwen3_5_attention.cpp
-    qwen3_5_decoder_layer.cpp
+    qwen3_5/qwen3_5_fused_moe.cpp
+    qwen3_5/qwen3_5_attention.cpp
+    qwen3_5/qwen3_5_decoder_layer.cpp
+    qwen3_5/qwen3_5_gated_delta_net.cpp
     moe_softplus_topk.cpp
   DEPS
     :common_layers

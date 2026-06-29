@@ -154,6 +154,13 @@ struct AttentionMetadata {
   torch::Tensor unshared_v_cache;
   torch::Tensor step_tensor;
 
+  // for GDN attention
+  torch::Tensor chunk_indices;
+  torch::Tensor batch;
+  torch::Tensor token_block_offset;
+  torch::Tensor has_initial_states;
+  int32_t tot = 0;
+
   // custom attention mask
   torch::Tensor attn_mask;
 

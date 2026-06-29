@@ -311,6 +311,10 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   // bound covers both paths when speculative decode is enabled.
   q_seq_lens_ = torch::zeros({max_seq_lens}, int_tensor_options);
   kv_seq_lens_ = torch::zeros({max_seq_lens}, int_tensor_options);
+  // The max_seq_lens index will be used as the padding value under MLU graph,
+  // and this value will not be used in valid computations.
+  linear_state_indices_ =
+      torch::full({max_seq_lens}, max_seq_lens, int_tensor_options);
 }
 
 void GraphPersistentParam::init_params(const ModelInputParams& params,
@@ -332,6 +336,12 @@ void GraphPersistentParam::init_params(const ModelInputParams& params,
     }
     params_.embedding.input_embedding =
         input_embeds_.slice(0, 0, padding_num_tokens);
+  }
+
+  if (!params.embedding.linear_state_ids.empty()) {
+    params_.embedding.linear_state_ids = params.embedding.linear_state_ids;
+    params_.embedding.linear_state_indices =
+        linear_state_indices(padding_num_tokens);
   }
 }
 
@@ -419,6 +429,24 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
           .slice(0, params.embedding.input_embedding.size(0), padded_tokens)
           .zero_();
     }
+  }
+
+  if (!params.embedding.linear_state_ids.empty()) {
+    const int64_t actual_batch_size = params.embedding.linear_state_ids.size();
+    if (params.embedding.linear_state_indices.defined()) {
+      linear_state_indices_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+          .copy_(params.embedding.linear_state_indices, /*non_blocking=*/true);
+    } else {
+      linear_state_indices_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+          .copy_(torch::tensor(params.embedding.linear_state_ids,
+                               linear_state_indices_.options()),
+                 /*non_blocking=*/true);
+    }
+    params_.embedding.linear_state_ids = params.embedding.linear_state_ids;
+    params_.embedding.linear_state_indices =
+        linear_state_indices(padded_tokens);
   }
 }
 
