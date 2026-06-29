@@ -48,6 +48,9 @@ jobs:
       requires_approval: ${{ steps.check_sensitive.outputs.requires_approval }}
       do_build: ${{ steps.decide.outputs.do_build }}
     steps:
+      - name: Github Proxy
+        run: git config --global url."https://gh-proxy.com/github.com".insteadOf "https://github.com"
+
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
@@ -59,7 +62,6 @@ jobs:
       - name: Check if sensitive files were changed
         id: check_sensitive
         run: |
-          git config --global url."https://gh-proxy.com/github.com".insteadOf "https://github.com"
           sensitive_files=(
             ".github/**.yaml"
             "cibuild/**.sh"
@@ -110,9 +112,11 @@ jobs:
       needs.check-sensitive.outputs.do_build == 'true'
     runs-on: [self-hosted, ARM64]
     steps:
+    - name: Github Proxy
+      run: git config --global url."https://gh-proxy.com/github.com".insteadOf "https://github.com"
+
     - name: Prepare submodule checkout
       run: |
-        git config --global url."https://gh-proxy.com/github.com".insteadOf "https://github.com"
         if [ -d .git/modules ]; then
           find .git/modules -type f -name '*.lock' -print -delete || true
         fi
@@ -125,7 +129,9 @@ jobs:
         submodules: recursive
 
     - name: Clean submodules
-      run: sudo git submodule foreach --recursive git clean -ffdx
+      run: |
+        git config --global --add safe.directory /home/admin/actions-runner/_work/xllm/xllm
+        sudo git submodule foreach --recursive git clean -ffdx
 
     - name: Build
       if: ${{ success() }}
