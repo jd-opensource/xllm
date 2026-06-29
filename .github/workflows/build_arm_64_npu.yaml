@@ -111,7 +111,7 @@ jobs:
     steps:
     - name: Prepare submodule checkout
       run: |
-        sudo chown -R admin:admin $GITHUB_WORKSPACE
+        sudo chown -R admin:admin /home/admin/actions-runner/_work/xllm/xllm/
         if [ -d .git/modules ]; then
           find .git/modules -type f -name '*.lock' -print -delete || true
         fi
