@@ -128,11 +128,6 @@ jobs:
         clean: true
         submodules: recursive
 
-    - name: Clean submodules
-      run: |
-        git config --global --add safe.directory /home/admin/actions-runner/_work/xllm/xllm
-        sudo git submodule foreach --recursive git clean -ffdx
-
     - name: Build
       if: ${{ success() }}
       timeout-minutes: 60
