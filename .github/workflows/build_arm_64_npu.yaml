@@ -59,6 +59,7 @@ jobs:
       - name: Check if sensitive files were changed
         id: check_sensitive
         run: |
+          git config --global url."https://gh-proxy.com/github.com".insteadOf "https://github.com"
           sensitive_files=(
             ".github/**.yaml"
             "cibuild/**.sh"
@@ -111,6 +112,7 @@ jobs:
     steps:
     - name: Prepare submodule checkout
       run: |
+        git config --global url."https://gh-proxy.com/github.com".insteadOf "https://github.com"
         if [ -d .git/modules ]; then
           find .git/modules -type f -name '*.lock' -print -delete || true
         fi
