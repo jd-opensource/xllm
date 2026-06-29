@@ -129,5 +129,11 @@ jobs:
       if: ${{ success() }}
       timeout-minutes: 60
       run: |
-        chmod +x ./cibuild/build_npu.sh
-        sudo bash cibuild/build_npu.sh 'pip install pre-commit -i http://mirrors.aliyun.com/pypi/simple; python setup.py bdist_wheel; pip install dist/* --force-reinstall; cd /tmp && python /export/home/actions-runner/_work/xllm/xllm/examples/generate.py --model="/export/home/models/Qwen2-7B-Instruct" --devices="npu:7"'
+        chmod +x /export/home/tools/build_npu.sh
+        sudo bash /export/home/tools/build_npu.sh 'git config --global --add safe.directory /workspace; pip install pre-commit -i http://mirrors.aliyun.com/pypi/simple; python setup.py bdist_wheel;'
+
+    - name: SmokeTest
+      if: ${{ success() }}
+      timeout-minutes: 60
+      run: |
+        cd /export/home/kongshuaikang1/xTask; sudo python3 main.py --case_group smoke_case_group --host_addr 0.0.0.0
