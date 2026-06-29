@@ -116,44 +116,21 @@ void Qwen3_5AttentionImpl::rotary_emb_forward(
   mrope_cu_seq_lens_[1] = num_tokens;
 
   xllm::kernel::RotaryParams rotary_params;
-  bool only_prefill =
-      (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
-  if (only_prefill) {
-    rotary_params.sin = attn_metadata.mrope_sin;
-    rotary_params.cos = attn_metadata.mrope_cos;
-    rotary_params.position_ids = std::nullopt;
-    rotary_params.cu_query_lens = mrope_cu_seq_lens_;
-    rotary_params.interleaved = false;
-    rotary_params.discrete = false;
-    rotary_params.max_query_len = num_tokens;
+  rotary_params.sin = attn_metadata.mrope_sin;
+  rotary_params.cos = attn_metadata.mrope_cos;
+  rotary_params.position_ids = std::nullopt;
+  rotary_params.cu_query_lens = mrope_cu_seq_lens_;
+  rotary_params.interleaved = false;
+  rotary_params.discrete = false;
+  rotary_params.max_query_len = num_tokens;
 
-    rotary_params.q = q.view({num_tokens, -1, head_dim_});
-    xllm::kernel::apply_rotary(rotary_params);
-    q = rotary_params.q.reshape(q_shape);
+  rotary_params.q = q.view({num_tokens, -1, head_dim_});
+  xllm::kernel::apply_rotary(rotary_params);
+  q = rotary_params.q.reshape(q_shape);
 
-    rotary_params.q = k.view({num_tokens, -1, head_dim_});
-    xllm::kernel::apply_rotary(rotary_params);
-    k = rotary_params.q.reshape(k_shape);
-  } else {
-    if (positions.dim() == 2) {
-      rotary_params.position_ids = positions[0];
-    } else {
-      rotary_params.position_ids = positions;
-    }
-    rotary_params.sin = rotary_emb_->get_sin_cache();
-    rotary_params.cos = rotary_emb_->get_cos_cache();
-
-    rotary_params.interleaved = false;
-    rotary_params.discrete = true;
-    rotary_params.max_query_len = num_tokens;
-    rotary_params.q = q.view({1, num_tokens, -1, head_dim_});
-    xllm::kernel::apply_rotary(rotary_params);
-    q = rotary_params.q.reshape(q_shape);
-
-    rotary_params.q = k.view({1, num_tokens, -1, head_dim_});
-    xllm::kernel::apply_rotary(rotary_params);
-    k = rotary_params.q.reshape(k_shape);
-  }
+  rotary_params.q = k.view({num_tokens, -1, head_dim_});
+  xllm::kernel::apply_rotary(rotary_params);
+  k = rotary_params.q.reshape(k_shape);
 }
 
 torch::Tensor Qwen3_5AttentionImpl::forward(

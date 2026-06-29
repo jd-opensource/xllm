@@ -28,8 +28,9 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/dense_mlp.h"
 #include "layers/common/qwen3_next_rms_norm.h"
-#include "layers/mlu/qwen3_5_attention.h"
-#include "layers/mlu/qwen3_5_fused_moe.h"
+#include "layers/mlu/qwen3_5/qwen3_5_attention.h"
+#include "layers/mlu/qwen3_5/qwen3_5_fused_moe.h"
+#include "layers/mlu/qwen3_5/qwen3_5_gated_delta_net.h"
 
 namespace xllm {
 namespace layer {
@@ -57,8 +58,7 @@ class Qwen3_5DecoderLayerImpl final : public torch::nn::Module {
 
   std::string layer_type_;
   Qwen3_5Attention full_attention_{nullptr};
-  // TODO: support linear attention
-  // Qwen3_5GatedDeltaNet linear_attention_{nullptr};
+  Qwen3_5GatedDeltaNet linear_attention_{nullptr};
   DenseMLP mlp_{nullptr};
   Qwen3_5FusedMoE moe_mlp_{nullptr};
   Qwen3NextRMSNorm input_norm_{nullptr};
