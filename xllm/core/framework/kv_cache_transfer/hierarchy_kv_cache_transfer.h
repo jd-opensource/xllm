@@ -51,12 +51,10 @@ class HierarchyKVCacheTransfer {
 
   using GroupedCaches = std::map<BlockType, std::vector<KVCache*>>;
 
-  struct HostCacheTensors {
-    BlockTypeTensorMap tensors;
-    int64_t num_blocks = 0;
-    int64_t num_layers = 0;
-  };
-  using HostGroupedCaches = std::map<BlockType, HostCacheTensors>;
+  // Host prefix caches: one real KVCache per block type, allocated over
+  // page-aligned + mlock'd + NPU-registered host memory. Shape per tensor is
+  // [host_blocks, layer_count, ...per_block_dims].
+  using HostGroupedCaches = std::map<BlockType, std::unique_ptr<KVCache>>;
 
   struct Options {
     PROPERTY(uint32_t, tp_rank);

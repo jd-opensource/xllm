@@ -90,23 +90,21 @@ BlockTypeTensorMap build_block_type_tensor_map(const KVCache& kv_cache,
       }
       return map;
     case BlockType::C4:
-      if (!has_tensor(swa_cache)) {
+      // DSV4 compress-ratio-4 layer: has swa + key + index (no value).
+      if (!has_tensor(swa_cache) || has_tensor(value_cache) ||
+          !has_tensor(key_cache) || !has_tensor(index_cache)) {
         return {};
       }
-      if (has_tensor(key_cache)) {
-        map.emplace(KVCacheTensorRole::KEY, key_cache);
-      }
-      if (has_tensor(index_cache)) {
-        map.emplace(KVCacheTensorRole::INDEX, index_cache);
-      }
+      map.emplace(KVCacheTensorRole::KEY, key_cache);
+      map.emplace(KVCacheTensorRole::INDEX, index_cache);
       return map;
     case BlockType::C128:
-      if (!has_tensor(swa_cache)) {
+      // DSV4 compress-ratio-128 layer: has swa + key, but no index/value.
+      if (!has_tensor(swa_cache) || has_tensor(value_cache) ||
+          !has_tensor(key_cache) || has_tensor(index_cache)) {
         return {};
       }
-      if (has_tensor(key_cache)) {
-        map.emplace(KVCacheTensorRole::KEY, key_cache);
-      }
+      map.emplace(KVCacheTensorRole::KEY, key_cache);
       return map;
     default:
       return {};
@@ -189,61 +187,19 @@ void HierarchyKVCacheTransfer::create_host_cache() {
       continue;
     }
 
-    BlockTypeTensorMap first_tensors =
-        build_block_type_tensor_map(*group_caches.front(), block_type);
-    if (first_tensors.empty()) {
-      continue;
-    }
+    const int64_t layer_count = static_cast<int64_t>(group_caches.size());
 
-    const int64_t group_layer_count = static_cast<int64_t>(group_caches.size());
+    KVCacheCreateOptions host_opts = create_options_;
+    host_opts.device(torch::Device(torch::kCPU))
+        .enable_xtensor(false)
+        .enable_raw_device_allocator(false)
+        .host_blocks_factor(options_.host_blocks_factor());
+#if defined(USE_NPU)
+    host_opts.enable_kv_cache_huge_page_allocator(false);
+#endif
 
-    // Determine num_device_blocks from the first tensor's dim 0
-    int64_t num_device_blocks = 0;
-    for (const auto& [role, tensor] : first_tensors) {
-      if (tensor.dim() > 0) {
-        num_device_blocks = tensor.size(0);
-        break;
-      }
-    }
-    if (num_device_blocks == 0) {
-      continue;
-    }
-
-    int64_t num_host_blocks = static_cast<int64_t>(
-        static_cast<double>(num_device_blocks) * options_.host_blocks_factor());
-
-    HostCacheTensors host_cache;
-    host_cache.num_blocks = num_host_blocks;
-    host_cache.num_layers = group_layer_count;
-
-    // Host tensor shape: [num_host_blocks, group_layer_count,
-    // ...per_block_dims] Device tensor shape per layer: [num_device_blocks,
-    // ...per_block_dims] So host[block_id][layer_slot] == device[block_id] for
-    // one layer
-    auto cpu_options = torch::TensorOptions()
-                           .dtype(create_options_.dtype())
-                           .device(torch::kCPU);
-
-    for (const auto& [role, device_tensor] : first_tensors) {
-      auto sizes = device_tensor.sizes().vec();
-      if (sizes.empty()) {
-        continue;
-      }
-      // sizes is [num_device_blocks, d1, d2, ...]
-      // host shape: [num_host_blocks, group_layer_count, d1, d2, ...]
-      std::vector<int64_t> host_shape;
-      host_shape.reserve(sizes.size() + 1);
-      host_shape.push_back(num_host_blocks);
-      host_shape.push_back(group_layer_count);
-      for (size_t i = 1; i < sizes.size(); ++i) {
-        host_shape.push_back(sizes[i]);
-      }
-
-      torch::Tensor host_tensor = torch::zeros(host_shape, cpu_options);
-      host_cache.tensors.emplace(role, std::move(host_tensor));
-    }
-
-    host_kv_caches_.emplace(block_type, std::move(host_cache));
+    host_kv_caches_[block_type] = std::make_unique<KVCache>(
+        kv_cache_shape_, host_opts, block_type, layer_count);
   }
 
   LOG(INFO) << "HierarchyKVCacheTransfer: created host cache for "
@@ -273,7 +229,10 @@ HierarchyKVCacheTransfer::CopyPlan HierarchyKVCacheTransfer::build_copy_plan(
 
     const auto& group_caches = device_it->second;
     const auto& layer_ids = layer_ids_it->second;
-    const auto& host_cache = host_it->second;
+    const KVCache* host_cache = host_it->second.get();
+    CHECK(host_cache != nullptr) << "host cache instance must not be null.";
+    const BlockTypeTensorMap host_tensors =
+        host_cache->get_block_type_tensors(type);
 
     int32_t host_block_id = -1;
     int32_t device_block_id = -1;
@@ -292,8 +251,6 @@ HierarchyKVCacheTransfer::CopyPlan HierarchyKVCacheTransfer::build_copy_plan(
     }
 
     CHECK_GE(host_block_id, 0) << "host block id must be non-negative.";
-    CHECK_LT(host_block_id, host_cache.num_blocks)
-        << "host block id out of range.";
 
     for (size_t layer_slot = 0; layer_slot < group_caches.size();
          ++layer_slot) {
@@ -306,17 +263,19 @@ HierarchyKVCacheTransfer::CopyPlan HierarchyKVCacheTransfer::build_copy_plan(
       BlockTypeTensorMap device_tensors =
           build_block_type_tensor_map(*group_caches[layer_slot], type);
       for (const auto& [role, device_tensor] : device_tensors) {
-        auto host_tensor_it = host_cache.tensors.find(role);
-        if (host_tensor_it == host_cache.tensors.end()) {
+        auto host_tensor_it = host_tensors.find(role);
+        if (host_tensor_it == host_tensors.end()) {
           continue;
         }
 
         // device_tensor shape: [num_blocks, ...per_block_dims]
         // host_tensor shape: [num_host_blocks, num_layers, ...per_block_dims]
+        const torch::Tensor& host_tensor = host_tensor_it->second;
+        CHECK_LT(host_block_id, host_tensor.size(0))
+            << "host block id out of range.";
         torch::Tensor device_block = device_tensor[device_block_id];
         torch::Tensor host_block_layer =
-            host_tensor_it
-                ->second[host_block_id][static_cast<int64_t>(layer_slot)];
+            host_tensor[host_block_id][static_cast<int64_t>(layer_slot)];
 
         if (transfer_type == TransferType::H2D) {
           plan.src_tensors.emplace_back(host_block_layer);

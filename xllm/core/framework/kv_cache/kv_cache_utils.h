@@ -181,6 +181,30 @@ LinearAttentionKVCacheTensors create_linear_attention_kv_cache_tensors(
     const KVCacheShape& kv_cache_shape,
     const KVCacheCreateOptions& create_options);
 
+// Scale a device block count to the host block count using host_blocks_factor
+// (clamped to >= 1.0 so the host pool is never smaller than the device pool).
+int64_t scale_host_block_count(int64_t block_count, double host_blocks_factor);
+
+// Build a host tensor shape from a per-layer device shape by scaling dim 0
+// (block count) by host_blocks_factor.
+std::vector<int64_t> build_host_tensor_shape(
+    const std::vector<int64_t>& base_shape,
+    double host_blocks_factor);
+
+// Build a grouped host tensor shape: scales dim 0 then inserts a layer
+// dimension at index 1, yielding [host_blocks, layer_count, ...per_block_dims].
+std::vector<int64_t> build_host_group_tensor_shape(
+    const std::vector<int64_t>& base_shape,
+    double host_blocks_factor,
+    int64_t layer_count);
+
+// Allocate a page-aligned, mlock'd (and NPU-registered) host tensor over a
+// HostPageAlignedRegion. The region owns the memory; the tensor is a view.
+void create_host_page_aligned_tensor(const std::vector<int64_t>& dims,
+                                     torch::ScalarType dtype,
+                                     torch::Tensor* tensor,
+                                     HostPageAlignedRegion* region);
+
 #if defined(USE_NPU)
 aclFormat get_npu_kv_cache_format(const std::string& model_type);
 #endif
