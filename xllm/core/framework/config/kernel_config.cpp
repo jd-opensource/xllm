@@ -42,6 +42,10 @@ DEFINE_bool(enable_interlayer_addnorm,
             false,
             "enable fused interlayer addnorm ops.");
 
+DEFINE_bool(enable_qwen3_flash_comm,
+            false,
+            "enable FlashComm v1 for NPU Qwen3 dense decoder layers.");
+
 DEFINE_bool(enable_split_rmsnorm_rope,
             false,
             "enable fused split rmsnorm rope ops.");
@@ -82,6 +86,7 @@ void KernelConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_intralayer_addnorm);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_fused_mc2);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_interlayer_addnorm);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_qwen3_flash_comm);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_split_rmsnorm_rope);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_aclnn_matmul);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_aclnn_swiglu);
@@ -95,6 +100,7 @@ void KernelConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_intralayer_addnorm);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_fused_mc2);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_interlayer_addnorm);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_qwen3_flash_comm);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_split_rmsnorm_rope);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_aclnn_matmul);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_aclnn_swiglu);
@@ -115,6 +121,8 @@ void KernelConfig::append_config_json(
       config_json, default_config, enable_fused_mc2);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_interlayer_addnorm);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_qwen3_flash_comm);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_split_rmsnorm_rope);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
