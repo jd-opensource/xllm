@@ -40,6 +40,150 @@ torch::Tensor slice_expert_weights(const torch::Tensor& weight,
       .contiguous();
 }
 
+torch::Tensor shard_fused_gate_up(const torch::Tensor& fused_gate_up,
+                                  int64_t rank,
+                                  int64_t world_size) {
+  if (world_size <= 1) {
+    return fused_gate_up;
+  }
+
+  CHECK_GE(fused_gate_up.dim(), 2)
+      << "gate_up_proj must have at least 2 dims, got "
+      << fused_gate_up.sizes();
+  CHECK_EQ(fused_gate_up.size(1) % 2, 0)
+      << "gate_up_proj dim1 must be even, got " << fused_gate_up.size(1);
+  const int64_t full_intermediate = fused_gate_up.size(1) / 2;
+  CHECK_EQ(full_intermediate % world_size, 0)
+      << "gate_up_proj intermediate dim is not divisible by world_size";
+  const int64_t inter_shard = full_intermediate / world_size;
+
+  torch::Tensor gate_full = fused_gate_up.slice(1, 0, full_intermediate);
+  torch::Tensor up_full =
+      fused_gate_up.slice(1, full_intermediate, full_intermediate * 2);
+  torch::Tensor gate_shard =
+      gate_full.slice(1, rank * inter_shard, (rank + 1) * inter_shard);
+  torch::Tensor up_shard =
+      up_full.slice(1, rank * inter_shard, (rank + 1) * inter_shard);
+  return torch::cat({gate_shard, up_shard}, 1);
+}
+
+torch::Tensor shard_last_dim(const torch::Tensor& tensor,
+                             int64_t rank,
+                             int64_t world_size,
+                             int64_t local_size) {
+  if (world_size <= 1) {
+    return tensor;
+  }
+  CHECK_EQ(tensor.size(-1), local_size * world_size)
+      << "last dim is not divisible by world_size, tensor shape="
+      << tensor.sizes() << ", local_size=" << local_size
+      << ", world_size=" << world_size;
+  return tensor.slice(
+      tensor.dim() - 1, rank * local_size, (rank + 1) * local_size);
+}
+
+void copy_expanded_vector(const torch::Tensor& src, torch::Tensor& dst) {
+  torch::Tensor reshaped = src.reshape({1, -1}).expand(dst.sizes());
+  dst.copy_(reshaped);
+}
+
+bool load_fused_gate_up_sq(const StateDict& state_dict,
+                           int64_t rank,
+                           int64_t world_size,
+                           int64_t start_expert_id,
+                           int64_t num_experts_per_rank,
+                           torch::Tensor& w13,
+                           torch::Tensor& w13_scale,
+                           torch::Tensor& input_smooth,
+                           bool& w13_is_loaded,
+                           bool& w13_scale_is_loaded,
+                           bool& input_smooth_is_loaded) {
+  torch::Tensor fused_qweight = state_dict.get_tensor("gate_up_proj.qweight");
+  torch::Tensor fused_scale =
+      state_dict.get_tensor("gate_up_proj.per_channel_scale");
+  torch::Tensor fused_smooth = state_dict.get_tensor("gate_up_proj.smooth");
+  if (!fused_qweight.defined() || !fused_scale.defined() ||
+      !fused_smooth.defined()) {
+    return false;
+  }
+
+  torch::Tensor qweight_shard =
+      slice_expert_weights(shard_fused_gate_up(fused_qweight, rank, world_size),
+                           start_expert_id,
+                           num_experts_per_rank);
+  CHECK_EQ(w13.sizes(), qweight_shard.sizes())
+      << "qweight size mismatch for " << state_dict.prefix()
+      << "gate_up_proj.qweight";
+  w13.copy_(qweight_shard);
+  w13_is_loaded = true;
+
+  torch::Tensor scale_shard =
+      slice_expert_weights(shard_fused_gate_up(fused_scale, rank, world_size),
+                           start_expert_id,
+                           num_experts_per_rank);
+  CHECK_EQ(w13_scale.sizes(), scale_shard.sizes())
+      << "per_channel_scale size mismatch for " << state_dict.prefix()
+      << "gate_up_proj.per_channel_scale";
+  w13_scale.copy_(scale_shard);
+  w13_scale_is_loaded = true;
+
+  CHECK_EQ(input_smooth.size(1), fused_smooth.numel())
+      << "smooth size mismatch for " << state_dict.prefix()
+      << "gate_up_proj.smooth";
+  copy_expanded_vector(fused_smooth, input_smooth);
+  input_smooth_is_loaded = true;
+  return true;
+}
+
+bool load_fused_down_sq(const StateDict& state_dict,
+                        int64_t rank,
+                        int64_t world_size,
+                        int64_t start_expert_id,
+                        int64_t num_experts_per_rank,
+                        torch::Tensor& w2,
+                        torch::Tensor& w2_scale,
+                        torch::Tensor& act_smooth,
+                        bool& w2_is_loaded,
+                        bool& w2_scale_is_loaded,
+                        bool& act_smooth_is_loaded) {
+  torch::Tensor fused_qweight = state_dict.get_tensor("down_proj.qweight");
+  torch::Tensor fused_scale =
+      state_dict.get_tensor("down_proj.per_channel_scale");
+  torch::Tensor fused_smooth = state_dict.get_tensor("down_proj.smooth");
+  if (!fused_qweight.defined() || !fused_scale.defined() ||
+      !fused_smooth.defined()) {
+    return false;
+  }
+
+  torch::Tensor qweight_shard = slice_expert_weights(
+      shard_last_dim(fused_qweight, rank, world_size, w2.size(-1)),
+      start_expert_id,
+      num_experts_per_rank);
+  CHECK_EQ(w2.sizes(), qweight_shard.sizes())
+      << "qweight size mismatch for " << state_dict.prefix()
+      << "down_proj.qweight";
+  w2.copy_(qweight_shard);
+  w2_is_loaded = true;
+
+  torch::Tensor scale = fused_scale;
+  if (fused_scale.dim() == w2_scale.dim() && fused_scale.dim() == 3) {
+    scale = shard_last_dim(fused_scale, rank, world_size, w2_scale.size(-1));
+  }
+  torch::Tensor scale_shard =
+      slice_expert_weights(scale, start_expert_id, num_experts_per_rank);
+  CHECK_EQ(w2_scale.sizes(), scale_shard.sizes())
+      << "per_channel_scale size mismatch for " << state_dict.prefix()
+      << "down_proj.per_channel_scale";
+  w2_scale.copy_(scale_shard);
+  w2_scale_is_loaded = true;
+
+  torch::Tensor smooth_shard =
+      shard_last_dim(fused_smooth, rank, world_size, act_smooth.size(-1));
+  copy_expanded_vector(smooth_shard, act_smooth);
+  act_smooth_is_loaded = true;
+  return true;
+}
+
 bool load_fused_gate_up_fallback(const StateDict& state_dict,
                                  int64_t rank,
                                  int64_t world_size,
@@ -127,7 +271,30 @@ Qwen3_5FusedMoEImpl::Qwen3_5FusedMoEImpl(const ModelArgs& model_args,
 void Qwen3_5FusedMoEImpl::load_experts(const StateDict& state_dict) {
   FusedMoEImpl::load_experts(state_dict);
 
-  if (!is_smoothquant_) {
+  if (is_smoothquant_) {
+    load_fused_gate_up_sq(state_dict,
+                          tp_pg_->rank(),
+                          tp_pg_->world_size(),
+                          start_expert_id_,
+                          num_experts_per_rank_,
+                          w13_,
+                          w13_scale_,
+                          input_smooth_,
+                          w13_is_loaded_,
+                          w13_scale_is_loaded_,
+                          input_smooth_is_loaded_);
+    load_fused_down_sq(state_dict,
+                       tp_pg_->rank(),
+                       tp_pg_->world_size(),
+                       start_expert_id_,
+                       num_experts_per_rank_,
+                       w2_,
+                       w2_scale_,
+                       act_smooth_,
+                       w2_is_loaded_,
+                       w2_scale_is_loaded_,
+                       act_smooth_is_loaded_);
+  } else {
     if (!w13_is_loaded_) {
       w13_is_loaded_ = load_fused_gate_up_fallback(state_dict,
                                                    tp_pg_->rank(),
