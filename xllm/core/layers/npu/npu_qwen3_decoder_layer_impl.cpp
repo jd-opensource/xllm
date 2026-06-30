@@ -460,8 +460,10 @@ void NpuQwen3DecoderLayerImpl::append_flash_comm_tensors(
   }
 
   const int64_t local_tokens = recv_counts[rank];
-  tensor_storage[6] = torch::zeros({local_tokens}).to(device_).to(dtype_);
-  tensor_storage[7] = torch::zeros({token_num}).to(device_).to(dtype_);
+  auto fake_shape_options =
+      torch::TensorOptions().dtype(torch::kFloat16).device(device_);
+  tensor_storage[6] = torch::zeros({local_tokens}, fake_shape_options);
+  tensor_storage[7] = torch::zeros({token_num}, fake_shape_options);
   node.variantPack.inTensors.at(input_idx++) =
       atb_speed::Utils::AtTensor2Tensor(tensor_storage[6]);
   node.variantPack.inTensors.at(input_idx++) =
