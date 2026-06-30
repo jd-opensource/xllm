@@ -119,6 +119,7 @@ jobs:
       run: |
         if [ -d .git/modules ]; then
           find .git/modules -type f -name '*.lock' -print -delete || true
+          sudo rm -rf third_party || true
         fi
 
     - name: Checkout Code
