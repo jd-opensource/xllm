@@ -45,6 +45,8 @@ class NPULayerSynchronizerAdapter final : public LayerSynchronizer {
     return true;
   }
 
+  void abort() override { impl_.abort(); }
+
   uint32_t size() const override {
     return const_cast<NPULayerSynchronizerImpl&>(impl_).get_event_size();
   }

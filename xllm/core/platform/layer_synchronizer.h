@@ -28,6 +28,11 @@ class LayerSynchronizer {
 
   virtual bool synchronize_layer(int64_t layer_index) = 0;
   virtual bool record_stream(int64_t layer_index, Stream* stream) = 0;
+  // Force every layer's wait to unblock and report failure. Called when a copy
+  // fails so a forward thread spinning in synchronize_layer does not hang
+  // forever; synchronize_layer returns false after abort so the caller aborts
+  // the forward instead of reading not-yet-copied KV cache.
+  virtual void abort() = 0;
   virtual uint32_t size() const = 0;
 };
 

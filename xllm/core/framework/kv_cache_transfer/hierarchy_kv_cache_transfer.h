@@ -96,7 +96,7 @@ class HierarchyKVCacheTransfer {
   uint32_t offload(const std::vector<BlockTransferInfo>& block_transfer_info);
   bool offload_to_host(Slice<BlockTransferInfo>& block_transfer_info);
   bool load_from_host(
-      uint64_t batch_id,
+      std::shared_ptr<LayerSynchronizer> synchronizer,
       const std::vector<BlockTransferInfo>& block_transfer_info);
 
  private:
@@ -104,7 +104,6 @@ class HierarchyKVCacheTransfer {
   Device device_;
 
   std::unique_ptr<ThreadPool> load_threadpool_;
-  std::unique_ptr<ThreadPool> offload_threadpool_;
   moodycamel::BlockingConcurrentQueue<std::unique_ptr<Stream>> copy_stream_;
 
   std::vector<xllm::KVCache>* kv_caches_ptr_ = nullptr;

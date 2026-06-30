@@ -24,6 +24,12 @@ namespace {
 
 constexpr uint32_t TIMEOUT_MS = 60000;
 
+// Streams reserved for concurrent D2H offload callers. D2H runs synchronously
+// on the RemoteWorker copy threadpool (4 threads, see remote_worker.h); reserve
+// one stream per such thread so concurrent offloads never block on the stream
+// queue.
+constexpr size_t kOffloadStreamCount = 4;
+
 std::vector<HierarchyKVCacheTransfer::LayerBatchRange> build_layer_batch_ranges(
     int64_t num_layers,
     uint32_t requested_batches) {
@@ -133,13 +139,12 @@ HierarchyKVCacheTransfer::HierarchyKVCacheTransfer(
       /*init_func=*/[this]() mutable { device_.set_device(); },
       /*cpu_binding=*/false,
       /*pool_name=*/"HierarchyKVCacheTransfer.load");
-  offload_threadpool_ = std::make_unique<ThreadPool>(
-      /*num_threads=*/5,
-      /*init_func=*/[this]() mutable { device_.set_device(); },
-      /*cpu_binding=*/false,
-      /*pool_name=*/"HierarchyKVCacheTransfer.offload");
-  for (int i = 0; i < load_threadpool_->size() + offload_threadpool_->size();
-       ++i) {
+  // D2H offload runs synchronously on the caller (RemoteWorker copy thread) so
+  // its copied-block count can be returned to the scheduler; it is not posted
+  // to a local pool. Size the shared stream pool to cover the H2D load threads
+  // plus the concurrent D2H callers.
+  const size_t num_streams = load_threadpool_->size() + kOffloadStreamCount;
+  for (size_t i = 0; i < num_streams; ++i) {
     copy_stream_.enqueue(device_.get_stream_from_pool(TIMEOUT_MS));
   }
 
@@ -300,11 +305,27 @@ uint32_t HierarchyKVCacheTransfer::transfer_kv_blocks(
     case TransferType::D2H2G:
       return offload(block_transfer_info);
     case TransferType::H2D: {
+      // Create and register the synchronizer synchronously, before scheduling
+      // the async copy. The scheduler issues transfer_kv_blocks before step, so
+      // by the time this returns the entry is in the map and the forward path's
+      // set_layer_synchronizer is guaranteed to find it. Registering inside the
+      // async load_from_host would race the forward lookup (it could miss the
+      // entry, skip the wait, and read KV before the H2D copy completed).
+      auto synchronizer = create_layer_synchronizer(
+          static_cast<int64_t>(layer_batch_ranges_.size()));
+      if (synchronizer == nullptr) {
+        LOG(ERROR) << "Failed to create layer synchronizer.";
+        return 0;
+      }
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        layer_wise_load_synchronizer_[batch_id] = synchronizer;
+      }
       load_threadpool_->schedule(
           [this,
-           batch_id,
+           synchronizer,
            block_transfer_info = std::move(block_transfer_info)]() mutable {
-            load_from_host(batch_id, block_transfer_info);
+            load_from_host(synchronizer, block_transfer_info);
           });
       return 0;
     }
@@ -369,23 +390,13 @@ bool HierarchyKVCacheTransfer::offload_to_host(
 }
 
 bool HierarchyKVCacheTransfer::load_from_host(
-    uint64_t batch_id,
+    std::shared_ptr<LayerSynchronizer> synchronizer,
     const std::vector<BlockTransferInfo>& block_transfer_info) {
   if (block_transfer_info.empty()) {
     return true;
   }
 
-  auto synchronizer = create_layer_synchronizer(
-      static_cast<int64_t>(layer_batch_ranges_.size()));
-  if (synchronizer == nullptr) {
-    LOG(ERROR) << "Failed to create layer synchronizer.";
-    return false;
-  }
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    layer_wise_load_synchronizer_[batch_id] = synchronizer;
-  }
-
+  CHECK(synchronizer != nullptr) << "layer synchronizer must not be null.";
   CHECK(batch_memcpy_ != nullptr) << "batch memcpy must be initialized.";
 
   std::unique_ptr<Stream> stream;
@@ -416,6 +427,12 @@ bool HierarchyKVCacheTransfer::load_from_host(
   }
 
   copy_stream_.enqueue(std::move(stream));
+  // On failure some ranges were never recorded; abort the synchronizer so a
+  // forward thread spinning on those layers unblocks and reports failure
+  // (aborting the forward) instead of hanging or reading uncopied KV cache.
+  if (!success) {
+    synchronizer->abort();
+  }
   return success;
 }
 
