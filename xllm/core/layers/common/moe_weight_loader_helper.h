@@ -197,10 +197,8 @@ inline bool try_load_down_sq(const StateDict& state_dict,
       start_expert_id,
       num_experts_per_rank);
   torch::Tensor scale = fused_scale;
-  if (fused_scale.dim() == w2_scale.dim() && fused_scale.dim() == 3) {
-    if (!can_shard_last_dim(fused_scale, world_size, w2_scale.size(-1))) {
-      return false;
-    }
+  if (fused_scale.dim() == w2_scale.dim() &&
+      can_shard_last_dim(fused_scale, world_size, w2_scale.size(-1))) {
     scale = shard_last_dim(fused_scale, rank, world_size, w2_scale.size(-1));
   }
   torch::Tensor scale_shard =

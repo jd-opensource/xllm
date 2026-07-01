@@ -196,6 +196,81 @@ TEST(MoEWeightHelperTest, LoadsDownSmoothquantShard) {
   EXPECT_TRUE(torch::equal(act_smooth.cpu(), expected_smooth.cpu()));
 }
 
+TEST(MoEWeightHelperTest, LoadsDownSmoothquantShardWith2DScale) {
+  const int64_t rank = 1;
+  const int64_t world_size = 2;
+  const int64_t start_expert_id = 1;
+  const int64_t num_experts_per_rank = 2;
+  const int64_t num_total_experts = 4;
+  const int64_t hidden_size = 3;
+  const int64_t local_intermediate = 2;
+  const int64_t full_intermediate = local_intermediate * world_size;
+
+  std::unordered_map<std::string, torch::Tensor> tensors;
+  tensors["down_proj.qweight"] = make_arange(
+      {num_total_experts, hidden_size, full_intermediate}, torch::kInt8);
+  tensors["down_proj.per_channel_scale"] =
+      make_arange({num_total_experts, full_intermediate}, torch::kFloat32);
+  tensors["down_proj.smooth"] =
+      torch::tensor({1.0f, 2.0f, 3.0f, 4.0f}, torch::kFloat32);
+  StateDict state_dict(std::move(tensors));
+
+  torch::Tensor w2 = torch::empty(
+      {num_experts_per_rank, hidden_size, local_intermediate}, torch::kInt8);
+  torch::Tensor w2_scale =
+      torch::empty({num_experts_per_rank, local_intermediate}, torch::kFloat32);
+  torch::Tensor act_smooth =
+      torch::empty({num_experts_per_rank, local_intermediate}, torch::kFloat32);
+  bool w2_loaded = false;
+  bool scale_loaded = false;
+  bool smooth_loaded = false;
+
+  bool loaded = moe_weight::try_load_down_sq(state_dict,
+                                             rank,
+                                             world_size,
+                                             start_expert_id,
+                                             num_experts_per_rank,
+                                             w2,
+                                             w2_scale,
+                                             act_smooth,
+                                             w2_loaded,
+                                             scale_loaded,
+                                             smooth_loaded);
+
+  torch::Tensor expected_w2 = state_dict.get_tensor("down_proj.qweight")
+                                  .slice(/*dim=*/2,
+                                         rank * local_intermediate,
+                                         (rank + 1) * local_intermediate)
+                                  .slice(/*dim=*/0,
+                                         start_expert_id,
+                                         start_expert_id + num_experts_per_rank)
+                                  .contiguous();
+  torch::Tensor expected_scale =
+      state_dict.get_tensor("down_proj.per_channel_scale")
+          .slice(/*dim=*/1,
+                 rank * local_intermediate,
+                 (rank + 1) * local_intermediate)
+          .slice(/*dim=*/0,
+                 start_expert_id,
+                 start_expert_id + num_experts_per_rank)
+          .contiguous();
+  torch::Tensor expected_smooth =
+      state_dict.get_tensor("down_proj.smooth")
+          .slice(/*dim=*/0,
+                 rank * local_intermediate,
+                 (rank + 1) * local_intermediate)
+          .reshape({1, -1})
+          .expand({num_experts_per_rank, local_intermediate});
+
+  EXPECT_TRUE(loaded);
+  EXPECT_TRUE(w2_loaded);
+  EXPECT_TRUE(scale_loaded);
+  EXPECT_TRUE(smooth_loaded);
+  EXPECT_TRUE(torch::equal(w2.cpu(), expected_w2.cpu()));
+  EXPECT_TRUE(torch::equal(w2_scale.cpu(), expected_scale.cpu()));
+  EXPECT_TRUE(torch::equal(act_smooth.cpu(), expected_smooth.cpu()));
+}
+
 TEST(MoEWeightHelperTest, MissingFusedKeyReturnsFalseWithoutMutation) {
   StateDict state_dict(std::unordered_map<std::string, torch::Tensor>{});
   torch::Tensor w13 = torch::full({2, 4, 3}, -7, torch::kInt8);

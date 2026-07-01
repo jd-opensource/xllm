@@ -100,28 +100,41 @@ void Qwen3_5FusedMoEImpl::load_experts(const StateDict& state_dict) {
   FusedMoEImpl::load_experts(state_dict);
 
   if (is_smoothquant_) {
-    moe_weight::try_load_gate_up_sq(state_dict,
-                                    tp_pg_->rank(),
-                                    tp_pg_->world_size(),
-                                    start_expert_id_,
-                                    num_experts_per_rank_,
-                                    w13_,
-                                    w13_scale_,
-                                    input_smooth_,
-                                    w13_is_loaded_,
-                                    w13_scale_is_loaded_,
-                                    input_smooth_is_loaded_);
-    moe_weight::try_load_down_sq(state_dict,
-                                 tp_pg_->rank(),
-                                 tp_pg_->world_size(),
-                                 start_expert_id_,
-                                 num_experts_per_rank_,
-                                 w2_,
-                                 w2_scale_,
-                                 act_smooth_,
-                                 w2_is_loaded_,
-                                 w2_scale_is_loaded_,
-                                 act_smooth_is_loaded_);
+    const bool gate_up_loaded =
+        w13_is_loaded_ && w13_scale_is_loaded_ && input_smooth_is_loaded_;
+    if (!gate_up_loaded) {
+      CHECK(moe_weight::try_load_gate_up_sq(state_dict,
+                                            tp_pg_->rank(),
+                                            tp_pg_->world_size(),
+                                            start_expert_id_,
+                                            num_experts_per_rank_,
+                                            w13_,
+                                            w13_scale_,
+                                            input_smooth_,
+                                            w13_is_loaded_,
+                                            w13_scale_is_loaded_,
+                                            input_smooth_is_loaded_))
+          << "failed to load gate_up smoothquant weights for "
+          << state_dict.prefix();
+    }
+
+    const bool down_loaded =
+        w2_is_loaded_ && w2_scale_is_loaded_ && act_smooth_is_loaded_;
+    if (!down_loaded) {
+      CHECK(moe_weight::try_load_down_sq(state_dict,
+                                         tp_pg_->rank(),
+                                         tp_pg_->world_size(),
+                                         start_expert_id_,
+                                         num_experts_per_rank_,
+                                         w2_,
+                                         w2_scale_,
+                                         act_smooth_,
+                                         w2_is_loaded_,
+                                         w2_scale_is_loaded_,
+                                         act_smooth_is_loaded_))
+          << "failed to load down smoothquant weights for "
+          << state_dict.prefix();
+    }
   } else {
     if (!w13_is_loaded_) {
       w13_is_loaded_ = load_fused_gate_up_fallback(state_dict,
