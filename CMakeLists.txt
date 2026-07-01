@@ -34,10 +34,24 @@ if(USE_NPU)
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
   )
-  if(DEFINED ENV{ASCEND_HOME_PATH} AND NOT "$ENV{ASCEND_HOME_PATH}" STREQUAL "")
-    set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_HOME_PATH}/opp/vendors/xllm/.xllm_ops_git_head")
+  if(DEFINED ENV{NPU_HOME_PATH} AND NOT "$ENV{NPU_HOME_PATH}" STREQUAL "")
+    set(XLLM_NPU_HOME_PATH "$ENV{NPU_HOME_PATH}")
+  elseif(DEFINED ENV{ASCEND_HOME_PATH} AND NOT "$ENV{ASCEND_HOME_PATH}" STREQUAL "")
+    set(XLLM_NPU_HOME_PATH "$ENV{ASCEND_HOME_PATH}")
   else()
-    set(XLLM_OPS_MARKER_PATH "/usr/local/Ascend/ascend-toolkit/latest/opp/vendors/xllm/.xllm_ops_git_head")
+    message(FATAL_ERROR "NPU_HOME_PATH or ASCEND_HOME_PATH is required for NPU build.")
+  endif()
+
+  if(DEFINED ENV{ASCEND_OPP_PATH} AND NOT "$ENV{ASCEND_OPP_PATH}" STREQUAL "")
+    set(XLLM_ASCEND_OPP_PATH "$ENV{ASCEND_OPP_PATH}")
+  else()
+    set(XLLM_ASCEND_OPP_PATH "${XLLM_NPU_HOME_PATH}/opp")
+  endif()
+
+  if(DEFINED XLLM_ASCEND_OPP_PATH)
+    set(XLLM_OPS_MARKER_PATH "${XLLM_ASCEND_OPP_PATH}/vendors/xllm/.xllm_ops_git_head")
+  else()
+    message(FATAL_ERROR "ASCEND_OPP_PATH is not initialized for NPU build.")
   endif()
 
   if(NOT DEFINED XLLM_OPS_GIT_HEAD_CACHED OR NOT XLLM_OPS_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD_CACHED)
@@ -50,6 +64,12 @@ if(USE_NPU)
     if(NOT XLLM_OPS_RESULT EQUAL 0)
       message(FATAL_ERROR "Failed to precompile xllm ops, error code: ${XLLM_OPS_RESULT}")
     endif()
+
+    if(EXISTS "${XLLM_ASCEND_OPP_PATH}/vendors/custom_xllm_math/op_api/include/aclnnop")
+      set(XLLM_OPS_MARKER_PATH "${XLLM_ASCEND_OPP_PATH}/vendors/custom_xllm_math/.xllm_ops_git_head")
+    endif()
+    message(STATUS "XLLM_OPS_MARKER_PATH: ${XLLM_OPS_MARKER_PATH}")
+
     set(XLLM_OPS_GIT_HEAD_CACHED "${XLLM_OPS_GIT_HEAD}" CACHE INTERNAL "" FORCE)
     get_filename_component(XLLM_OPS_MARKER_DIR "${XLLM_OPS_MARKER_PATH}" DIRECTORY)
     file(MAKE_DIRECTORY "${XLLM_OPS_MARKER_DIR}")
@@ -324,15 +344,25 @@ if(USE_NPU)
 
   include_directories(
       $ENV{PYTHON_INCLUDE_PATH}
+      ${Python_INCLUDE_DIRS}
       $ENV{PYTORCH_INSTALL_PATH}/include
       $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
       $ENV{PYTORCH_NPU_INSTALL_PATH}/include
       $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/distributed
-      $ENV{NPU_HOME_PATH}/include
+      ${XLLM_NPU_HOME_PATH}/include
       $ENV{ATB_HOME_PATH}/include
-      $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/include/
       ${CMAKE_CURRENT_SOURCE_DIR}/third_party/torch_npu_ops/
   )
+  if(EXISTS "${XLLM_ASCEND_OPP_PATH}/vendors/xllm/op_api/include")
+    include_directories(SYSTEM
+      ${XLLM_ASCEND_OPP_PATH}/vendors/xllm/op_api/include/
+    )
+  endif()
+  if(EXISTS "${XLLM_ASCEND_OPP_PATH}/vendors/custom_xllm_math/op_api/include/aclnnop")
+    include_directories(SYSTEM
+      ${XLLM_ASCEND_OPP_PATH}/vendors/custom_xllm_math/op_api/include/aclnnop
+    )
+  endif()
   # Keep third-party warnings suppressed while providing headers expected by
   # legacy includes like "atb_speed/log.h" from xllm_atb_layers.
   include_directories(SYSTEM
@@ -343,11 +373,20 @@ if(USE_NPU)
       $ENV{PYTHON_LIB_PATH}
       $ENV{PYTORCH_INSTALL_PATH}/lib
       $ENV{PYTORCH_NPU_INSTALL_PATH}/lib
-      $ENV{NPU_HOME_PATH}/lib64
+      ${XLLM_NPU_HOME_PATH}/lib64
       $ENV{ATB_HOME_PATH}/lib
       $ENV{NPU_TOOLKIT_HOME}/lib64
-      $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/lib/
   )
+  if(EXISTS "${XLLM_ASCEND_OPP_PATH}/vendors/xllm/op_api/lib")
+    link_directories(
+      ${XLLM_ASCEND_OPP_PATH}/vendors/xllm/op_api/lib/
+    )
+  endif()
+  if(EXISTS "${XLLM_ASCEND_OPP_PATH}/vendors/custom_xllm_math/op_api/lib")
+    link_directories(
+      ${XLLM_ASCEND_OPP_PATH}/vendors/custom_xllm_math/op_api/lib/
+    )
+  endif()
   link_libraries(cust_opapi)
   # avoid conflicts with xllm libruntime.a
   find_library(
