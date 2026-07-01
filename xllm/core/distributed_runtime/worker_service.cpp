@@ -18,8 +18,8 @@ limitations under the License.
 #include <brpc/controller.h>
 #include <glog/logging.h>
 #include <signal.h>
-#include <unistd.h>
 #include <torch/torch.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <boost/algorithm/string.hpp>

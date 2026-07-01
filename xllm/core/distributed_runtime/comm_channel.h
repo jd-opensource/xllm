@@ -122,6 +122,8 @@ class CommChannel {
 
   virtual bool stop_profile();
 
+  // Request the remote worker to terminate. Currently only used by
+  // multi-machine offline inference for coordinated shutdown of all machines.
   virtual bool shutdown();
 
  protected:

@@ -171,6 +171,7 @@ class Engine {
     return false;
   };
 
+  // Shut down remote workers (multi-machine offline inference only).
   virtual bool shutdown_remote_workers() { return true; };
 
   // XTensor mode: get GlobalXTensor offsets for allocated blocks

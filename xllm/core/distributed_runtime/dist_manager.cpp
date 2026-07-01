@@ -15,9 +15,8 @@ limitations under the License.
 
 #include "distributed_runtime/dist_manager.h"
 
-#include <glog/logging.h>
-
 #include <folly/futures/Future.h>
+#include <glog/logging.h>
 
 #include "comm_channel.h"
 #include "common/health_check_manager.h"

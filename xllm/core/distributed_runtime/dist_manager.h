@@ -32,6 +32,9 @@ class DistManager {
     return worker_clients_;
   };
 
+  // Shut down all remote (non-local) worker processes via the Shutdown RPC.
+  // Currently only used by multi-machine offline inference. Sends shutdown
+  // only to workers on other machines; skips local ranks. Idempotent.
   bool shutdown_remote_workers();
 
  private:
