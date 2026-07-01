@@ -48,6 +48,56 @@ bool is_supported_initial_state_dtype(torch::ScalarType dtype) {
   return dtype == torch::kBFloat16 || dtype == torch::kFloat32;
 }
 #endif
+
+#if defined(USE_DCU)
+torch::Tensor pack_2d_position_ids(const torch::Tensor& position_ids,
+                                   const torch::Tensor& cu_query_lens,
+                                   const torch::Tensor& query) {
+  if (position_ids.numel() == query.size(0)) {
+    return position_ids.reshape({-1}).contiguous();
+  }
+
+  torch::Tensor cu_cpu = cu_query_lens.to(torch::kCPU).to(torch::kInt64);
+  CHECK_GE(cu_cpu.numel(), 2)
+      << "apply_rotary: cu_query_lens must have at least 2 elements when "
+         "packing 2D position_ids.";
+  const int64_t num_seqs = cu_cpu.numel() - 1;
+  CHECK_LE(num_seqs, position_ids.size(0))
+      << "apply_rotary: position_ids batch is smaller than cu_query_lens, "
+      << "position_ids: " << position_ids.sizes()
+      << ", cu_query_lens: " << cu_query_lens.sizes();
+
+  std::vector<torch::Tensor> packed_positions;
+  packed_positions.reserve(static_cast<size_t>(num_seqs));
+  int64_t total_tokens = 0;
+  for (int64_t seq_idx = 0; seq_idx < num_seqs; ++seq_idx) {
+    const int64_t start = cu_cpu[seq_idx].item<int64_t>();
+    const int64_t end = cu_cpu[seq_idx + 1].item<int64_t>();
+    const int64_t seq_len = end - start;
+    CHECK_GE(seq_len, 0) << "apply_rotary: cu_query_lens must be monotonic.";
+    CHECK_LE(seq_len, position_ids.size(1))
+        << "apply_rotary: position_ids seq dimension is smaller than "
+        << "q_seq_len, position_ids: " << position_ids.sizes()
+        << ", seq_len: " << seq_len;
+    if (seq_len > 0) {
+      packed_positions.emplace_back(
+          position_ids.select(/*dim=*/0, seq_idx)
+              .slice(/*dim=*/0, /*start=*/0, /*end=*/seq_len));
+    }
+    total_tokens += seq_len;
+  }
+  CHECK_EQ(total_tokens, query.size(0))
+      << "apply_rotary: packed position_ids token count mismatch, "
+      << "position_ids: " << position_ids.sizes()
+      << ", cu_query_lens: " << cu_query_lens.sizes()
+      << ", query: " << query.sizes();
+  if (packed_positions.empty()) {
+    return torch::empty({0}, position_ids.options().dtype(torch::kInt64));
+  }
+  return torch::cat(packed_positions, /*dim=*/0).to(torch::kInt64).contiguous();
+}
+
+#endif
 }  // namespace
 
 void apply_rotary(RotaryParams& params) {
@@ -74,6 +124,22 @@ void apply_rotary(RotaryParams& params) {
     // positions is already int64 on CUDA/MUSA/DCU (pre-converted in
     // ForwardInput::to).
     pos_ids = params.position_ids.value().to(torch::kInt64);
+#if defined(USE_DCU)
+    if (pos_ids.dim() == 2 && params.q.dim() == 3) {
+      if (pos_ids.numel() == params.q.size(0)) {
+        pos_ids = pos_ids.reshape({-1}).contiguous();
+      } else {
+        CHECK(params.cu_query_lens.has_value())
+            << "apply_rotary: cu_query_lens is required to pack 2D "
+               "position_ids for packed query, position_ids: "
+            << pos_ids.sizes() << ", query: " << params.q.sizes();
+        pos_ids = pack_2d_position_ids(
+            pos_ids, params.cu_query_lens.value(), params.q);
+      }
+    } else {
+      pos_ids = pos_ids.contiguous();
+    }
+#endif
   } else if (params.cu_query_lens.has_value()) {
     auto cu = params.cu_query_lens.value().to(torch::kInt64);
     CHECK(cu.numel() >= 2)
@@ -119,7 +185,14 @@ void apply_rotary(RotaryParams& params) {
     LOG(FATAL) << "apply_rotary: neither cos_sin nor cos/sin "
                   "provided; cannot infer cos_sin.";
   }
+#if defined(USE_DCU)
+  std::optional<torch::Tensor> key =
+      params.k.defined() ? std::optional<torch::Tensor>(params.k)
+                         : std::nullopt;
+  cuda::rotary_embedding(pos_ids, params.q, key, cos_sin, is_neox);
+#else
   cuda::rotary_embedding(pos_ids, params.q, params.k, cos_sin, is_neox);
+#endif
 #elif defined(USE_ILU)
   torch::Tensor ilu_cos_sin;
   if (params.precomputed_cos_sin.defined()) {
@@ -528,7 +601,16 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
                               params.scoring_func,
                               params.route_scale,
                               params.e_score_correction_bias);
-#elif defined(USE_CUDA) || defined(USE_MUSA) || defined(USE_DCU)
+#elif defined(USE_DCU)
+  return dcu::moe_active_topk(params.input,
+                              params.topk,
+                              params.num_expert_group,
+                              params.topk_group,
+                              params.normalize,
+                              params.e_score_correction_bias,
+                              params.scoring_func,
+                              params.route_scale);
+#elif defined(USE_CUDA) || defined(USE_MUSA)
   return cuda::moe_fused_topk(params.input,
                               params.topk,
                               params.normalize,

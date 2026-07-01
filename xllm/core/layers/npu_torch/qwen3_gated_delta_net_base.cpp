@@ -493,7 +493,10 @@ void Qwen3GatedDeltaNetBaseImpl::load_common_state_dict(
 
   if (auto w = state_dict.get_tensor("conv1d.weight"); w.defined()) {
     conv1d_->load_state_dict(
-        StateDict({{"weight", w.squeeze(1)}}), shard_tensor_count, shard_sizes);
+        StateDict({{"weight", w.squeeze(1)}},
+                  static_cast<std::string>(state_dict.prefix()) + "conv1d."),
+        shard_tensor_count,
+        shard_sizes);
     conv1d_->weight().set_(conv1d_->weight().transpose(0, 1).contiguous());
   }
   o_proj_->load_state_dict(state_dict.get_dict_with_prefix("out_proj."));
