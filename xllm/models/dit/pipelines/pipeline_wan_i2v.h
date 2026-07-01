@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstring>
 #include <memory>
 
+#include "core/framework/config/dit_config.h"
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/dit_model_loader.h"
@@ -481,6 +482,21 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
     float boundary_timestep =
         boundary_ratio_ > 0.0f ? boundary_ratio_ * num_train_timesteps_ : -1.0f;
 
+    auto& dit_config = DiTConfig::get_instance();
+    xllm::dit::RainFusionState rf_state;
+    if (dit_config.rainfusion_enabled()) {
+      xllm::dit::RainFusionConfig rf_config;
+      rf_config.enabled = true;
+      rf_config.sparsity = static_cast<float>(dit_config.rainfusion_sparsity());
+      rf_config.pool_size = dit_config.rainfusion_pool_size();
+      rf_config.sparse_start_step = dit_config.rainfusion_sparse_start_step();
+
+      transformer_->set_rainfusion_config(rf_config);
+      transformer_2_->set_rainfusion_config(rf_config);
+    }
+    xllm::dit::RainFusionState* rf_state_ptr =
+        dit_config.rainfusion_enabled() ? &rf_state : nullptr;
+
     for (int64_t i = 0; i < timesteps.numel(); ++i) {
       torch::Tensor t = timesteps[i];
       int64_t total_steps = timesteps.numel();
@@ -495,6 +511,8 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
         current_model = transformer_2_;
         current_guidance = guidance_scale_2;
       }
+
+      rf_state.current_step = i;
 
       torch::Tensor latent_model_input;
       torch::Tensor timestep_input;
@@ -532,6 +550,7 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
             timestep_input,
             embeds,
             torch::Tensor(),
+            rf_state_ptr,
             [&rolling](int32_t i) { rolling.wait_h2d(i); },
             [&rolling](int32_t i) { rolling.schedule_next_h2d(i); });
       };
@@ -552,7 +571,9 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
                   : current_model->forward(latent_model_input,
                                            timestep_input,
                                            rank == 0 ? encoded_prompt_embeds
-                                                     : encoded_negative_embeds);
+                                                     : encoded_negative_embeds,
+                                           torch::Tensor(),
+                                           rf_state_ptr);
           auto gathered = xllm::parallel_state::gather(
               noise_pred, parallel_args_.dit_cfg_group_, /*dim=*/0);
           auto chunks = torch::chunk(gathered, 2, 0);
@@ -563,10 +584,16 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
             noise_pred = rolling_forward(encoded_prompt_embeds);
             noise_uncond = rolling_forward(encoded_negative_embeds);
           } else {
-            noise_pred = current_model->forward(
-                latent_model_input, timestep_input, encoded_prompt_embeds);
-            noise_uncond = current_model->forward(
-                latent_model_input, timestep_input, encoded_negative_embeds);
+            noise_pred = current_model->forward(latent_model_input,
+                                                timestep_input,
+                                                encoded_prompt_embeds,
+                                                torch::Tensor(),
+                                                rf_state_ptr);
+            noise_uncond = current_model->forward(latent_model_input,
+                                                  timestep_input,
+                                                  encoded_negative_embeds,
+                                                  torch::Tensor(),
+                                                  rf_state_ptr);
           }
         }
 
@@ -580,7 +607,9 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
                          ? rolling_forward(encoded_prompt_embeds)
                          : current_model->forward(latent_model_input,
                                                   timestep_input,
-                                                  encoded_prompt_embeds);
+                                                  encoded_prompt_embeds,
+                                                  torch::Tensor(),
+                                                  rf_state_ptr);
       }
       auto prev_latents = scheduler_->step(noise_pred, t, prepared_latents);
       prepared_latents = prev_latents.detach();
@@ -616,7 +645,8 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
     prepared_latents = prepared_latents + latents_mean;
     video = vae_->decode(prepared_latents.to(torch::kFloat32)).sample;
     video = video_processor_->postprocess_video(video);
-
+    torch::save(video,
+                "/export/home/weinan5/zjs/tensors_save_dir/cpp/vae_output.pt");
     return video;
   }
 

@@ -35,6 +35,7 @@ limitations under the License.
 #include "core/layers/common/add_matmul.h"
 #include "core/layers/common/rms_norm.h"
 #include "models/dit/utils/dit_parallel_linear.h"
+#include "models/dit/utils/rainfusion_attention.h"
 
 using xllm::dit::DiTParallelLinear;
 using xllm::dit::SpOptions;
@@ -617,12 +618,39 @@ class WanAttentionImpl : public torch::nn::Module {
 
   torch::Tensor at_npu_attention(const torch::Tensor& q,
                                  const torch::Tensor& k,
-                                 const torch::Tensor& v) {
+                                 const torch::Tensor& v,
+                                 xllm::dit::RainFusionState* rf_state) {
     const auto q_t = q.transpose(1, 2);
     const auto k_t = k.transpose(1, 2);
     const auto v_t = v.transpose(1, 2);
 
 #if defined(USE_NPU)
+    if (rf_state && rainfusion_config_.enabled &&
+        rf_state->current_step >= rainfusion_config_.sparse_start_step &&
+        q_t.size(2) == k_t.size(2)) {
+      // Strip SP padding: latent_shape uses the unpadded seq_len,
+      // but SP may have padded the sequence to be divisible by sp_size.
+      auto q_use = q_t;
+      auto k_use = k_t;
+      auto v_use = v_t;
+      int64_t pad_len = 0;
+      if (rf_state->seq_len > 0 && q_t.size(2) > rf_state->seq_len) {
+        pad_len = q_t.size(2) - rf_state->seq_len;
+        q_use = q_t.slice(2, 0, rf_state->seq_len);
+        k_use = k_t.slice(2, 0, rf_state->seq_len);
+        v_use = v_t.slice(2, 0, rf_state->seq_len);
+      }
+      auto [out_bnsd, unused] = xllm::dit::rainfusion_attention(
+          q_use, k_use, v_use, rainfusion_config_, *rf_state);
+      // RainFusionState cache (cached_select_idx/_num_idx) managed internally
+      if (pad_len > 0) {
+        out_bnsd = torch::nn::functional::pad(
+            out_bnsd,
+            torch::nn::functional::PadFuncOptions({0, 0, 0, pad_len}));
+      }
+      return out_bnsd.transpose(1, 2).flatten(2, 3).to(q.dtype());
+    }
+
     const int64_t head_num = q_t.size(1);
     const int64_t head_dim = q_t.size(-1);
     const auto results = at_npu::native::custom_ops::npu_fusion_attention(
@@ -648,11 +676,16 @@ class WanAttentionImpl : public torch::nn::Module {
     return out.flatten(2, 3);
   }
 
+  void set_rainfusion_config(const xllm::dit::RainFusionConfig& config) {
+    rainfusion_config_ = config;
+  }
+
   torch::Tensor forward(
       const torch::Tensor& hidden_states_in,
       const torch::Tensor& encoder_hidden_states = torch::Tensor(),
       std::optional<std::pair<torch::Tensor, torch::Tensor>> rotary_emb =
-          std::nullopt) {
+          std::nullopt,
+      xllm::dit::RainFusionState* rf_state = nullptr) {
     torch::Tensor hidden_states = hidden_states_in;
     bool is_self_attention =
         !encoder_hidden_states.defined() ||
@@ -759,9 +792,9 @@ class WanAttentionImpl : public torch::nn::Module {
 
       key_img = key_img.view({batch_size, -1, n_heads, dim_head_});
       value_img = value_img.view({batch_size, -1, n_heads, dim_head_});
-      hidden_states_img = at_npu_attention(query, key_img, value_img);
+      hidden_states_img = at_npu_attention(query, key_img, value_img, rf_state);
     }
-    hidden_states = at_npu_attention(query, key, value);
+    hidden_states = at_npu_attention(query, key, value, rf_state);
     if (hidden_states_img.defined()) {
       hidden_states = hidden_states + hidden_states_img;
     }
@@ -826,6 +859,9 @@ class WanAttentionImpl : public torch::nn::Module {
   layer::RMSNorm norm_added_k_{nullptr};
 
   torch::TensorOptions options_;
+
+  // RainFusionV3 configuration (static, same for all requests)
+  xllm::dit::RainFusionConfig rainfusion_config_;
 };
 TORCH_MODULE(WanAttention);
 
@@ -1178,11 +1214,17 @@ class WanTransformerBlockImpl : public torch::nn::Module {
                                std::sqrt(static_cast<float>(dim_)));
   }
 
+  void set_rainfusion_config(const xllm::dit::RainFusionConfig& config) {
+    attn1_->set_rainfusion_config(config);
+    attn2_->set_rainfusion_config(config);
+  }
+
   torch::Tensor forward(const torch::Tensor& hidden_states_in,
                         const torch::Tensor& encoder_hidden_states,
                         const torch::Tensor& timestep_proj,
                         std::optional<std::pair<torch::Tensor, torch::Tensor>>
-                            rotary_emb = std::nullopt) {
+                            rotary_emb = std::nullopt,
+                        xllm::dit::RainFusionState* rf_state = nullptr) {
     torch::Tensor hidden_states = hidden_states_in;
     torch::Tensor shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa,
         c_gate_msa;
@@ -1213,8 +1255,8 @@ class WanTransformerBlockImpl : public torch::nn::Module {
     torch::Tensor norm1_result = norm1_->forward(hidden_states);
     torch::Tensor norm_hidden_states =
         (norm1_result.to(hidden_states.dtype()) * (1 + scale_msa) + shift_msa);
-    torch::Tensor attn_output =
-        attn1_->forward(norm_hidden_states, norm_hidden_states, rotary_emb);
+    torch::Tensor attn_output = attn1_->forward(
+        norm_hidden_states, norm_hidden_states, rotary_emb, rf_state);
     hidden_states = hidden_states + attn_output * gate_msa;
 
     if (cross_attn_norm_) {
@@ -1224,7 +1266,7 @@ class WanTransformerBlockImpl : public torch::nn::Module {
     }
 
     attn_output = attn2_->forward(
-        norm_hidden_states, encoder_hidden_states, std::nullopt);
+        norm_hidden_states, encoder_hidden_states, std::nullopt, rf_state);
     hidden_states = hidden_states + attn_output;
     torch::Tensor norm2_result = norm3_->forward(hidden_states);
     norm_hidden_states = (norm2_result * (1 + c_scale_msa) + c_shift_msa);
@@ -1365,11 +1407,18 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
     }
   }
 
+  void set_rainfusion_config(const xllm::dit::RainFusionConfig& config) {
+    for (auto& block : transformer_layers_) {
+      block->set_rainfusion_config(config);
+    }
+  }
+
   torch::Tensor forward(
       const torch::Tensor& hidden_states_in,
       const torch::Tensor& timestep,
       const torch::Tensor& encoder_hidden_states,
       const torch::Tensor& encoder_hidden_states_image = torch::Tensor(),
+      xllm::dit::RainFusionState* rf_state = nullptr,
       std::function<void(int32_t)> before_layer_cb = nullptr,
       std::function<void(int32_t)> after_layer_cb = nullptr) {
     int64_t batch_size = hidden_states_in.size(0);
@@ -1384,6 +1433,9 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
     int64_t post_patch_height = height / p_h;
     int64_t post_patch_width = width / p_w;
 
+    std::vector<int64_t> latent_shape = {
+        post_patch_num_frames, post_patch_height, post_patch_width};
+
     torch::Tensor hidden_states = hidden_states_in;
 
     auto [freqs_cos, freqs_sin] = rope_->forward(hidden_states);
@@ -1397,6 +1449,11 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
     int64_t seq_len = hidden_states.size(1);
     int64_t pad_seq_len = sp_pad_sequence(
         hidden_states, freqs_cos, freqs_sin, rotary_emb, sp_group_);
+
+    if (rf_state) {
+      rf_state->latent_shape = latent_shape;
+      rf_state->seq_len = seq_len;
+    }
 
     torch::Tensor timestep_input = timestep;
     int64_t ts_seq_len_val = hidden_states.size(1);
@@ -1446,7 +1503,8 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
           transformer_layers_[i]->forward(hidden_states,
                                           encoder_hidden_states_embedded,
                                           timestep_proj,
-                                          rotary_emb);
+                                          rotary_emb,
+                                          rf_state);
       if (after_layer_cb) {
         after_layer_cb(static_cast<int32_t>(i));
       }
