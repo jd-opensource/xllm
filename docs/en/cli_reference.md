@@ -25,6 +25,9 @@ xLLM uses gflags to manage service startup parameters. The specific parameter me
 | `enable_prefill_sp` | `bool` | false | true | Whether to enable prefill-only sequence parallel. | `enable_chunked_prefill=true` is supported only for prefill-only batches (`PREFILL` / `CHUNKED_PREFILL`); `MIXED` and `DECODE` batches do not run with sequence parallel. |
 | `enable_schedule_overlap` | `bool` | false | true | Whether to enable asynchronous scheduling. | [Details](./features/async_schedule.md) |
 | `enable_prefix_cache` | `bool` | true | false | Whether to enable prefix cache (not supported by DeepSeek currently). |  |
+| `enable_prefix_cache_aware_dp_routing` | `bool` | false | true | Whether to enable prefix-cache-aware DP rank routing. | Requires `enable_prefix_cache=true` and `dp_size>1`. Among ranks that can fit the full prefill, prefer the one with the longest prefix-cache hit; otherwise select by free blocks. |
+| `prefix_cache_aware_dp_match_threshold` | `double` | 0.5 | 0.7 | Minimum prefix block hit ratio for cache-aware DP affinity routing. | Below this threshold, routing falls back to free-block balancing. |
+| `prefix_cache_aware_dp_imbalance_threshold` | `double` | 0.1 | 0.2 | Maximum cross-rank KV utilization gap before cache-aware affinity routing is disabled. | Computed as `(max_used-min_used)/total_blocks`; exceeding this routes to the least-loaded rank. |
 | `communication_backend` | `string` | "hccl" | "lccl" | The backend used for communication operations. |  |
 | `block_size` | `int32` | 128 |  | The block size for KV Cache storage. |  |
 | `task` | `string` | "generate" | "embed", "mm_embed" | Service type: generation, embedding, or multimodal embedding. |  |
