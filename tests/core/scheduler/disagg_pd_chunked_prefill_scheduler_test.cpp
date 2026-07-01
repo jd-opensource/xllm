@@ -514,4 +514,56 @@ TEST(DisaggPDChunkedPrefillSchedulerTest, FullPrefixHitStillSchedulesStep) {
   release_prefix_cache(block_manager);
 }
 
+TEST(DisaggPDChunkedPrefillSchedulerTest,
+     EvictsPrefixCacheWhenFreeBlocksAreZero) {
+  ScopedConfigValue<bool> prefix_cache(
+      KVCacheConfig::get_instance().enable_prefix_cache(), true);
+  FakeEngine engine(/*num_blocks=*/8, /*block_size=*/2);
+  BlockManagerPool* block_manager = engine.block_manager_pool();
+  const size_t data_blocks = block_manager->num_blocks() - 1;
+
+  std::vector<int32_t> prompt_token_ids;
+  prompt_token_ids.reserve(data_blocks *
+                           static_cast<size_t>(block_manager->block_size()));
+  for (size_t i = 0;
+       i < data_blocks * static_cast<size_t>(block_manager->block_size());
+       ++i) {
+    prompt_token_ids.emplace_back(static_cast<int32_t>(i + 1));
+  }
+  cache_prompt(block_manager, prompt_token_ids);
+  EXPECT_EQ(first_cache_size(*block_manager), data_blocks);
+  EXPECT_EQ(first_free_blocks(*block_manager), 0u);
+  if (first_cache_size(*block_manager) != data_blocks ||
+      first_free_blocks(*block_manager) != 0u) {
+    release_prefix_cache(block_manager);
+    return;
+  }
+
+  DisaggPDChunkedPrefillScheduler scheduler(&engine,
+                                            make_options(
+                                                /*max_tokens_per_batch=*/4,
+                                                /*max_chunk=*/4));
+  std::shared_ptr<Request> request = make_request(prompt_token_ids);
+  Sequence* sequence = request->sequences()[0].get();
+  ASSERT_TRUE(scheduler.ContinuousScheduler::add_request(request));
+
+  std::vector<Batch> batches = scheduler.prepare_batch_test();
+
+  EXPECT_EQ(batches.size(), 1u);
+  if (batches.size() == 1u) {
+    EXPECT_EQ(batches[0].size(), 1u);
+    EXPECT_EQ(scheduler.get_running_sequences_budgets().size(), 1u);
+    if (scheduler.get_running_sequences_budgets().size() == 1u) {
+      EXPECT_EQ(scheduler.get_running_sequences_budgets()[0], 2u);
+    }
+    EXPECT_EQ(batches[0].get_allowed_max_tokens(), std::vector<uint32_t>({2}));
+    EXPECT_EQ(sequence->kv_state().kv_cache_tokens_num(), 12u);
+    EXPECT_EQ(sequence->kv_state().shared_blocks_num(BlockType::KV), 6u);
+    EXPECT_EQ(sequence->kv_state().num_blocks(BlockType::KV), 7u);
+  }
+
+  block_manager->deallocate(request.get());
+  release_prefix_cache(block_manager);
+}
+
 }  // namespace xllm

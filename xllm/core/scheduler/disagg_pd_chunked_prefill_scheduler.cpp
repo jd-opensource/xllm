@@ -77,6 +77,31 @@ size_t num_free_blocks_for_sequence(const Sequence* sequence,
   return util::max(free_blocks);
 }
 
+size_t prefix_blocks_for_seq(const Sequence* sequence,
+                             const std::vector<size_t>& prefix_blocks) {
+  CHECK(sequence != nullptr);
+  if (prefix_blocks.empty()) {
+    return 0;
+  }
+
+  const int32_t dp_rank = sequence->dp_rank();
+  if (dp_rank >= 0 && static_cast<size_t>(dp_rank) < prefix_blocks.size()) {
+    return prefix_blocks[static_cast<size_t>(dp_rank)];
+  }
+  return util::max(prefix_blocks);
+}
+
+bool has_evictable_prefix_blocks(Sequence* sequence, KVCacheManager* manager) {
+  CHECK(sequence != nullptr);
+  CHECK(manager != nullptr);
+  const std::vector<size_t> prefix_blocks =
+      manager->num_blocks_in_prefix_cache();
+  const size_t cache_blocks = prefix_blocks_for_seq(sequence, prefix_blocks);
+  const size_t shared_blocks =
+      sequence->kv_state().shared_blocks_num(BlockType::KV);
+  return cache_blocks > shared_blocks;
+}
+
 size_t allocatable_chunk_tokens(Sequence* sequence, KVCacheManager* manager) {
   CHECK(sequence != nullptr);
   CHECK(manager != nullptr);
@@ -104,6 +129,9 @@ size_t allocatable_chunk_tokens(Sequence* sequence, KVCacheManager* manager) {
       current_capacity_tokens + free_block_count * block_size_tokens;
   const size_t kv_tokens = sequence->kv_cache_tokens_num();
   if (max_capacity_tokens <= kv_tokens) {
+    if (has_evictable_prefix_blocks(sequence, manager)) {
+      return block_size_tokens;
+    }
     return 0;
   }
   return max_capacity_tokens - kv_tokens;
