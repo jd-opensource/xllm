@@ -199,6 +199,12 @@ size_t first_cache_size(const BlockManagerPool& block_manager) {
   return cache_sizes[0];
 }
 
+size_t first_free_blocks(const BlockManagerPool& block_manager) {
+  const std::vector<size_t> free_blocks = block_manager.num_free_blocks();
+  CHECK(!free_blocks.empty());
+  return free_blocks[0];
+}
+
 void cache_prompt(BlockManagerPool* block_manager,
                   const std::vector<int32_t>& token_ids) {
   CHECK(block_manager != nullptr);
@@ -402,6 +408,46 @@ TEST(DisaggPDChunkedPrefillSchedulerTest, SkipsEmptyBlockMetrics) {
   EXPECT_EQ(num_used_blocks, 13);
 
   block_manager->deallocate(request.get());
+}
+
+TEST(DisaggPDChunkedPrefillSchedulerTest,
+     SchedulesPartialChunkWhenFreeBlocksAreLow) {
+  ScopedConfigValue<bool> prefix_cache(
+      KVCacheConfig::get_instance().enable_prefix_cache(), true);
+  FakeEngine engine(/*num_blocks=*/8, /*block_size=*/2);
+  BlockManagerPool* block_manager = engine.block_manager_pool();
+
+  std::shared_ptr<Request> request =
+      make_request({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
+  Sequence* sequence = request->sequences()[0].get();
+  ASSERT_TRUE(block_manager->allocate(sequence, /*num_tokens=*/8));
+  sequence->kv_state().set_kv_cache_tokens_num(/*num=*/8);
+  ASSERT_TRUE(sequence->is_chunked_prefill_stage());
+
+  std::shared_ptr<Request> blocker = make_request({101, 102, 103, 104});
+  Sequence* blocker_sequence = blocker->sequences()[0].get();
+  ASSERT_TRUE(block_manager->allocate(blocker_sequence));
+  blocker_sequence->kv_state().set_kv_cache_tokens_num(
+      blocker_sequence->num_prompt_tokens());
+  ASSERT_EQ(first_free_blocks(*block_manager), 1u);
+
+  DisaggPDChunkedPrefillScheduler scheduler(&engine,
+                                            make_options(
+                                                /*max_tokens_per_batch=*/4,
+                                                /*max_chunk=*/4));
+  ASSERT_TRUE(scheduler.ContinuousScheduler::add_request(request));
+
+  std::vector<Batch> batches = scheduler.prepare_batch_test();
+
+  ASSERT_EQ(batches.size(), 1u);
+  ASSERT_EQ(batches[0].size(), 1u);
+  ASSERT_EQ(scheduler.get_running_sequences_budgets().size(), 1u);
+  EXPECT_EQ(scheduler.get_running_sequences_budgets()[0], 2u);
+  EXPECT_EQ(batches[0].get_allowed_max_tokens(), std::vector<uint32_t>({2}));
+
+  block_manager->deallocate(request.get());
+  block_manager->deallocate(blocker.get());
+  release_prefix_cache(block_manager);
 }
 
 TEST(DisaggPDChunkedPrefillSchedulerTest,

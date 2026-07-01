@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <atomic>
+#include <limits>
 
 #include "common/metrics.h"
 #include "core/framework/config/scheduler_config.h"
@@ -60,6 +61,52 @@ void update_block_metrics(KVCacheManager* manager) {
   if (!used_blocks.empty()) {
     GAUGE_SET(num_used_blocks, util::min(used_blocks));
   }
+}
+
+size_t num_free_blocks_for_sequence(const Sequence* sequence,
+                                    const std::vector<size_t>& free_blocks) {
+  CHECK(sequence != nullptr);
+  if (free_blocks.empty()) {
+    return 0;
+  }
+
+  const int32_t dp_rank = sequence->dp_rank();
+  if (dp_rank >= 0 && static_cast<size_t>(dp_rank) < free_blocks.size()) {
+    return free_blocks[static_cast<size_t>(dp_rank)];
+  }
+  return util::max(free_blocks);
+}
+
+size_t allocatable_chunk_tokens(Sequence* sequence, KVCacheManager* manager) {
+  CHECK(sequence != nullptr);
+  CHECK(manager != nullptr);
+  const int32_t block_size = manager->block_size();
+  if (block_size <= 0) {
+    return 0;
+  }
+
+  const std::vector<size_t> free_blocks = manager->num_free_blocks();
+  if (free_blocks.empty()) {
+    return std::numeric_limits<size_t>::max();
+  }
+  const size_t current_capacity_tokens =
+      sequence->kv_state().current_max_tokens_capacity();
+  const size_t free_block_count =
+      num_free_blocks_for_sequence(sequence, free_blocks);
+  const size_t block_size_tokens = static_cast<size_t>(block_size);
+  const size_t max_size = std::numeric_limits<size_t>::max();
+  if (free_block_count >
+      (max_size - current_capacity_tokens) / block_size_tokens) {
+    return max_size;
+  }
+
+  const size_t max_capacity_tokens =
+      current_capacity_tokens + free_block_count * block_size_tokens;
+  const size_t kv_tokens = sequence->kv_cache_tokens_num();
+  if (max_capacity_tokens <= kv_tokens) {
+    return 0;
+  }
+  return max_capacity_tokens - kv_tokens;
 }
 
 }  // namespace
@@ -128,11 +175,14 @@ bool DisaggPDChunkedPrefillScheduler::alloc_chunk(Sequence* sequence,
   match_prefix_blocks(sequence);
 
   const size_t kv_tokens = sequence->kv_cache_tokens_num();
+  const size_t allocatable_tokens =
+      allocatable_chunk_tokens(sequence, kv_cache_manager_);
+  const size_t chunk_token_budget = std::min(token_budget, allocatable_tokens);
   const PDChunkBudget budget = pick_pd_chunk_budget(
       kv_tokens,
       sequence->num_tokens(),
       static_cast<size_t>(options_.max_tokens_per_chunk_for_prefill()),
-      token_budget);
+      chunk_token_budget);
   *actual_tokens = budget.next_tokens;
   if (budget.next_tokens == 0) {
     return false;
