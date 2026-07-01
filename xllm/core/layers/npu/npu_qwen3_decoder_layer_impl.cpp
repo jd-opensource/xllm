@@ -267,7 +267,6 @@ int64_t NpuQwen3DecoderLayerImpl::init_layer() {
 
   const bool can_init_flash_comm =
       ::xllm::KernelConfig::get_instance().enable_qwen3_flash_comm() &&
-      !::xllm::KernelConfig::get_instance().enable_interlayer_addnorm() &&
       prefill_flash_comm_param_.tensorParallelInfo.worldSize > 1 &&
       prefill_flash_comm_param_.backend == "hccl";
   if (can_init_flash_comm &&
@@ -387,9 +386,6 @@ bool NpuQwen3DecoderLayerImpl::should_enable_flash_comm(
   }
   if (!kernel_config.enable_qwen3_flash_comm() ||
       param.tensorParallelInfo.worldSize <= 1 || param.backend != "hccl") {
-    return false;
-  }
-  if (kernel_config.enable_interlayer_addnorm()) {
     return false;
   }
   if (is_prefill &&
