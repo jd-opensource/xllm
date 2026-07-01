@@ -22,8 +22,8 @@ limitations under the License.
 
 #include "core/framework/state_dict/utils.h"
 #include "core/layers/common/add_matmul.h"
-#include "core/layers/common/rms_norm.h"
 #include "core/layers/common/quant_linear_helpers.h"
+#include "core/layers/common/rms_norm.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
 
@@ -145,9 +145,9 @@ class DiTParallelLinearImpl : public torch::nn::Module {
       int64_t out_features,
       bool bias,
       const torch::TensorOptions& options,
-      const QuantArgs& quant_args = QuantArgs(),
       const std::optional<SpOptions>& sp_options = std::nullopt,
-      const std::optional<TpOptions>& tp_options = std::nullopt)
+      const std::optional<TpOptions>& tp_options = std::nullopt,
+      const QuantArgs& quant_args = QuantArgs())
       : in_features_(in_features),
         out_features_(out_features),
         has_bias_(bias),
@@ -436,6 +436,8 @@ class DiTParallelLinearImpl : public torch::nn::Module {
   bool has_tp_weights() const {
     return linear_type_ == LinearType::TensorParallel ||
            linear_type_ == LinearType::TensorAndSequenceParallel;
+  }
+
   torch::Tensor forward_tp_column_quant(const torch::Tensor& input) {
     const auto& tp = tp_options_.value();
     CHECK(tp_weight_scale_is_loaded_ && tp_weight_scale_.defined())
@@ -537,7 +539,7 @@ class DiTParallelLinearImpl : public torch::nn::Module {
       int64_t weight_axis = tp.column_parallel ? 0 : 1;
       weight::load_sharded_weight(state_dict,
                                   "weight",
-                                  /*axis=*/0,
+                                  /*axis=*/weight_axis,
                                   tp.tp_rank(),
                                   tp.tp_size(),
                                   tp_weight_,
@@ -546,16 +548,16 @@ class DiTParallelLinearImpl : public torch::nn::Module {
         weight::load_sharded_weight(state_dict,
                                     "weight_scale",
                                     /*axis=*/0,
-                                    tp.tp_rank,
-                                    tp.tp_size,
+                                    tp.tp_rank(),
+                                    tp.tp_size(),
                                     tp_weight_scale_,
                                     tp_weight_scale_is_loaded_);
         if (state_dict.has("weight_offset")) {
           weight::load_sharded_weight(state_dict,
                                       "weight_offset",
                                       /*axis=*/0,
-                                      tp.tp_rank,
-                                      tp.tp_size,
+                                      tp.tp_rank(),
+                                      tp.tp_size(),
                                       tp_weight_offset_,
                                       tp_weight_offset_is_loaded_);
         }
@@ -576,16 +578,16 @@ class DiTParallelLinearImpl : public torch::nn::Module {
         weight::load_sharded_weight(state_dict,
                                     "weight",
                                     /*axis=*/0,
-                                    tp.tp_rank,
-                                    tp.tp_size,
+                                    tp.tp_rank(),
+                                    tp.tp_size(),
                                     tp_weight_,
                                     tp_weight_loaded_);
       } else {
         weight::load_sharded_weight(state_dict,
                                     "weight",
                                     /*axis=*/1,
-                                    tp.tp_rank,
-                                    tp.tp_size,
+                                    tp.tp_rank(),
+                                    tp.tp_size(),
                                     tp_weight_,
                                     tp_weight_loaded_);
       }
@@ -600,16 +602,7 @@ class DiTParallelLinearImpl : public torch::nn::Module {
                                     tp.tp_size(),
                                     tp_bias_,
                                     tp_bias_loaded_);
-      }
-    } else {
-      weight::load_sharded_weight(state_dict,
-                                  "weight",
-                                  /*axis=*/1,
-                                  tp.tp_rank(),
-                                  tp.tp_size(),
-                                  tp_weight_,
-                                  tp_weight_loaded_);
-      if (has_bias_) {
+      } else {
         weight::load_weight(state_dict, "bias", tp_bias_, tp_bias_loaded_);
       }
     }

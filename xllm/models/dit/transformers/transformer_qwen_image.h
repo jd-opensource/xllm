@@ -470,8 +470,13 @@ class AttentionImpl final : public torch::nn::Module {
         query_dim, q_dim, bias, options_, quant_args_);
 
     to_q_ = register_module("q_linear",
-                            xllm::dit::DiTParallelLinear(
-                                query_dim, q_dim, bias, options_, q_sp_option));
+                            xllm::dit::DiTParallelLinear(query_dim,
+                                                         q_dim,
+                                                         bias,
+                                                         options_,
+                                                         q_sp_option,
+                                                         /*tp=*/std::nullopt,
+                                                         quant_args_));
 
     // Key-Value projections (if not only cross attention)
     if (!only_cross_attention) {
@@ -482,6 +487,7 @@ class AttentionImpl final : public torch::nn::Module {
                                        bias,
                                        options_,
                                        kv_sp_option,
+                                       /*tp=*/std::nullopt,
                                        quant_args_));
 
       to_v_ = register_module(
@@ -490,7 +496,8 @@ class AttentionImpl final : public torch::nn::Module {
                                        kv_dim,
                                        bias,
                                        options_,
-                                       kv_sp_optioni,
+                                       kv_sp_option,
+                                       /*tp=*/std::nullopt,
                                        quant_args_));
     }
 
@@ -502,6 +509,7 @@ class AttentionImpl final : public torch::nn::Module {
                                        added_proj_bias,
                                        options_,
                                        kv_sp_option,
+                                       /*tp=*/std::nullopt,
                                        quant_args_));
 
       add_v_proj_ = register_module(
@@ -511,6 +519,7 @@ class AttentionImpl final : public torch::nn::Module {
                                        added_proj_bias,
                                        options_,
                                        kv_sp_option,
+                                       /*tp=*/std::nullopt,
                                        quant_args_));
       if (context_pre_only.has_value()) {
         add_q_proj_ = register_module(
@@ -520,6 +529,7 @@ class AttentionImpl final : public torch::nn::Module {
                                          added_proj_bias,
                                          options_,
                                          q_sp_option,
+                                         /*tp=*/std::nullopt,
                                          quant_args_));
       }
     }
@@ -538,8 +548,13 @@ class AttentionImpl final : public torch::nn::Module {
     if (!pre_only) {
       to_out_ = register_module("to_out", torch::nn::Sequential());
 
-      to_out_->push_back(xllm::dit::DiTParallelLinear(
-          q_dim, out_dim.value(), out_bias, options_, out_sp_option, quant_args_));
+      to_out_->push_back(xllm::dit::DiTParallelLinear(q_dim,
+                                                      out_dim.value(),
+                                                      out_bias,
+                                                      options_,
+                                                      out_sp_option,
+                                                      /*tp=*/std::nullopt,
+                                                      quant_args_));
       to_out_->push_back(
           torch::nn::Dropout(torch::nn::DropoutOptions(dropout)));
     }
@@ -553,6 +568,7 @@ class AttentionImpl final : public torch::nn::Module {
                                                        out_bias,
                                                        options_,
                                                        out_sp_option,
+                                                       /*tp=*/std::nullopt,
                                                        quant_args_));
     }
 
