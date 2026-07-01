@@ -59,18 +59,6 @@ std::tuple<torch::Tensor, torch::Tensor> npu_block_sparse_attention(
   // attenMaskOptional and blockTableOptional: always nullptr.
   std::optional<torch::Tensor> null_tensor = std::nullopt;
 
-  // Convert std::optional<IntArrayRef> → std::optional<IntArrayRef>.
-  // nullopt → nullptr (acl op skips per-batch tiling);
-  // has_value() → the actual array.
-  std::optional<torch::IntArrayRef> opt_seq_lens =
-      actual_seq_lengths.has_value()
-          ? std::optional<torch::IntArrayRef>(actual_seq_lengths.value())
-          : std::nullopt;
-  std::optional<torch::IntArrayRef> opt_seq_lens_kv =
-      actual_seq_lengths_kv.has_value()
-          ? std::optional<torch::IntArrayRef>(actual_seq_lengths_kv.value())
-          : std::nullopt;
-
   auto attention_out = torch::empty(query.sizes(), query.options());
 
   // softmaxLse shape depends on layout.
@@ -98,9 +86,9 @@ std::tuple<torch::Tensor, torch::Tensor> npu_block_sparse_attention(
                block_sparse_mask,
                null_tensor,  // attenMaskOptional
                block_shape,
-               opt_seq_lens,     // actual_seq_lengths  (nullptr when unset)
-               opt_seq_lens_kv,  // actual_seq_lengths_kv
-               null_tensor,      // blockTableOptional
+               actual_seq_lengths,
+               actual_seq_lengths_kv,
+               null_tensor,  // blockTableOptional
                q_layout_ptr,
                kv_layout_ptr,
                num_key_value_heads,

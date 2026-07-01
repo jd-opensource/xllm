@@ -52,8 +52,8 @@ std::tuple<torch::Tensor, torch::Tensor> npu_rain_fusion_attention(
   std::optional<torch::Tensor> null_tensor = std::nullopt;
 
   // actual_seq_lengths: empty IntArrayRef when not set.
-  auto opt_seq_lens = actual_seq_lengths.value_or(at::IntArrayRef{});
-  auto opt_seq_lens_kv = actual_seq_lengths_kv.value_or(at::IntArrayRef{});
+  auto opt_seq_lens = actual_seq_lengths.value_or(torch::IntArrayRef{});
+  auto opt_seq_lens_kv = actual_seq_lengths_kv.value_or(torch::IntArrayRef{});
 
   auto attention_out = torch::empty(query.sizes(), query.options());
 

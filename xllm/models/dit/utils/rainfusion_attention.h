@@ -39,11 +39,9 @@ struct RainFusionState {
   int64_t seq_len = -1;
 };
 
-namespace {
-
-torch::Tensor avgpool(const torch::Tensor& input,
-                      int64_t pool_size,
-                      const std::string& input_layout) {
+inline torch::Tensor avgpool(const torch::Tensor& input,
+                             int64_t pool_size,
+                             const std::string& input_layout) {
   std::vector<torch::Tensor> pooled_parts;
   if (input_layout == "BSND") {
     int64_t batch = input.size(0);
@@ -121,11 +119,11 @@ inline torch::Tensor from_flat(const torch::Tensor& t, int64_t B, int64_t N) {
 // Splits first frame (placed at END), pairs remaining frames (fn=tq/2, fb=2).
 // All internal ops work on [B*N, S, D] — max 8 dims after splitting.
 // Output: [B, N, rearranged_rest+first_frame, D]
-torch::Tensor rearrange_with_remaining(const torch::Tensor& tensor,
-                                       int64_t tq,
-                                       int64_t hq,
-                                       int64_t wq,
-                                       const std::string& input_layout) {
+inline torch::Tensor rearrange_with_remaining(const torch::Tensor& tensor,
+                                              int64_t tq,
+                                              int64_t hq,
+                                              int64_t wq,
+                                              const std::string& input_layout) {
   int64_t B = (input_layout == "BNSD") ? tensor.size(0) : tensor.size(0);
   int64_t N = (input_layout == "BNSD") ? tensor.size(1) : tensor.size(2);
   int64_t D = (input_layout == "BNSD") ? tensor.size(3) : tensor.size(3);
@@ -188,11 +186,11 @@ torch::Tensor rearrange_with_remaining(const torch::Tensor& tensor,
 // ---- V2 inverse rearrange ----
 // Reverses frame-pairing: [B*N, paired_rest+first_frame, D] → [B,N,S,D]
 // Works on flat layout; max 8 dims.
-torch::Tensor bsa_inv_rearrange(const torch::Tensor& out,
-                                int64_t tq,
-                                int64_t hq,
-                                int64_t wq,
-                                const std::string& input_layout) {
+inline torch::Tensor bsa_inv_rearrange(const torch::Tensor& out,
+                                       int64_t tq,
+                                       int64_t hq,
+                                       int64_t wq,
+                                       const std::string& input_layout) {
   int64_t B = (input_layout == "BNSD") ? out.size(0) : out.size(0);
   int64_t N = (input_layout == "BNSD") ? out.size(1) : out.size(2);
   int64_t D = (input_layout == "BNSD") ? out.size(3) : out.size(3);
@@ -273,21 +271,20 @@ inline std::pair<torch::Tensor, torch::Tensor> mask_to_select_idx(
   auto sorted_vals =
       torch::where(mask_b0,
                    row_indices,
-                   torch::full({}, int64_t(1000000000), row_indices.options()));
+                   torch::full({}, 1000000000LL, row_indices.options()));
   auto sorted_sorted = std::get<0>(torch::sort(sorted_vals, -1));
 
   auto valid_count = mask_b0.sum(-1);
   auto keep_mask = row_indices < valid_count.unsqueeze(-1);
 
-  auto select_idx =
-      torch::where(keep_mask,
-                   sorted_sorted.to(torch::kInt64),
-                   torch::full({}, int64_t(-1), row_indices.options()));
+  auto select_idx = torch::where(keep_mask,
+                                 sorted_sorted.to(torch::kInt64),
+                                 torch::full({}, -1LL, row_indices.options()));
   auto select_num_idx = valid_count.to(torch::kInt64);
   return {select_idx, select_num_idx};
 }
 
-std::pair<torch::Tensor, torch::Tensor> get_blockwise_mask(
+inline std::pair<torch::Tensor, torch::Tensor> get_blockwise_mask(
     const torch::Tensor& q_pool,
     const torch::Tensor& k_pool,
     int64_t txt_len,
@@ -307,8 +304,9 @@ std::pair<torch::Tensor, torch::Tensor> get_blockwise_mask(
 
   auto score_matrix = torch::softmax(attn_scores, -1);
   int64_t cols = score_matrix.size(-1);
-  int64_t keep_len = std::max(
-      static_cast<int64_t>(std::ceil(cols * (1.0 - sparsity))), int64_t(1));
+  int64_t keep_len =
+      std::max(static_cast<int64_t>(std::ceil(cols * (1.0 - sparsity))),
+               static_cast<int64_t>(1));
 
   auto topk_result = score_matrix.topk(keep_len, -1);
   auto thresholds = std::get<0>(topk_result).slice(-1, keep_len - 1, keep_len);
@@ -336,8 +334,6 @@ std::pair<torch::Tensor, torch::Tensor> get_blockwise_mask(
   auto [si, sn] = mask_to_select_idx(mask[0]);      // [N, q_blocks, kv_blocks]
   return {si.transpose(0, 1), sn.transpose(0, 1)};  // → [q_blocks, N, ...]
 }
-
-}  // namespace
 
 // RainFusionV2 block sparse attention — main entry point.
 std::tuple<torch::Tensor, torch::Tensor> rainfusion_attention(
