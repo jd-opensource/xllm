@@ -54,7 +54,7 @@ jobs:
           fetch-depth: 0  # Ensure we can compare commits
 
       - name: Install jq
-        run: yum install -y jq
+        run: sudo yum install -y jq
 
       - name: Check if sensitive files were changed
         id: check_sensitive
