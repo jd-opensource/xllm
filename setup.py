@@ -56,7 +56,7 @@ def _ensure_tilelang_ascend_ready(target_platform: str, arch: str) -> None:
     prepare_ascend(target_platform, arch)
 
 
-def _maybe_compile_tilelang_kernels(device: str) -> None:
+def _maybe_compile_tilelang_kernels(device: str, jobs: int | str | None = None) -> None:
     if device != "npu":
         return
     target_platform = get_ascend_platform()
@@ -78,6 +78,8 @@ def _maybe_compile_tilelang_kernels(device: str) -> None:
         "--device",
         target_platform,
     ]
+    if jobs is not None:
+        cmd.extend(["--jobs", str(jobs)])
     logger.info("compiling TileLang kernels via source-tree launcher")
     subprocess.check_call(cmd, cwd=base_dir, env=env)
 
@@ -138,6 +140,7 @@ class ExtBuild(build_ext):
         ("device=", None, "target device type (npu or mlu or cuda or ilu or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("generate-so=", None, "generate so or binary"),
+        ("tilelang-jobs=", None, "maximum parallel TileLang compile workers"),
     ]
 
     def initialize_options(self) -> None:
@@ -146,6 +149,7 @@ class ExtBuild(build_ext):
         self.device: Optional[str] = None
         self.arch: Optional[str] = None
         self.generate_so: bool = False
+        self.tilelang_jobs: int | str | None = None
 
     def finalize_options(self) -> None:
         build_ext.finalize_options(self)
@@ -227,7 +231,7 @@ class ExtBuild(build_ext):
         if self.device == "npu":
             cmake_args += ["-DUSE_NPU=ON"]
             set_npu_envs()
-            _maybe_compile_tilelang_kernels(self.device)
+            _maybe_compile_tilelang_kernels(self.device, self.tilelang_jobs)
         elif self.device == "mlu":
             cmake_args += ["-DUSE_MLU=ON"]
             set_mlu_envs()
@@ -256,13 +260,21 @@ class ExtBuild(build_ext):
                 if dcu_arch:
                     cmake_args += [f"-DCMAKE_HIP_ARCHITECTURES={dcu_arch}"]
 
+                set_dcu_envs()
+
                 # Pass FLASH_ATTENTION_LIB to CMake so the DCU layers can
                 # link against libflash_attention.so (prefix prefill/decode).
                 flash_attn_lib = os.getenv("FLASH_ATTENTION_LIB")
                 if flash_attn_lib:
                     cmake_args += [f"-DFLASH_ATTENTION_LIB={flash_attn_lib}"]
 
-                set_dcu_envs()
+                flash_mla_lib = os.getenv("FLASH_MLA_LIB")
+                if flash_mla_lib:
+                    cmake_args += [f"-DFLASH_MLA_LIB={flash_mla_lib}"]
+
+                aiter_cpp_api_lib = os.getenv("AITER_CPP_API_LIB")
+                if aiter_cpp_api_lib:
+                    cmake_args += [f"-DAITER_CPP_API_LIB={aiter_cpp_api_lib}"]
             else:
                 raise RuntimeError(
                     "DCU build requires a HIP/ROCm PyTorch environment. "
@@ -427,12 +439,14 @@ class BuildDistWheel(bdist_wheel):
     user_options = bdist_wheel.user_options + [
         ("device=", None, "target device type (npu or mlu or cuda or ilu or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
+        ("tilelang-jobs=", None, "maximum parallel TileLang compile workers"),
     ]
 
     def initialize_options(self) -> None:
         super().initialize_options()
         self.device: Optional[str] = None
         self.arch: Optional[str] = None
+        self.tilelang_jobs: int | str | None = None
         # Cache the original dist name early so finalize_options is idempotent
         # and so name changes are visible to egg_info/metadata generation.
         self._base_dist_name = self.distribution.metadata.name
@@ -459,6 +473,7 @@ class BuildDistWheel(bdist_wheel):
         build_ext_cmd = self.get_finalized_command('build_ext')
         build_ext_cmd.device = self.device
         build_ext_cmd.arch = self.arch
+        build_ext_cmd.tilelang_jobs = self.tilelang_jobs
 
         logger.info("🔨 build project...")
         self.run_command('build')
@@ -662,6 +677,7 @@ class SingleTest(Command):
         ("device=", None, "target device type (npu or mlu or cuda or ilu)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("generate-so=", None, "generate so or binary"),
+        ("tilelang-jobs=", None, "maximum parallel TileLang compile workers"),
     ]
 
     def initialize_options(self) -> None:
@@ -669,6 +685,7 @@ class SingleTest(Command):
         self.device: Optional[str] = None
         self.arch: Optional[str] = None
         self.generate_so: bool = False
+        self.tilelang_jobs: int | str | None = None
 
     def finalize_options(self) -> None:
         if not self.test_name:
@@ -682,6 +699,7 @@ class SingleTest(Command):
         build_ext.device = self.device
         build_ext.arch = self.arch
         build_ext.generate_so = self.generate_so
+        build_ext.tilelang_jobs = self.tilelang_jobs
         build_ext.finalize_options()
 
         # Ensure extension modules are set
@@ -726,6 +744,12 @@ def parse_arguments() -> dict[str, Any]:
         default=None,
         help='Name of the test target to build and run; when omitted, all tests run'
     )
+    parser.add_argument(
+        '--tilelang-jobs',
+        type=int,
+        default=None,
+        help='Maximum parallel TileLang compile workers, e.g. --tilelang-jobs 16; auto-selects a safe default when omitted'
+    )
 
     args = parser.parse_args()
 
@@ -737,6 +761,7 @@ def parse_arguments() -> dict[str, Any]:
         'device': args.device,
         'generate_so': generate_so,
         'test_name': args.test_name,
+        'tilelang_jobs': args.tilelang_jobs,
     }
 
 if __name__ == "__main__":
@@ -755,6 +780,7 @@ if __name__ == "__main__":
 
     generate_so = config['generate_so']
     test_name = config.get('test_name')
+    tilelang_jobs = config.get('tilelang_jobs')
 
     if "SKIP_TEST" in os.environ:
         BUILD_TEST_FILE = False
@@ -771,11 +797,13 @@ if __name__ == "__main__":
         'build_ext': {
             'device': device,
             'arch': arch,
-            'generate_so': generate_so
+            'generate_so': generate_so,
+            'tilelang_jobs': tilelang_jobs,
         },
         'bdist_wheel': {
             'device': device,
             'arch': arch,
+            'tilelang_jobs': tilelang_jobs,
         }
     }
     if test_name:
@@ -784,6 +812,7 @@ if __name__ == "__main__":
             'arch': arch,
             'generate_so': generate_so,
             'test_name': test_name,
+            'tilelang_jobs': tilelang_jobs,
         }
 
     setup(

@@ -74,6 +74,9 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
     default_sample_size_ = 128;
 
     vae_ = AutoencoderKLQwenImage(context.get_model_context("vae"));
+    if (::xllm::DiTConfig::get_instance().dit_enable_vae_tiling()) {
+      vae_->enable_tiling();
+    }
     transformer_ = QwenImageTransformer2DModel(
         context.get_model_context("transformer"), parallel_args_);
     scheduler_ =
@@ -93,6 +96,29 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
     register_module("scheduler", scheduler_);
     register_module("transformer", transformer_);
     register_module("vae_image_processor", vae_image_processor_);
+
+    use_layer3d_rope_ = context.get_model_context("transformer")
+                            .get_model_args()
+                            .use_layer3d_rope();
+    std::vector<int64_t> axes_dims_rope =
+        context.get_model_context("transformer")
+            .get_model_args()
+            .axes_dims_rope();
+    if (use_layer3d_rope_) {
+      pos_embed_3d_rope_ = register_module(
+          "pos_embed",
+          QwenEmbedLayer3DRope(context.get_model_context("transformer"),
+                               /*theta=*/10000,
+                               axes_dims_rope,
+                               true));
+    } else {
+      pos_embed_ = register_module(
+          "pos_embed",
+          QwenEmbedRope(context.get_model_context("transformer"),
+                        /*theta=*/10000,
+                        axes_dims_rope,
+                        true));
+    }
   }
 
   std::vector<torch::Tensor> _extract_masked_hidden(
@@ -474,6 +500,25 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
       negative_txt_seq_lens = negative_prompt_embeds_mask.sum(1);
     }
     scheduler_->set_begin_index(0);
+
+    auto get_image_rotary_emb =
+        [&](int64_t text_seq_len) -> std::tuple<torch::Tensor, torch::Tensor> {
+      if (use_layer3d_rope_) {
+        auto image_rotary_emb = pos_embed_3d_rope_->forward(
+            main_shape, text_seq_len, prompt_embeds.device());
+        return std::make_tuple(image_rotary_emb.first, image_rotary_emb.second);
+      }
+      return pos_embed_->forward(main_shape,
+                                 text_seq_len,
+                                 prompt_embeds.device(),
+                                 /*max_txt_seq_len=*/std::nullopt);
+    };
+    std::tuple<torch::Tensor, torch::Tensor> image_rotary_emb_pos =
+        get_image_rotary_emb(prompt_embeds.size(1));
+    std::tuple<torch::Tensor, torch::Tensor> image_rotary_emb_neg =
+        do_true_cfg ? get_image_rotary_emb(negative_prompt_embeds.size(1))
+                    : image_rotary_emb_pos;
+
     for (int64_t i = 0; i < timesteps.size(0); ++i) {
       auto t = timesteps[i];
       current_timestep_ = t;
@@ -499,6 +544,7 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
                                              timestep_expanded / 1000.0,
                                              main_shape,
                                              txt_seq_lens,
+                                             image_rotary_emb_pos,
                                              /*use_cfg=*/false,
                                              /*step_index=*/i);
           noise_pred = noise_pred.slice(1, 0, final_latents.size(1));
@@ -513,6 +559,7 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
                                                  timestep_expanded / 1000.0,
                                                  main_shape,
                                                  negative_txt_seq_lens,
+                                                 image_rotary_emb_neg,
                                                  /*use_cfg=*/true,
                                                  /*step_index=*/i);
 
@@ -536,6 +583,7 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
                                            timestep_expanded / 1000.0,
                                            main_shape,
                                            txt_seq_lens,
+                                           image_rotary_emb_pos,
                                            /*use_cfg=*/false,
                                            /*step_index=*/i);
         noise_pred = noise_pred.slice(1, 0, final_latents.size(1));
@@ -546,6 +594,7 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
                                                  timestep_expanded / 1000.0,
                                                  main_shape,
                                                  negative_txt_seq_lens,
+                                                 image_rotary_emb_neg,
                                                  /*use_cfg=*/true,
                                                  /*step_index=*/i);
 
@@ -633,6 +682,9 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
   torch::Tensor current_timestep_;
   string prompt_template_encode_;
   const ModelArgs& vae_model_args_;
+  bool use_layer3d_rope_;
+  QwenEmbedRope pos_embed_{nullptr};
+  QwenEmbedLayer3DRope pos_embed_3d_rope_{nullptr};
 };
 
 REGISTER_MODEL_ARGS(Qwen2Tokenizer, [&] {});
