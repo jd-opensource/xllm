@@ -29,6 +29,7 @@ limitations under the License.
 #include "ilu/ilu_ops_api.h"
 #elif defined(USE_MUSA)
 #include "cuda/cuda_ops_api.h"
+#include "musa/torch_musa_ops_api.h"
 #include "musa/musa_ops_api.h"
 #elif defined(USE_DCU)
 #include "cuda/cuda_ops_api.h"
