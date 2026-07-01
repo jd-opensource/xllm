@@ -35,6 +35,7 @@ limitations under the License.
 #include "models/dit/processors/vae_video_processor.h"
 #include "models/dit/schedulers/uni_pc_multi_step_scheduler.h"
 #include "models/dit/transformers/transformer_wan.h"
+#include "models/dit/utils/vae_spatial_parallel.h"
 #if defined(USE_NPU)
 #include "models/dit/utils/dit_block_weight_manager.h"
 #endif
@@ -72,6 +73,18 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
                                          false,
                                          4,
                                          vae_scale_factor_spatial_);
+    // Initialize VAE spatial parallel context
+    int64_t vae_parallel_size = parallel_args_.vae_size();
+    if (vae_parallel_size > 1) {
+      auto* pg = parallel_args_.dit_vae_group_;
+      CHECK(pg != nullptr)
+          << "dit_vae_group_ is null but vae_parallel_size > 1";
+      auto ctx = std::make_unique<dit::VaeSpatialParallel>(
+          vae_parallel_size, pg, options_.device());
+      vae_->set_parallel_ctx(std::move(ctx));
+      LOG(INFO) << "VAE spatial parallel enabled: w_split="
+                << vae_parallel_size;
+    }
     register_module("vae", vae_);
     register_module("transformer", transformer_);
     register_module("transformer_2", transformer_2_);
@@ -616,7 +629,6 @@ class WanImageToVideoPipelineImpl : public torch::nn::Module {
     prepared_latents = prepared_latents + latents_mean;
     video = vae_->decode(prepared_latents.to(torch::kFloat32)).sample;
     video = video_processor_->postprocess_video(video);
-
     return video;
   }
 
