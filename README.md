@@ -12,21 +12,16 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. -->
 
-[English](./README.md) | [中文](./docs/project/README_zh.md)
+[English](./README.md) | [中文](./README_zh.md)
 
 <div align="center">
-<img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
+<img src="assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
     
 [![Document](https://img.shields.io/badge/Document-black?logo=html5&labelColor=grey&color=red)](https://docs.xllm-ai.com/) [![Docker](https://img.shields.io/badge/Docker-black?logo=docker&labelColor=grey&color=%231E90FF)](https://quay.io/repository/jd_xllm/xllm-ai?tab=tags) [![License](https://img.shields.io/badge/license-Apache%202.0-brightgreen?labelColor=grey)](https://opensource.org/licenses/Apache-2.0) [![report](https://img.shields.io/badge/Technical%20Report-red?logo=arxiv&logoColor=%23B31B1B&labelColor=%23F0EBEB&color=%23D42626)](https://arxiv.org/abs/2510.14686) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/jd-opensource/xllm)
     
 </div>
 
 ---------------------
-
-<p align="center">
-| <a href="https://docs.xllm-ai.com/"><b>Documentation</b></a> | <a href="https://arxiv.org/abs/2510.14686"><b>Technical Report</b></a> |
-</p>
-
 
 ### 📢 News
 - 2026-06-13: 🎉 We day-0 support the [MiniMax-M3](https://huggingface.co/MiniMaxAI/MiniMax-M3) model, please refer to the [Deployment Document](https://github.com/jd-opensource/xllm/blob/preview/minimax-m3/testspace/run_minimax_m3.sh) for deployment.
@@ -44,7 +39,7 @@ limitations under the License. -->
 **xLLM** is an **efficient LLM inference framework**, specifically optimized for **Chinese AI accelerators**, enabling enterprise-grade deployment with enhanced efficiency and reduced cost. The framework adopts a **service-engine decoupled** inference architecture, achieving breakthrough efficiency through several  technologies: at the service layer, including elastic scheduling of online/offline requests, dynamic PD disaggregation, a hybrid EPD mechanism for multimodal and high-availability fault tolerance; and at the engine layer, combined with technologies such as multi-stream parallel computing, graph fusion optimization, speculative inference, dynamic load balancing and global KV cache management. The overall architecture is shown below:
 
 <div align="center">
-<img src="docs/assets/xllm_arch.png" alt="xllm_arch" style="width:90%; height:auto;">
+<img src="assets/xllm_arch.png" alt="xllm_arch" style="width:90%; height:auto;">
 </div>
 
 **xLLM** already supports efficient deployment of mainstream large models (such as *DeepSeek-V3.1*, *Qwen2/3*, etc.) on Chinese AI accelerators, empowering enterprises to implement high-performance, low-cost AI large model applications. xLLM has been fully deployed in JD.com’s real core retail businesses, covering a variety of scenarios including intelligent customer service, risk control, supply chain optimization, ad recommendation, and more.
@@ -90,13 +85,13 @@ limitations under the License. -->
 | MUSA     | S5000   |                 |
 | DCU      | BW1000  |                 |
 
-Besides, please check the supported models on different hardwares at [Supported Models List](docs/en/supported_models.md).
+Besides, please check the supported models on different hardwares at [Supported Models List](https://docs.xllm-ai.com/en/supported_models/).
 
 ---
 
 ## Quick Start
 
-Please refer to [Quick Start](docs/en/getting_started/quick_start.md) for more details.
+Please refer to [Quick Start](https://docs.xllm-ai.com/en/getting_started/quick_start/) for more details.
 
 --- 
 
@@ -109,7 +104,7 @@ Please refer to [CONTRIBUTING.md](.github/CONTRIBUTING.md) for contribution guid
 If you encounter any issues along the way, you are welcomed to submit reproducible steps and log snippets in the project's Issues area, or contact the xLLM Core team directly via your internal Slack. In addition, we have established official WeChat groups. You can access the following QR code to join. Welcome to contact us!
 
 <div align="center">
-  <img src="docs/assets/wechat_qrcode.png" alt="qrcode3" width="50%" />
+  <img src="assets/wechat_qrcode.png" alt="qrcode3" width="50%" />
 </div>
 
 ## Acknowledgment
