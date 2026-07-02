@@ -25,6 +25,9 @@ xLLM使用gflags来管理服务启动参数，具体的参数含义如下：
 | `enable_prefill_sp` | `bool` | false | true | 是否开启 prefill 阶段的 sequence parallel | 支持 `enable_chunked_prefill=true`，但仅限纯 prefill batch（`PREFILL` / `CHUNKED_PREFILL`）；`MIXED` 与 `DECODE` batch 不会进入 sequence parallel。 |
 | `enable_schedule_overlap` | `bool` | false | true | 是否开启异步调度 | [详情](./features/async_schedule.md) |
 | `enable_prefix_cache` | `bool` | true | false | 是否开启prefix cache（DeepSeek暂不支持） |  |
+| `enable_prefix_cache_aware_dp_routing` | `bool` | false | true | 是否启用 prefix cache 亲和性的 DP rank 路由。 | 需同时启用 `enable_prefix_cache=true` 且 `dp_size>1`。在可容纳完整 prefill 的 rank 中优先选择 prefix 命中最长者，否则按空闲 block 数选择。 |
+| `prefix_cache_aware_dp_match_threshold` | `double` | 0.5 | 0.7 | cache-aware DP 路由的最小 prefix block 命中率。 | 低于该阈值时回退为按空闲 block 均衡路由。 |
+| `prefix_cache_aware_dp_imbalance_threshold` | `double` | 0.1 | 0.2 | 禁用 cache-aware 亲和路由所允许的跨 rank KV 利用率最大偏差。 | 计算方式为 `(max_used-min_used)/total_blocks`；超出后路由至最空闲 rank。 |
 | `communication_backend` | `string` | "hccl" | "lccl" | 通信操作采用的后端 |  |
 | `block_size` | `int32` | 128 |  | KV Cache存储的block size大小 |  |
 | `task` | `string` | "generate" | "embed", "mm_embed" | 服务类型，生成式、embedding或多模态embedding |  |
