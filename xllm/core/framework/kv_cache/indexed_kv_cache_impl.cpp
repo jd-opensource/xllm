@@ -46,8 +46,58 @@ IndexedKVCacheImpl::IndexedKVCacheImpl(
   index_cache_shape_ = kv_cache_shape.index_cache_shape();
 }
 
+IndexedKVCacheImpl::IndexedKVCacheImpl(
+    const KVCacheShape& kv_cache_shape,
+    const KVCacheCreateOptions& create_options,
+    BlockType type,
+    int64_t layer_count)
+    : KVCacheImpl() {
+  CHECK(type == BlockType::KV)
+      << "IndexedKVCacheImpl host cache only supports BlockType::KV.";
+  host_page_aligned_regions_.reserve(3);
+  if (kv_cache_shape.has_key_cache_shape()) {
+    create_host_tensor(
+        build_host_group_tensor_shape(kv_cache_shape.key_cache_shape(),
+                                      create_options.host_blocks_factor(),
+                                      layer_count),
+        create_options.dtype(),
+        &key_cache_,
+        &key_cache_shape_);
+  }
+  if (kv_cache_shape.has_value_cache_shape()) {
+    create_host_tensor(
+        build_host_group_tensor_shape(kv_cache_shape.value_cache_shape(),
+                                      create_options.host_blocks_factor(),
+                                      layer_count),
+        create_options.dtype(),
+        &value_cache_,
+        &value_cache_shape_);
+  }
+  if (kv_cache_shape.has_index_cache_shape()) {
+    create_host_tensor(
+        build_host_group_tensor_shape(kv_cache_shape.index_cache_shape(),
+                                      create_options.host_blocks_factor(),
+                                      layer_count),
+        create_options.dtype(),
+        &index_cache_,
+        &index_cache_shape_);
+  }
+}
+
 torch::Tensor IndexedKVCacheImpl::get_index_cache() const {
   return index_cache_;
+}
+
+BlockTypeTensorMap IndexedKVCacheImpl::get_block_type_tensors(
+    BlockType type) const {
+  BlockTypeTensorMap tensor_map = KVCacheImpl::get_block_type_tensors(type);
+  if (type != BlockType::KV) {
+    return tensor_map;
+  }
+  if (index_cache_.defined() && index_cache_.numel() > 0) {
+    tensor_map.emplace(KVCacheTensorRole::INDEX, index_cache_);
+  }
+  return tensor_map;
 }
 
 bool IndexedKVCacheImpl::empty() const {
