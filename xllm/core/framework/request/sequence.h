@@ -204,11 +204,47 @@ class Sequence final {
   int32_t get_single_block_id() const {
     return kv_state_.get_single_block_id();
   }
+
+  // Linear-state (Qwen3.5 GDN) live slot, stored in composite_blocks_ under
+  // BlockType::LINEAR. Drawn from the dedicated LinearStateBlockManager id
+  // space.
+  bool has_linear_state_slot() const {
+    return kv_state_.get_linear_block_id() >= 0;
+  }
+  int32_t get_linear_state_slot_id() const {
+    return kv_state_.get_linear_block_id();
+  }
+
+  // Whether the linear-state live slot already holds valid recurrent state for
+  // this sequence. False until the first forward initializes it (restored from
+  // a checkpoint or computed cold). The batch builder uses this to emit a
+  // cold-start restore only on the first forward; continued forwards keep their
+  // slot warm and must not be reset to cold by the worker.
+  bool linear_state_initialized() const {
+    return kv_state_.linear_state_initialized();
+  }
+  void mark_linear_state_initialized() {
+    kv_state_.mark_linear_state_initialized();
+  }
+  void reset_linear_state_initialized() {
+    kv_state_.reset_linear_state_initialized();
+  }
+  void set_pending_linear_save(const XXH3Key& hash) {
+    kv_state_.set_pending_linear_save(hash);
+  }
+  std::optional<XXH3Key> take_pending_linear_save() {
+    return kv_state_.take_pending_linear_save();
+  }
+  bool has_pending_linear_save() const {
+    return kv_state_.has_pending_linear_save();
+  }
+  Block copy_block(BlockType type) const { return kv_state_.copy_block(type); }
   const std::string& request_id() const { return request_id_; }
   // get input embedding
   torch::Tensor get_input_embedding() const { return input_embedding_; }
 
   void add_blocks(BlockType type, const std::vector<Block>& blocks);
+  void replace_block(BlockType type, Block&& block);
   void add_host_blocks(BlockType type, const std::vector<Block>& blocks);
   void add_shared_blocks(BlockType type, std::vector<Block>&& blocks);
   void add_shared_host_blocks(BlockType type, std::vector<Block>&& blocks);

@@ -74,6 +74,12 @@ class BlockManager {
     PROPERTY(int64_t, num_layers) = 0;
     PROPERTY(int64_t, slot_size) = 0;
     PROPERTY(std::string, model_id);
+    // Linear-state (Qwen3.5 GDN) resource leaf. When enable_linear_state is
+    // set, build_composite_leaves appends a LINEAR leaf on top of the KV
+    // family. linear_state_num_slots is the total physical slot count [0, N)
+    // for the unified slot pool. Both are ignored unless linear state is on.
+    PROPERTY(bool, enable_linear_state) = false;
+    PROPERTY(int32_t, linear_state_num_slots) = 0;
   };
 
   explicit BlockManager(Options options) : options_(options) {}

@@ -223,6 +223,19 @@ size_t PrefixCache::insert(Slice<Block>& blocks) {
   return blocks.size() * block_size_;
 }
 
+Block PrefixCache::find(const XXH3Key& hash) {
+  auto iter = cached_blocks_.find(hash);
+  if (iter == cached_blocks_.end()) {
+    return Block();
+  }
+  lru_lst_.move_back(iter->second);
+  return iter->second->block;
+}
+
+bool PrefixCache::contains(const XXH3Key& hash) const {
+  return cached_blocks_.find(hash) != cached_blocks_.end();
+}
+
 size_t PrefixCache::evict(size_t n_blocks) {
   if (num_blocks_ == 0 || lru_lst_.is_empty()) {
     return 0;

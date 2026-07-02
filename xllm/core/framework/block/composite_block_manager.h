@@ -46,6 +46,11 @@ class CompositeBlockManager : public BlockManager {
 
   bool is_composite() const override { return true; }
 
+  // Leaf serving `type`, or nullptr if none. Public so the pool can reach the
+  // LINEAR leaf for the linear-state typed APIs (restore/save) without a
+  // dynamic_cast through every leaf.
+  BlockManager* leaf_of(BlockType type) const;
+
   // —— Sequence-level orchestration (the only Sequence-aware surface) ——
   // Drives every leaf's allocate_for_sequence(seq, num_tokens), stages the
   // blocks each leaf returns, and commits them into the sequence under the
@@ -100,8 +105,6 @@ class CompositeBlockManager : public BlockManager {
   size_t num_sub_managers() const { return leaves_.size(); }
 
  private:
-  // Leaf serving `type`, or nullptr if none.
-  BlockManager* leaf_of(BlockType type) const;
   // The single admission leaf whose raw block count defines the pool's
   // scheduler-facing capacity unit. Schedulers treat num_free/used/total_blocks
   // as counts of base (block_size()) blocks, so we must report one leaf's raw

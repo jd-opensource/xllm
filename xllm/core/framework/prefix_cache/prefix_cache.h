@@ -86,6 +86,16 @@ class PrefixCache {
   virtual size_t insert(Slice<Block>& blocks);
   virtual size_t insert(const std::vector<Block>& blocks);
 
+  // Point-lookup a single block by its chained hash key (no token-sequence
+  // walk). On hit, refresh the entry's LRU recency and return its block; on
+  // miss return an invalid Block. Used by callers whose hash domain is not the
+  // KV by-block-boundary chain (e.g. linear-state checkpoints with a different
+  // stride).
+  virtual Block find(const XXH3Key& hash);
+
+  // Whether a block is cached under `hash`, without touching LRU recency.
+  virtual bool contains(const XXH3Key& hash) const;
+
   // evict blocks hold by the prefix cache
   // return the actual number of evicted blocks
   virtual size_t evict(size_t n_blocks);

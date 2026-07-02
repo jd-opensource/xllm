@@ -24,6 +24,7 @@ class BlockManagerImpl : public BlockManager {
  public:
   explicit BlockManagerImpl(const Options& options);
   virtual ~BlockManagerImpl() {
+    prefix_cache_.reset();
     CHECK_EQ(num_free_blocks_, free_blocks_.size() - 1)
         << "Not all blocks have been freed";
   };
@@ -98,7 +99,7 @@ class BlockManagerImpl : public BlockManager {
   // from the prefix cache
   bool has_enough_blocks(uint32_t num_blocks);
 
- private:
+ protected:
   // prefix cache
   std::unique_ptr<PrefixCache> prefix_cache_;
 
