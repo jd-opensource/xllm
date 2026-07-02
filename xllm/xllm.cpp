@@ -462,6 +462,9 @@ int run() {
     } else {
       master = std::make_unique<LLMAssistantMaster>(options);
     }
+    master->run();
+    master->wait();
+    return 0;
   } else {
     // master node
     master = create_master(model_config.backend(), options);
