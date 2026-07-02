@@ -23,6 +23,7 @@ limitations under the License.
 #include "concurrent_block_manager_impl.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "framework/xtensor/xtensor_block_manager_impl.h"
+#include "linear_state_block_manager.h"
 #include "single_block_manager.h"
 #include "sliding_window_block_manager.h"
 
@@ -79,6 +80,30 @@ std::map<BlockType, CompositeBlockManager::LeafEntry> build_composite_leaves(
     const BlockManager::Options& options,
     int32_t dp_rank) {
   std::map<BlockType, CompositeBlockManager::LeafEntry> leaves;
+
+  // Per-sequence resource leaf, additive on top of the KV family built below:
+  // a GDN model holds both KV (full-attention layers) and LINEAR (linear
+  // layers), so LINEAR is never an alternative KV shape. leaves is keyed by
+  // BlockType, so insertion order is irrelevant; emplacing here keeps the
+  // early-returning KV-family branches untouched. participates_in_admission
+  // stays false -- a true here would let capacity_leaf() pick this
+  // block_size==1 leaf and misreport pool capacity as the linear-slot pool.
+  // LINEAR is scheduler-thread only, so unlike the SINGLE leaf it is
+  // deliberately NOT wrapped in ConcurrentBlockManagerImpl.
+  // TODO(refactor): fold the SINGLE leaf (still emplaced by BlockManagerPool)
+  // in here too, once num_single_blocks rides on BlockManager::Options.
+  if (options.enable_linear_state()) {
+    CHECK_GT(options.linear_state_num_slots(), 0)
+        << "linear_state_num_slots must be set when linear state is enabled";
+    leaves.emplace(
+        BlockType::LINEAR,
+        CompositeBlockManager::LeafEntry{
+            std::make_unique<LinearStateBlockManager>(
+                static_cast<uint32_t>(options.linear_state_num_slots()),
+                options.block_size()),
+            /*participates_in_admission=*/false,
+            /*supports_prefix_cache=*/false});
+  }
 
   if (options.manager_types().empty()) {
     // Normal / Qwen / xtensor model: a single KV leaf. It is the admission
@@ -239,6 +264,22 @@ void CompositeBlockManager::allocate_shared_for_sequence(Sequence* seq) {
                            .slice(0, kv_state.shared_blocks_num(BlockType::KV));
   std::vector<Block> shared = kv_leaf.allocate_shared(
       seq->tokens(), existed, seq->mm_data(), seq->block_hashes());
+  // Linear-state clamp: when a linear-state leaf is registered, the KV shared
+  // prefix must be trimmed to what a committed linear-state checkpoint can
+  // recover. The leaf reports its recoverable length (its own hash domain);
+  // the composite owns the cross-leaf min(kv_match, recoverable).
+  auto linear_it = leaves_.find(BlockType::LINEAR);
+  if (linear_it != leaves_.end() && !shared.empty()) {
+    auto* linear_leaf =
+        static_cast<LinearStateBlockManager*>(linear_it->second.leaf.get());
+    const size_t recoverable = linear_leaf->recoverable_shared_prefix_blocks(
+        seq, kv_state.shared_blocks_num(BlockType::KV), shared.size());
+    const size_t safe_count = std::min(shared.size(), recoverable);
+    if (safe_count < shared.size()) {
+      kv_leaf.deallocate(Slice<Block>(shared).slice(safe_count));
+      shared.resize(safe_count);
+    }
+  }
   seq->add_shared_blocks(BlockType::KV, std::move(shared));
 }
 
@@ -294,6 +335,30 @@ void CompositeBlockManager::cache_for_sequence(Sequence* seq,
                 existed_shared_blocks_num,
                 seq->mm_data(),
                 seq->block_hashes());
+}
+
+void CompositeBlockManager::apply_pending_linear_saves(
+    const std::vector<Sequence*>& sequences) {
+  auto it = leaves_.find(BlockType::LINEAR);
+  if (it == leaves_.end()) {
+    return;
+  }
+  static_cast<LinearStateBlockManager*>(it->second.leaf.get())
+      ->apply_pending_saves(sequences);
+}
+
+void CompositeBlockManager::resolve_linear_state_cache_ops(
+    std::vector<LinearStateCacheOp>* cache_ops,
+    const std::vector<Sequence*>& sequences) {
+  if (cache_ops == nullptr || cache_ops->empty()) {
+    return;
+  }
+  auto it = leaves_.find(BlockType::LINEAR);
+  if (it == leaves_.end()) {
+    return;
+  }
+  static_cast<LinearStateBlockManager*>(it->second.leaf.get())
+      ->resolve_cache_ops(cache_ops, sequences);
 }
 
 std::vector<Block> CompositeBlockManager::allocate_blocks(BlockType type,

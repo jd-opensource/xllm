@@ -53,7 +53,8 @@ BlockManagerImpl::BlockManagerImpl(const Options& options)
   if (options_.enable_prefix_cache()) {
     PrefixCache::Options prefix_cache_options;
     prefix_cache_options.block_size(options.block_size())
-        .hasher_type(options.hasher_type());
+        .hasher_type(options.hasher_type())
+        .block_type(options.block_type());
     prefix_cache_ = create_prefix_cache(prefix_cache_options);
     CHECK(prefix_cache_) << "Failed to create prefix cache!";
   }
@@ -171,6 +172,8 @@ std::vector<Block> BlockManagerImpl::allocate_shared(
         shared_blocks.empty() ? 0
                               : shared_blocks.size() * shared_blocks[0].size();
     COUNTER_ADD(prefix_cache_match_length_total, prefix_length);
+    VLOG(1) << "Prefix cache matched " << shared_blocks.size()
+            << " blocks, prefix_length=" << prefix_length;
 
     // update effective block usage
     for (const auto& block : shared_blocks) {

@@ -24,13 +24,19 @@ limitations under the License.
 
 namespace xllm {
 
+struct LinearStateCacheOp;
+
 class BlockManagerPool : public KVCacheManager {
  public:
   struct Options {
     PROPERTY(uint32_t, num_blocks) = 0;
     PROPERTY(uint32_t, host_num_blocks) = 0;
     PROPERTY(int32_t, block_size) = 0;
+    PROPERTY(uint32_t, single_block_capacity) = 0;
     PROPERTY(bool, enable_linear_state) = false;
+    // Total physical linear-state slots [0, N) for the unified slot pool
+    // (= num_linear_state_blocks). Only used when enable_linear_state is true.
+    PROPERTY(int32_t, linear_state_num_slots) = 0;
     PROPERTY(bool, enable_prefix_cache) = true;
     PROPERTY(bool, enable_disagg_pd) = false;
     PROPERTY(bool, enable_kvcache_store) = false;
@@ -48,7 +54,6 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(std::vector<uint32_t>, manager_types) = {};
     PROPERTY(std::vector<uint32_t>, compress_ratios) = {};
     PROPERTY(uint32_t, max_seqs_per_batch) = 0;
-    PROPERTY(uint32_t, max_concurrent_requests) = 0;
     // Hasher type bound to the engine (TEXT for LLM, MM for VLM).
     PROPERTY(BlockHasherType, hasher_type) = BlockHasherType::TEXT;
     PROPERTY(uint32_t, num_single_blocks) = 0;
@@ -87,6 +92,20 @@ class BlockManagerPool : public KVCacheManager {
 
   virtual float get_gpu_cache_usage_perc() const;
 
+  // Execute deferred linear-state saves from the previous step: for each
+  // sequence with a pending_linear_save_hash, insert the old live slot as a
+  // checkpoint and rotate the sequence onto a fresh live slot. Must be called
+  // at the start of prepare_inputs, before the builder reads slot ids.
+  void apply_pending_linear_saves(int32_t dp_rank,
+                                  const std::vector<Sequence*>& sequences);
+
+  // Resolve linear-state checkpoint restore matches for this batch and mark
+  // save candidates on their sequences (deferred to next step's apply).
+  void resolve_linear_state_cache_ops(
+      int32_t dp_rank,
+      std::vector<LinearStateCacheOp>* cache_ops,
+      const std::vector<Sequence*>& sequences = {});
+
   virtual uint32_t num_blocks() const override;
   virtual int32_t block_size() const override;
   void reset_prefix_cache() override;
@@ -109,6 +128,8 @@ class BlockManagerPool : public KVCacheManager {
   bool process_beam_search(Sequence* sequence, bool need_swap = false);
 
  private:
+  friend class BlockManagerPoolTestPeer;
+
   std::vector<std::vector<BlockTransferInfo>> swap_block_transfer_infos_;
 
  protected:

@@ -24,6 +24,8 @@ limitations under the License.
 
 namespace xllm {
 
+struct LinearStateCacheOp;
+
 // Generic composition of multiple BlockManager leaves keyed by BlockType. The
 // map key decides which KVCacheState slot a leaf's blocks land in; the leaf
 // itself is type-free. The composite is the only block-side class that touches
@@ -46,6 +48,11 @@ class CompositeBlockManager : public BlockManager {
 
   bool is_composite() const override { return true; }
 
+  // Leaf serving `type`, or nullptr if none. Public so the pool can reach the
+  // LINEAR leaf for the linear-state typed APIs (restore/save) without a
+  // dynamic_cast through every leaf.
+  BlockManager* leaf_of(BlockType type) const;
+
   // —— Sequence-level orchestration (the only Sequence-aware surface) ——
   // Drives every leaf's allocate_for_sequence(seq, num_tokens), stages the
   // blocks each leaf returns, and commits them into the sequence under the
@@ -57,6 +64,15 @@ class CompositeBlockManager : public BlockManager {
   void allocate_shared_for_sequence(Sequence* seq);
   void cache_for_sequence(Sequence* seq);
   void cache_for_sequence(Sequence* seq, size_t num_tokens);
+
+  // —— Linear-state checkpoint orchestration ——
+  // The LINEAR leaf owns the checkpoint index and its hash domain; the
+  // composite is the layer allowed to know that leaf exists and drive it. Both
+  // no-op when no LINEAR leaf is registered (non-GDN models).
+  void apply_pending_linear_saves(const std::vector<Sequence*>& sequences);
+  void resolve_linear_state_cache_ops(
+      std::vector<LinearStateCacheOp>* cache_ops,
+      const std::vector<Sequence*>& sequences);
 
   // Typed block-level allocation routed to the leaf under `type`. Used by the
   // pool for beam copy-on-write (which needs exactly one KV block).
@@ -100,8 +116,6 @@ class CompositeBlockManager : public BlockManager {
   size_t num_sub_managers() const { return leaves_.size(); }
 
  private:
-  // Leaf serving `type`, or nullptr if none.
-  BlockManager* leaf_of(BlockType type) const;
   // The single admission leaf whose raw block count defines the pool's
   // scheduler-facing capacity unit. Schedulers treat num_free/used/total_blocks
   // as counts of base (block_size()) blocks, so we must report one leaf's raw

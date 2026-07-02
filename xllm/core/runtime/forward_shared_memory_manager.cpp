@@ -405,6 +405,27 @@ inline void write_bytes(RawInputSectionCursor& cursor,
   cursor.size += bytes;
 }
 
+inline void write_linear_state_prefix_hash(
+    RawInputSectionCursor& cursor,
+    const LinearStatePrefixHash& prefix_hash) {
+  write_bytes(cursor, prefix_hash.data(), XXH3_128BITS_HASH_VALUE_LEN);
+}
+
+inline void write_linear_state_cache_ops(
+    RawInputSerializeContext& context,
+    const std::vector<LinearStateCacheOp>& cache_ops) {
+  write_data(context.descriptor, static_cast<uint64_t>(cache_ops.size()));
+  for (const LinearStateCacheOp& cache_op : cache_ops) {
+    write_data(context.descriptor, cache_op.linear_state_id);
+    write_linear_state_prefix_hash(context.descriptor,
+                                   cache_op.restore_prefix_hash);
+    write_data(context.descriptor, cache_op.restore_src_slot_id);
+    write_linear_state_prefix_hash(context.descriptor,
+                                   cache_op.save_prefix_hash);
+    write_data(context.descriptor, cache_op.save_dst_slot_id);
+  }
+}
+
 inline void write_padding(RawInputSectionCursor& cursor, uint64_t bytes) {
   if (bytes == 0) {
     return;
@@ -1138,6 +1159,29 @@ template <typename T>
 inline void read_data(ReadContext& context, T& data) {
   data = *reinterpret_cast<const T*>(context.descriptor_cursor);
   advance_descriptor_cursor(context, type_size<T>);
+}
+
+inline void read_linear_state_prefix_hash(ReadContext& context,
+                                          LinearStatePrefixHash& prefix_hash) {
+  std::memcpy(prefix_hash.data(),
+              context.descriptor_cursor,
+              XXH3_128BITS_HASH_VALUE_LEN);
+  advance_descriptor_cursor(context, XXH3_128BITS_HASH_VALUE_LEN);
+}
+
+inline void read_linear_state_cache_ops(
+    ReadContext& context,
+    std::vector<LinearStateCacheOp>& cache_ops) {
+  uint64_t size;
+  read_data(context, size);
+  cache_ops.resize(size);
+  for (LinearStateCacheOp& cache_op : cache_ops) {
+    read_data(context, cache_op.linear_state_id);
+    read_linear_state_prefix_hash(context, cache_op.restore_prefix_hash);
+    read_data(context, cache_op.restore_src_slot_id);
+    read_linear_state_prefix_hash(context, cache_op.save_prefix_hash);
+    read_data(context, cache_op.save_dst_slot_id);
+  }
 }
 
 template <typename T>
@@ -2184,6 +2228,7 @@ inline void deserialize_forward_input_payload(
   read_vector(context, input_params.parallel.dp_is_decode);
   read_vector(context, input_params.embedding.embedding_ids);
   read_vector(context, input_params.embedding.linear_state_ids);
+  read_linear_state_cache_ops(context, input_params.linear_state_cache_ops);
   normalize_linear_state_ids(input_params.embedding.linear_state_ids,
                              input_params.meta.num_sequences);
   read_string_vector(context, input_params.embedding.request_ids);
@@ -2526,6 +2571,7 @@ inline void serialize_forward_input_sections(
   write_vector(context.descriptor, input_params.parallel.dp_is_decode);
   write_vector(context.descriptor, input_params.embedding.embedding_ids);
   write_vector(context.descriptor, input_params.embedding.linear_state_ids);
+  write_linear_state_cache_ops(context, input_params.linear_state_cache_ops);
   write_string_vector(context.descriptor, input_params.embedding.request_ids);
   write_vector(context.descriptor, input_params.embedding.extra_token_ids);
   // Mirror the read_* layout: write root + embedding mtp paths so the

@@ -33,6 +33,7 @@ limitations under the License.
 #include "core/framework/multimodal/mm_visitor.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
+#include "framework/prefix_cache/block_hasher.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
 #include "models/vlm/mposition/mposition.h"
@@ -167,6 +168,23 @@ torch::Tensor build_pinned_int_tensor(const std::vector<int32_t>& values) {
                            .dtype(torch::kInt)
                            .device(torch::kCPU)
                            .pinned_memory(true));
+}
+
+// Whether the current prefill step end should hold a linear-state checkpoint.
+// Checkpoints are saved at prefill step ends that land on a chunk-end boundary
+// (stride = max_tokens_per_chunk_for_prefill). The linear-state cache is a
+// sparse per-chunk overlay: KV may cache every block boundary while
+// linear-state saves only at chunk ends.
+bool should_save_linear_checkpoint(Sequence* sequence,
+                                   uint32_t boundary_tokens,
+                                   uint32_t chunk_stride) {
+  if (sequence == nullptr || !sequence->is_prefill_stage()) {
+    return false;
+  }
+  if (boundary_tokens == 0 || chunk_stride == 0) {
+    return false;
+  }
+  return boundary_tokens % chunk_stride == 0;
 }
 
 }  // namespace
@@ -431,6 +449,9 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.linear_state_ids.insert(state_.linear_state_ids.end(),
                                    state.linear_state_ids.begin(),
                                    state.linear_state_ids.end());
+    state_.linear_state_cache_ops.insert(state_.linear_state_cache_ops.end(),
+                                         state.linear_state_cache_ops.begin(),
+                                         state.linear_state_cache_ops.end());
     state_.request_ids.insert(state_.request_ids.end(),
                               state.request_ids.begin(),
                               state.request_ids.end());
@@ -619,9 +640,72 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     }
   }
 
-  // `linear_state_ids` is sequence-scoped metadata and must stay aligned with
-  // logical batch rows even for non-terminal chunked-prefill slices.
-  state.linear_state_ids.emplace_back(sequence->get_single_block_id());
+  // linear_state_ids must stay aligned with logical batch rows even when the
+  // model has no linear-attention layers, because downstream consumers index by
+  // batch row. Prefer the dedicated linear-state slot. Linear-attention decode
+  // paths that only carry a scheduler-side single block still share that live
+  // slot value across embedding and linear-state transport fields.
+  const bool has_linear_attention =
+      args_ && has_linear_attention_layers(*args_);
+  int32_t linear_state_id = sequence->get_linear_state_slot_id();
+  if (linear_state_id < 0 && has_linear_attention) {
+    linear_state_id = sequence->get_single_block_id();
+  }
+  state.linear_state_ids.emplace_back(linear_state_id);
+  if (has_linear_attention) {
+    LinearStateCacheOp linear_state_cache_op;
+    linear_state_cache_op.linear_state_id = state.linear_state_ids.back();
+    // Linear-state checkpoints live on chunk-end boundaries, so the prefix hash
+    // is chained per chunk (stride = max_tokens_per_chunk_for_prefill), not per
+    // KV block. The engine enforces this stride is a positive multiple of
+    // block_size when linear prefix cache is on (llm_engine.cpp); guard against
+    // an unset (<= 0) stride so a misconfigured run simply skips cache ops.
+    const int32_t chunk_stride = ::xllm::SchedulerConfig::get_instance()
+                                     .max_tokens_per_chunk_for_prefill();
+    // Cold-start restore: only on the sequence's first forward, and only when a
+    // chunk-aligned prefix was reused (its recurrent state lives in a
+    // checkpoint). Continued forwards keep their live slot warm, so they need
+    // no copy-in and must not be reset to cold by the worker. The matching
+    // source slot is resolved later from the LinearStateBlockManager.
+    const bool needs_restore_hash = !sequence->linear_state_initialized() &&
+                                    n_kv_cache_tokens > 0 && chunk_stride > 0 &&
+                                    n_kv_cache_tokens % chunk_stride == 0;
+    // Exit-boundary save: persist the live state only when this prefill step
+    // lands on a chunk-end boundary, so the linear-state cache stays a sparse
+    // per-chunk overlay on top of the per-block KV cache.
+    const bool needs_save_hash =
+        should_save_linear_checkpoint(sequence, seq_len, chunk_stride);
+    const size_t restore_boundary =
+        needs_restore_hash ? static_cast<size_t>(n_kv_cache_tokens) : 0;
+    const size_t save_boundary =
+        needs_save_hash ? static_cast<size_t>(seq_len) : 0;
+    const size_t max_hash_boundary = std::max(restore_boundary, save_boundary);
+    std::vector<PrefixHash> linear_state_hashes;
+    if (max_hash_boundary > 0) {
+      linear_state_hashes =
+          compute_linear_state_prefix_hashes(sequence->tokens(),
+                                             static_cast<size_t>(chunk_stride),
+                                             max_hash_boundary);
+    }
+    if (needs_restore_hash) {
+      const size_t restore_chunk_idx =
+          restore_boundary / static_cast<size_t>(chunk_stride) - 1;
+      if (restore_chunk_idx < linear_state_hashes.size()) {
+        linear_state_cache_op.restore_prefix_hash =
+            linear_state_hashes[restore_chunk_idx];
+      }
+    }
+    if (needs_save_hash) {
+      const size_t save_chunk_idx =
+          save_boundary / static_cast<size_t>(chunk_stride) - 1;
+      if (save_chunk_idx < linear_state_hashes.size()) {
+        linear_state_cache_op.save_prefix_hash =
+            linear_state_hashes[save_chunk_idx];
+      }
+    }
+    state.linear_state_cache_ops.emplace_back(std::move(linear_state_cache_op));
+    sequence->mark_linear_state_initialized();
+  }
 
   // Add extra token id
   int32_t extra_token_id = -1;
@@ -950,6 +1034,8 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
 
   input_params.embedding.embedding_ids = std::move(state_.embedding_ids);
   input_params.embedding.linear_state_ids = std::move(state_.linear_state_ids);
+  input_params.linear_state_cache_ops =
+      std::move(state_.linear_state_cache_ops);
   if (!input_params.embedding.linear_state_ids.empty()) {
     input_params.embedding.linear_state_indices =
         torch::tensor(input_params.embedding.linear_state_ids, torch::kInt);

@@ -46,6 +46,9 @@ class PrefixCache {
   struct Options {
     PROPERTY(int32_t, block_size) = 128;
     PROPERTY(BlockHasherType, hasher_type) = BlockHasherType::TEXT;
+    // Selects the concrete cache in create_prefix_cache: LINEAR builds the
+    // linear-state checkpoint index, everything else the base cache.
+    PROPERTY(BlockType, block_type) = BlockType::KV;
   };
 
   PrefixCache(const PrefixCache&) = delete;
@@ -85,6 +88,16 @@ class PrefixCache {
   // insert the blocks with hash key into the prefix tree
   virtual size_t insert(Slice<Block>& blocks);
   virtual size_t insert(const std::vector<Block>& blocks);
+
+  // Point-lookup a single block by its chained hash key (no token-sequence
+  // walk). On hit, refresh the entry's LRU recency and return its block; on
+  // miss return an invalid Block. Used by callers whose hash domain is not the
+  // KV by-block-boundary chain (e.g. linear-state checkpoints with a different
+  // stride).
+  virtual Block find(const XXH3Key& hash);
+
+  // Whether a block is cached under `hash`, without touching LRU recency.
+  virtual bool contains(const XXH3Key& hash) const;
 
   // evict blocks hold by the prefix cache
   // return the actual number of evicted blocks
@@ -210,6 +223,35 @@ class PrefixCache {
       cached_blocks_;
 
   std::atomic<uint64_t> total_blocks_{0}, matched_blocks_{0};
+};
+
+// Checkpoint index for Qwen3.5 GDN linear-state slots. Same LRU / eviction /
+// insert machinery as the base cache; the only addition is the admission-time
+// prefix probe. Restore still goes through the base find(XXH3Key) point-lookup,
+// so this subclass owns just the "how long a prefix can I recover" question --
+// and, crucially, the chained-hash computation it depends on. That hashing used
+// to live in the block manager; it belongs here because the hash domain (stride
+// = prefill chunk, not KV block) is a property of this index, not of the leaf.
+class LinearStatePrefixCache final : public PrefixCache {
+ public:
+  explicit LinearStatePrefixCache(uint32_t block_size,
+                                  BlockHasherType hasher_type)
+      : PrefixCache(block_size, hasher_type) {}
+
+  // Hash `token_ids` into chained per-chunk keys (chunk = `chunk_stride`
+  // tokens) for the leading `probe_chunks` chunks and probe the index for the
+  // furthest recoverable prefix. Counting is in KV blocks: probing starts at
+  // chunk `start_blocks / blocks_per_chunk`, and each hit extends the result to
+  // `(chunk_index + 1) * blocks_per_chunk`. Gaps are allowed -- a later hit
+  // extends past an intervening miss. Returns `start_blocks` unchanged if
+  // nothing hits, so the caller's already-confirmed prefix is never shortened.
+  // Read-only: does NOT touch LRU recency, because this runs at admission to
+  // bound the shared prefix before any checkpoint is actually restored.
+  size_t recoverable_prefix_blocks(const Slice<int32_t>& token_ids,
+                                   size_t chunk_stride,
+                                   size_t blocks_per_chunk,
+                                   size_t start_blocks,
+                                   size_t probe_chunks) const;
 };
 
 }  // namespace xllm

@@ -38,12 +38,13 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
-#include "core/framework/config/service_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "framework/block/block_utils.h"
 // hierarchy temporarily disabled during the block-manager refactor
 // #include "framework/block/hierarchy_block_manager_pool.h"
 #include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
+#include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/xtensor/page_allocator.h"
@@ -450,8 +451,8 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
       static_cast<int64_t>(options_.num_speculative_tokens());
   estimate_options.max_tokens_per_batch =
       static_cast<int64_t>(options_.max_tokens_per_batch());
-  estimate_options.max_concurrent_requests = static_cast<int64_t>(
-      ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
+  estimate_options.max_linear_state_cache_slots =
+      options_.max_linear_state_cache_slots();
   estimate_options.is_draft_engine = options_.is_draft_engine();
   estimate_options.enable_prefix_cache =
       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
@@ -479,6 +480,14 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
             << ", scale_slot_size: " << kv_cache_cap.scale_slot_size()
             << ", linear_slot_size: " << kv_cache_cap.linear_slot_size()
             << ", linear_blocks: " << kv_cache_cap.num_linear_state_blocks()
+            << ", linear_state_slots: "
+            << (has_linear_attention_layers(args_)
+                    ? calculate_linear_state_live_slots(
+                          kv_cache_cap.num_linear_state_blocks(),
+                          options_.max_seqs_per_batch())
+                    : 0)
+            << ", max_linear_state_cache_slots: "
+            << options_.max_linear_state_cache_slots()
             << ", reserved_linear_bytes: "
             << readable_size(kv_cache_cap.linear_cache_size_in_bytes())
             << ", n_layers: " << kv_cache_cap.n_layers()
@@ -487,6 +496,19 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   CHECK_GT(kv_cache_cap.n_blocks(), 0) << "no memory for kv cache";
   const int32_t block_size = static_cast<int32_t>(kv_cache_cap.block_size());
   const bool enable_gdn_attention = has_linear_attention_layers(args_);
+
+  if (options_.enable_prefix_cache() && enable_gdn_attention) {
+    const auto& scheduler_config = ::xllm::SchedulerConfig::get_instance();
+    CHECK(scheduler_config.enable_chunked_prefill())
+        << "Linear-attention prefix cache requires block-aligned chunked "
+           "prefill to save matching linear states. Please set "
+           "--enable_chunked_prefill=true in your config.";
+    CHECK(scheduler_config.max_tokens_per_chunk_for_prefill() % block_size == 0)
+        << "linear-attention prefix cache saves linear-state checkpoints at "
+           "chunk-end boundaries, so max_tokens_per_chunk_for_prefill ("
+        << scheduler_config.max_tokens_per_chunk_for_prefill()
+        << ") must be a multiple of block_size (" << block_size << ").";
+  }
 
   // init kv cache for each worker
   const KVCacheShape kv_cache_shape(kv_cache_cap, args_, dp_local_tp_size_);
@@ -515,9 +537,14 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .num_layers(args_.n_layers())
       .slot_size(kv_cache_cap.slot_size())
       .model_id(options_.model_id())
-      .max_seqs_per_batch(options_.max_seqs_per_batch())
-      .max_concurrent_requests(
-          ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
+      .max_seqs_per_batch(options_.max_seqs_per_batch());
+  if (enable_gdn_attention) {
+    // The unified linear-state slot pool spans all physical slots [0, N);
+    // id 0 is reserved as padding and ids [1, N) serve live and checkpoint
+    // rows interchangeably under reference counting.
+    options.linear_state_num_slots(
+        static_cast<int32_t>(kv_cache_cap.num_linear_state_blocks()));
+  }
   if (util::is_deepseek_v4_model_type(args_.model_type())) {
     constexpr uint32_t kManagerTypeBlockManagerImpl = 0;
     constexpr uint32_t kManagerTypeSlidingWindowBlockManager = 1;
@@ -939,36 +966,50 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   // wait for the all future to complete
   auto results = folly::collectAll(futures).get();
 
+  DCHECK_EQ(dp_size_, worker_clients_num_ / dp_local_size_);
+  // Every worker must have produced a value before EPLB consumes all results
+  // and before promotions are committed to the shared prefix cache below; an
+  // interrupted or failed worker must not reach those non-reversible steps.
+  for (uint32_t worker_rank = 0; worker_rank < worker_clients_num_;
+       ++worker_rank) {
+    if (!results[worker_rank].hasValue() || !results[worker_rank].value()) {
+      LOG(FATAL) << "Failed to execute model, result has no value";
+    }
+  }
+  // Interruption is reported per dp group via its driver worker's output.
+  for (uint32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
+    const uint32_t worker_begin = dp_rank * dp_local_size_;
+    const auto& result = results[worker_begin].value();
+    if (result.value().outputs.empty() && layer_forward_interrupted_) {
+      throw ForwardInterruptedException();
+    }
+  }
+
   if (::xllm::EPLBConfig::get_instance().enable_eplb() &&
       !options_.enable_schedule_overlap()) {
     process_eplb_data(results);
   }
 
-  assert(dp_size_ == worker_clients_num_ / dp_local_size_);
   size_t dp_rank = 0;
   for (auto worker_rank = 0; worker_rank < worker_clients_num_;
        worker_rank += dp_local_size_) {
     auto result = results[worker_rank].value();
-    if (result.has_value()) {
-      if (result.value().outputs.empty() && layer_forward_interrupted_) {
-        throw ForwardInterruptedException();
-      }
-      // if src_seq_idxes is not empty, skip sample output processing and
-      // process beam search output instead
-      if (result.value().src_seq_idxes.size() == 0) {
-        // set second input param enable_schedule_overlap to false,
-        // if it's not enabled, process_sample_output will append the real
-        // token, if it's enabled, this false here will append the fake token in
-        // process_sample_output
-        batch[dp_rank].process_sample_output(result.value(), false);
-      } else {
-        batch[dp_rank].process_beam_search_output(result.value(), false);
-      }
-      // Keep Batch::sequences_ aligned with SequencesGroup after beam updates.
-      batch[dp_rank].refresh_sequences_from_groups();
+    // The all-workers guard above already asserted every result holds a value.
+    DCHECK(result.has_value())
+        << "Failed to execute model, result has no value";
+    // if src_seq_idxes is not empty, skip sample output processing and
+    // process beam search output instead
+    if (result.value().src_seq_idxes.size() == 0) {
+      // set second input param enable_schedule_overlap to false,
+      // if it's not enabled, process_sample_output will append the real
+      // token, if it's enabled, this false here will append the fake token in
+      // process_sample_output
+      batch[dp_rank].process_sample_output(result.value(), false);
     } else {
-      LOG(FATAL) << "Failed to execute model, result has no value";
+      batch[dp_rank].process_beam_search_output(result.value(), false);
     }
+    // Keep Batch::sequences_ aligned with SequencesGroup after beam updates.
+    batch[dp_rank].refresh_sequences_from_groups();
     ++dp_rank;
   }
 
@@ -1089,8 +1130,32 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
 
   // build model input for every single micro batch
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
+    // Execute linear-state saves deferred from the previous step before the
+    // builder reads slot ids, so the builder sees the newly rotated live slot.
+    std::vector<Sequence*> sequences = batch[dp_rank].get_sequences();
+    block_manager_pool()->apply_pending_linear_saves(dp_rank, sequences);
+
     batched_inputs.emplace_back(std::move(batch[dp_rank].prepare_forward_input(
         args_, threadpool_.get(), cp_size_)));
+    std::vector<LinearStateCacheOp>& linear_state_cache_ops =
+        batched_inputs[dp_rank].input_params.linear_state_cache_ops;
+    if (!linear_state_cache_ops.empty()) {
+      block_manager_pool()->resolve_linear_state_cache_ops(
+          dp_rank, &linear_state_cache_ops, sequences);
+    }
+    // resolve_linear_state_cache_ops only reads linear_state_id (it assigns
+    // restore_src/save_dst slot ids), so linear_state_ids stays in sync with
+    // the ops and the indices tensor built by the batch input builder is still
+    // valid. Assert that invariant instead of rewriting the ids and rebuilding
+    // the tensor.
+    const std::vector<int32_t>& linear_state_ids =
+        batched_inputs[dp_rank].input_params.embedding.linear_state_ids;
+    if (linear_state_ids.size() == linear_state_cache_ops.size()) {
+      for (size_t i = 0; i < linear_state_ids.size(); ++i) {
+        DCHECK_EQ(linear_state_ids[i],
+                  linear_state_cache_ops[i].linear_state_id);
+      }
+    }
     const BatchForwardType& current_batch_forward_type =
         batched_inputs[dp_rank].input_params.meta.batch_forward_type;
     dp_global_token_nums[dp_rank] =

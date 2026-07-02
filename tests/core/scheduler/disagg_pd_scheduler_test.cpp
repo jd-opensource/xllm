@@ -67,7 +67,8 @@ class FakeEngine final : public Engine {
     options.num_blocks(num_blocks)
         .block_size(block_size)
         .enable_prefix_cache(true)
-        .enable_disagg_pd(true);
+        .enable_disagg_pd(true)
+        .max_seqs_per_batch(1024);
     tokenizer_ = std::make_unique<FakeTokenizer>();
     block_manager_ = std::make_unique<BlockManagerPool>(options, /*dp_size=*/1);
   }

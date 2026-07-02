@@ -223,6 +223,41 @@ size_t PrefixCache::insert(Slice<Block>& blocks) {
   return blocks.size() * block_size_;
 }
 
+Block PrefixCache::find(const XXH3Key& hash) {
+  auto iter = cached_blocks_.find(hash);
+  if (iter == cached_blocks_.end()) {
+    return Block();
+  }
+  lru_lst_.move_back(iter->second);
+  return iter->second->block;
+}
+
+bool PrefixCache::contains(const XXH3Key& hash) const {
+  return cached_blocks_.find(hash) != cached_blocks_.end();
+}
+
+size_t LinearStatePrefixCache::recoverable_prefix_blocks(
+    const Slice<int32_t>& token_ids,
+    size_t chunk_stride,
+    size_t blocks_per_chunk,
+    size_t start_blocks,
+    size_t probe_chunks) const {
+  if (chunk_stride == 0 || blocks_per_chunk == 0) {
+    return start_blocks;
+  }
+  const std::vector<PrefixHash> hashes = compute_linear_state_prefix_hashes(
+      token_ids, chunk_stride, probe_chunks * chunk_stride);
+  size_t safe_shared_blocks = start_blocks;
+  for (size_t chunk_idx = start_blocks / blocks_per_chunk;
+       chunk_idx < hashes.size();
+       ++chunk_idx) {
+    if (contains(XXH3Key(hashes[chunk_idx].data()))) {
+      safe_shared_blocks = (chunk_idx + 1) * blocks_per_chunk;
+    }
+  }
+  return safe_shared_blocks;
+}
+
 size_t PrefixCache::evict(size_t n_blocks) {
   if (num_blocks_ == 0 || lru_lst_.is_empty()) {
     return 0;

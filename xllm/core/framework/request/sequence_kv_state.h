@@ -24,6 +24,7 @@ limitations under the License.
 #include "core/common/types.h"
 #include "core/util/slice.h"
 #include "framework/block/block.h"
+#include "util/hash_util.h"
 
 namespace xllm {
 
@@ -59,6 +60,18 @@ class KVCacheState {
   // Drop all blocks held under `type` (releases their Block refs and removes
   // the map entry).
   void erase_blocks(BlockType type);
+
+  // --- Singleton block operations (SINGLE / LINEAR) ---
+  // Difference from add_blocks/erase_blocks:
+  //   add_blocks:     appends to the vector (multi-block, no clear)
+  //   erase_blocks:   destroys all blocks of a type (returns void, Block
+  //   destructed) replace_block:  clears then installs exactly one block
+  //   (singleton invariant)
+
+  // Atomically replace the singleton block for |type|.
+  // Precondition: |type| must be a singleton block type (SINGLE or LINEAR).
+  void replace_block(BlockType type, Block&& block);
+
   // Number of shared (prefix-cache-hit) blocks held under `type`.
   size_t shared_blocks_num(BlockType type) const;
   // Number of shared tokens for this sequence. Sequence-level: the value is the
@@ -91,9 +104,35 @@ class KVCacheState {
 
   // Single per-sequence resource block (BlockType::SINGLE). The only per-type
   // id convenience accessor: returns the Single block id, or -1 when absent.
-  // Used for linear_state_ids / embedding_ids export and disagg-PD's
-  // linear_state_id. Other block types read via blocks(type).
+  // Used for embedding_ids export and disagg-PD's linear_state_id fallback.
+  // Other block types read via blocks(type).
   int32_t get_single_block_id() const;
+
+  // Linear-state live slot id (BlockType::LINEAR), or -1 when absent.
+  int32_t get_linear_block_id() const;
+
+  // Whether the linear-state live slot holds valid recurrent state.
+  bool linear_state_initialized() const { return linear_state_initialized_; }
+  void mark_linear_state_initialized() { linear_state_initialized_ = true; }
+  void reset_linear_state_initialized() { linear_state_initialized_ = false; }
+
+  // Deferred linear-state save: the hash to checkpoint at the next step's
+  // prepare_inputs entry, after the current forward writes the slot's
+  // end-of-step contents.
+  void set_pending_linear_save(const XXH3Key& hash) {
+    pending_linear_save_hash_ = hash;
+  }
+  std::optional<XXH3Key> take_pending_linear_save() {
+    auto h = std::move(pending_linear_save_hash_);
+    pending_linear_save_hash_.reset();
+    return h;
+  }
+  bool has_pending_linear_save() const {
+    return pending_linear_save_hash_.has_value();
+  }
+
+  // Return a Block copy (refcount+1) of the singleton slot without removing it.
+  Block copy_block(BlockType type) const;
 
   void set_transfer_kv_info(TransferKVInfo&& info);
   std::optional<TransferKVInfo>& transfer_kv_info();
@@ -149,6 +188,14 @@ class KVCacheState {
   // Number of local KV blocks already pushed to the decode instance.
   // Used for incremental push in chunked prefill + PD disagg mode.
   uint32_t pushed_local_block_count_ = 0;
+
+  // Whether the LINEAR live slot holds valid recurrent state for its sequence.
+  // Cleared by erase_blocks(LINEAR) and reset().
+  bool linear_state_initialized_ = false;
+
+  // Hash to checkpoint at the next step's entry (set during resolve, consumed
+  // by apply_pending_saves). Cleared by erase_blocks(LINEAR) and reset().
+  std::optional<XXH3Key> pending_linear_save_hash_;
 };
 
 }  // namespace xllm
