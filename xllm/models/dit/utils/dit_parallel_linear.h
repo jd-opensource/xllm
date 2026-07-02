@@ -22,6 +22,7 @@ limitations under the License.
 
 #include "core/framework/state_dict/utils.h"
 #include "core/layers/common/add_matmul.h"
+#include "core/layers/common/quant_linear_helpers.h"
 #include "core/layers/common/rms_norm.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
@@ -145,14 +146,16 @@ class DiTParallelLinearImpl : public torch::nn::Module {
       bool bias,
       const torch::TensorOptions& options,
       const std::optional<SpOptions>& sp_options = std::nullopt,
-      const std::optional<TpOptions>& tp_options = std::nullopt)
+      const std::optional<TpOptions>& tp_options = std::nullopt,
+      const QuantArgs& quant_args = QuantArgs())
       : in_features_(in_features),
         out_features_(out_features),
         has_bias_(bias),
         tensor_options_(options),
         linear_type_(infer_linear_type(sp_options, tp_options)),
         sp_options_(sp_options.value_or(SpOptions())),
-        tp_options_(tp_options) {
+        tp_options_(tp_options),
+        quant_args_(quant_args) {
     if (linear_type_ == LinearType::SequenceParallel ||
         linear_type_ == LinearType::TensorAndSequenceParallel) {
       sp_options_.validate();
@@ -198,6 +201,11 @@ class DiTParallelLinearImpl : public torch::nn::Module {
     if (has_tp_weights()) {
       CHECK(tp_weight_loaded_)
           << "DiTParallelLinear: weight not loaded for " << prefix << "weight";
+      if (layer::is_w8a8_dynamic_quant(resolved_weight_quant_method_)) {
+        CHECK(tp_weight_scale_is_loaded_)
+            << "DiTParallelLinear: weight_scale not loaded for " << prefix
+            << "weight_scale";
+      }
       if (has_bias_) {
         CHECK(tp_bias_loaded_)
             << "DiTParallelLinear: bias not loaded for " << prefix << "bias";
@@ -247,6 +255,9 @@ class DiTParallelLinearImpl : public torch::nn::Module {
 
   void init_tp_weights() {
     const auto& tp = tp_options_.value();
+    // Defer weight dtype decision to load_tp_weights: only layers that
+    // resolve to w8a8_dynamic get int8 weight. Register as the original
+    // dtype here and convert when the quant method is confirmed.
     if (tp.column_parallel) {
       int64_t out_per_partition = out_features_ / tp.tp_size();
       tp_weight_ = register_parameter(
@@ -257,6 +268,22 @@ class DiTParallelLinearImpl : public torch::nn::Module {
         tp_bias_ = register_parameter(
             "bias",
             torch::empty({out_per_partition}, tensor_options_),
+            /*is_buffer=*/false);
+      }
+      // Pre-allocate 1D weight_scale and weight_offset for dynamic W8A8 TP.
+      // The NPU kernel requires 1D tensors; 2D [N,1] checkpoints are reshaped
+      // during loading via reshape_quant_vector_if_compatible.
+      // When column-parallel, output features are sharded.
+      if (!quant_args_.quant_descs().empty()) {
+        tp_weight_scale_ = register_parameter(
+            "weight_scale",
+            torch::empty({out_per_partition},
+                         tensor_options_.dtype(torch::kFloat32)),
+            /*is_buffer=*/false);
+        tp_weight_offset_ = register_parameter(
+            "weight_offset",
+            torch::empty({out_per_partition},
+                         tensor_options_.dtype(torch::kFloat32)),
             /*is_buffer=*/false);
       }
     } else {
@@ -271,6 +298,20 @@ class DiTParallelLinearImpl : public torch::nn::Module {
                                torch::empty({out_features_}, tensor_options_),
                                /*is_buffer=*/false);
       }
+      // Pre-allocate 1D weight_scale and weight_offset for dynamic W8A8 TP.
+      // When row-parallel, all output features are kept locally.
+      if (!quant_args_.quant_descs().empty()) {
+        tp_weight_scale_ = register_parameter(
+            "weight_scale",
+            torch::empty({out_features_},
+                         tensor_options_.dtype(torch::kFloat32)),
+            /*is_buffer=*/false);
+        tp_weight_offset_ = register_parameter(
+            "weight_offset",
+            torch::empty({out_features_},
+                         tensor_options_.dtype(torch::kFloat32)),
+            /*is_buffer=*/false);
+      }
     }
   }
 
@@ -278,6 +319,10 @@ class DiTParallelLinearImpl : public torch::nn::Module {
     const auto& tp = tp_options_.value();
     if (tp.tp_size() <= 1) {
       return linear_->forward(input);
+    }
+    if (layer::is_w8a8_dynamic_quant(resolved_weight_quant_method_)) {
+      return tp.column_parallel ? forward_tp_column_quant(input)
+                                : forward_tp_row_quant(input);
     }
     return tp.column_parallel ? forward_tp_column(input)
                               : forward_tp_row(input);
@@ -393,17 +438,163 @@ class DiTParallelLinearImpl : public torch::nn::Module {
            linear_type_ == LinearType::TensorAndSequenceParallel;
   }
 
+  torch::Tensor forward_tp_column_quant(const torch::Tensor& input) {
+    const auto& tp = tp_options_.value();
+    CHECK(tp_weight_scale_is_loaded_ && tp_weight_scale_.defined())
+        << "tp_weight_scale is required for w8a8_dynamic TP column quant";
+
+    auto bias =
+        has_bias_ ? std::optional<torch::Tensor>(tp_bias_) : std::nullopt;
+    // Offset only valid when out dtype is INT8 (NPU kernel requirement).
+    auto w_offset =
+        (tp_weight_offset_.defined() && output_dtype_ == torch::kInt8)
+            ? std::optional<torch::Tensor>(tp_weight_offset_)
+            : std::nullopt;
+    auto output = layer::npu_w8a8_dynamic_linear_forward(
+        input, tp_weight_, tp_weight_scale_, bias, output_dtype_, w_offset);
+
+    if (tp.gather_output) {
+      output = parallel_state::gather(output, tp.process_group, /*dim=*/-1);
+    }
+    return output;
+  }
+
+  torch::Tensor forward_tp_row_quant(const torch::Tensor& input) {
+    const auto& tp = tp_options_.value();
+    CHECK(tp_weight_scale_is_loaded_ && tp_weight_scale_.defined())
+        << "tp_weight_scale is required for w8a8_dynamic TP row quant";
+
+    auto x = input;
+    if (tp.need_scatter) {
+      x = parallel_state::scatter(input, tp.process_group, /*dim=*/-1);
+    }
+
+    // Bias must be added AFTER all-reduce for row-parallel, otherwise
+    // each rank adds the full bias and reduce-sum multiplies it by tp_size.
+    // Offset only valid when out dtype is INT8 (NPU kernel requirement).
+    auto w_offset =
+        (tp_weight_offset_.defined() && output_dtype_ == torch::kInt8)
+            ? std::optional<torch::Tensor>(tp_weight_offset_)
+            : std::nullopt;
+    auto output = layer::npu_w8a8_dynamic_linear_forward(x,
+                                                         tp_weight_,
+                                                         tp_weight_scale_,
+                                                         /*bias=*/std::nullopt,
+                                                         output_dtype_,
+                                                         w_offset);
+
+    auto orig_dtype = output.dtype();
+    auto output_fp32 = output.to(torch::kFloat32);
+    output =
+        parallel_state::reduce(output_fp32, tp.process_group).to(orig_dtype);
+
+    if (has_bias_) {
+      output = output + tp_bias_;
+    }
+    return output;
+  }
+
   void load_tp_weights(const StateDict& state_dict) {
     const auto& tp = tp_options_.value();
-    if (tp.column_parallel) {
+
+    // Resolve quant method from quant_descs (no-op if quant_args_ is empty).
+    layer::resolve_weight_quant_method_for_linear_load(
+        quant_args_, state_dict, nullptr, resolved_weight_quant_method_);
+
+    // Dynamically decide weight dtype based on the resolved quant method for
+    // THIS specific layer. Only w8a8_dynamic layers get int8 weight; all
+    // others keep the original dtype from init_tp_weights.
+    if (layer::is_w8a8_dynamic_quant(resolved_weight_quant_method_)) {
+      // Convert tp_weight from original dtype to int8.
+      std::vector<weight::LazyParameterSpec> specs;
+      specs.push_back(
+          weight::LazyParameterSpec{&tp_weight_,
+                                    &tp_weight_loaded_,
+                                    "weight",
+                                    {tp_weight_.size(0), tp_weight_.size(1)},
+                                    tensor_options_.dtype(torch::kInt8)});
+      weight::ensure_parameter_storage(this, specs);
+
+      // Ensure weight_scale and weight_offset are registered
+      // with correct size and dtype.
+      {
+        auto weight_scale_size =
+            tp.column_parallel ? tp_weight_.size(0) : tp_weight_.size(0);
+        std::vector<weight::LazyParameterSpec> scale_specs;
+        scale_specs.push_back(
+            weight::LazyParameterSpec{&tp_weight_scale_,
+                                      &tp_weight_scale_is_loaded_,
+                                      "weight_scale",
+                                      {weight_scale_size},
+                                      tensor_options_.dtype(torch::kFloat32)});
+        scale_specs.push_back(
+            weight::LazyParameterSpec{&tp_weight_offset_,
+                                      &tp_weight_offset_is_loaded_,
+                                      "weight_offset",
+                                      {weight_scale_size},
+                                      tensor_options_.dtype(torch::kFloat32)});
+        weight::ensure_parameter_storage(this, scale_specs);
+      }
+
+      int64_t weight_axis = tp.column_parallel ? 0 : 1;
       weight::load_sharded_weight(state_dict,
                                   "weight",
-                                  /*axis=*/0,
+                                  /*axis=*/weight_axis,
                                   tp.tp_rank(),
                                   tp.tp_size(),
                                   tp_weight_,
                                   tp_weight_loaded_);
-      if (has_bias_) {
+      if (tp.column_parallel) {
+        weight::load_sharded_weight(state_dict,
+                                    "weight_scale",
+                                    /*axis=*/0,
+                                    tp.tp_rank(),
+                                    tp.tp_size(),
+                                    tp_weight_scale_,
+                                    tp_weight_scale_is_loaded_);
+        if (state_dict.has("weight_offset")) {
+          weight::load_sharded_weight(state_dict,
+                                      "weight_offset",
+                                      /*axis=*/0,
+                                      tp.tp_rank(),
+                                      tp.tp_size(),
+                                      tp_weight_offset_,
+                                      tp_weight_offset_is_loaded_);
+        }
+      } else {
+        weight::load_weight(state_dict,
+                            "weight_scale",
+                            tp_weight_scale_,
+                            tp_weight_scale_is_loaded_);
+        if (state_dict.has("weight_offset")) {
+          weight::load_weight(state_dict,
+                              "weight_offset",
+                              tp_weight_offset_,
+                              tp_weight_offset_is_loaded_);
+        }
+      }
+    } else {
+      if (tp.column_parallel) {
+        weight::load_sharded_weight(state_dict,
+                                    "weight",
+                                    /*axis=*/0,
+                                    tp.tp_rank(),
+                                    tp.tp_size(),
+                                    tp_weight_,
+                                    tp_weight_loaded_);
+      } else {
+        weight::load_sharded_weight(state_dict,
+                                    "weight",
+                                    /*axis=*/1,
+                                    tp.tp_rank(),
+                                    tp.tp_size(),
+                                    tp_weight_,
+                                    tp_weight_loaded_);
+      }
+    }
+
+    if (has_bias_) {
+      if (tp.column_parallel) {
         weight::load_sharded_weight(state_dict,
                                     "bias",
                                     /*axis=*/0,
@@ -411,16 +602,7 @@ class DiTParallelLinearImpl : public torch::nn::Module {
                                     tp.tp_size(),
                                     tp_bias_,
                                     tp_bias_loaded_);
-      }
-    } else {
-      weight::load_sharded_weight(state_dict,
-                                  "weight",
-                                  /*axis=*/1,
-                                  tp.tp_rank(),
-                                  tp.tp_size(),
-                                  tp_weight_,
-                                  tp_weight_loaded_);
-      if (has_bias_) {
+      } else {
         weight::load_weight(state_dict, "bias", tp_bias_, tp_bias_loaded_);
       }
     }
@@ -436,8 +618,15 @@ class DiTParallelLinearImpl : public torch::nn::Module {
   std::optional<TpOptions> tp_options_;
   torch::Tensor tp_weight_;
   torch::Tensor tp_bias_;
+  torch::Tensor tp_weight_scale_;
+  torch::Tensor tp_weight_offset_;
   bool tp_weight_loaded_ = false;
   bool tp_bias_loaded_ = false;
+  bool tp_weight_scale_is_loaded_ = false;
+  bool tp_weight_offset_is_loaded_ = false;
+  QuantArgs quant_args_;
+  std::optional<std::string> resolved_weight_quant_method_;
+  at::ScalarType output_dtype_;
 };
 
 TORCH_MODULE(DiTParallelLinear);
