@@ -37,6 +37,7 @@ limitations under the License.
 #include "models/dit/schedulers/flowmatch_euler_discrete_scheduler.h"
 #include "models/dit/transformers/transformer_qwen_image.h"
 #include "models/dit/utils/util.h"
+#include "models/dit/utils/vae_spatial_parallel.h"
 #include "models/model_registry.h"
 #include "processors/qwen2_vl_image_processor.h"
 #include "util/tensor_helper.h"
@@ -77,6 +78,20 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
     if (::xllm::DiTConfig::get_instance().dit_enable_vae_tiling()) {
       vae_->enable_tiling();
     }
+
+    // Initialize VAE spatial parallel context
+    int64_t vae_parallel_size = parallel_args_.vae_size();
+    if (vae_parallel_size > 1) {
+      auto* pg = parallel_args_.dit_vae_group_;
+      CHECK(pg != nullptr)
+          << "dit_vae_group_ is null but vae_parallel_size > 1";
+      auto ctx = std::make_unique<dit::VaeSpatialParallel>(
+          vae_parallel_size, pg, options_.device());
+      vae_->set_parallel_ctx(std::move(ctx));
+      LOG(INFO) << "VAE spatial parallel enabled: w_split="
+                << vae_parallel_size;
+    }
+
     transformer_ = QwenImageTransformer2DModel(
         context.get_model_context("transformer"), parallel_args_);
     scheduler_ =
