@@ -81,7 +81,8 @@ atb::Status BaseLayer::execute_node(atb_speed::Model::Node& node,
   //   However, libtorch_npu current stream is set to default stream after
   //   capture ends, causing inconsistency between ATB context and the actual
   //   execution stream
-  if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
+  if (::xllm::ExecutionConfig::get_instance().enable_graph() ||
+      ::xllm::ExecutionConfig::get_instance().enable_encoder_graph()) {
     void* stream = c10_npu::getCurrentNPUStream(device_.index()).stream();
     context_->SetExecuteStream(stream);
   }
@@ -103,7 +104,19 @@ atb::Status BaseLayer::execute_node(atb_speed::Model::Node& node,
   atb::Status st =
       node.operation->Setup(node.variantPack, node.workspaceSize, context_);
   if (st != 0) {
-    LOG(ERROR) << " setup layer node fail, not call execute";
+    LOG(ERROR) << " setup layer node fail, not call execute, name=" << name_;
+    for (size_t i = 0; i < node.variantPack.inTensors.size(); ++i) {
+      auto& t = node.variantPack.inTensors.at(i);
+      LOG(ERROR) << "  inTensor[" << i << "] shape=[" << t.desc.shape.dimNum
+                 << " dims] dtype=" << t.desc.dtype
+                 << " format=" << t.desc.format;
+    }
+    for (size_t i = 0; i < node.variantPack.outTensors.size(); ++i) {
+      auto& t = node.variantPack.outTensors.at(i);
+      LOG(ERROR) << "  outTensor[" << i << "] shape=[" << t.desc.shape.dimNum
+                 << " dims] dtype=" << t.desc.dtype
+                 << " format=" << t.desc.format;
+    }
     return st;
   }
 

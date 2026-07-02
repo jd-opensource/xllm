@@ -248,6 +248,10 @@ struct Options {
   // maximum number of tokens for graph execution
   PROPERTY(int32_t, max_tokens_for_graph_mode) = 2048;
 
+  PROPERTY(bool, enable_encoder_graph) = false;
+
+  PROPERTY(std::string, encoder_graph_budgets) = "1024,2048,4096,8192";
+
   // beam width for beam search
   PROPERTY(int32_t, beam_width) = 128;
 

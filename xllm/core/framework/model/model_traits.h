@@ -25,6 +25,8 @@ namespace xllm {
 struct ModelInputParams;
 struct ModelGraphMetadataState;
 
+class ModelLoader;
+
 namespace layer {
 class LmHead;
 class WordEmbedding;
@@ -166,6 +168,21 @@ struct has_pooler<T,
                       std::declval<const torch::Tensor&>(),
                       std::declval<const torch::Tensor&>()))>>
     : std::true_type {};
+
+// Note: has_init_encoder_graph_manager is defined unconditionally (not under
+// USE_NPU) because CausalVLMImpl::init_encoder_graph_manager references it
+// unconditionally. On non-NPU backends no model provides the method, so the
+// trait evaluates to false and the if-constexpr body is discarded — the encoder
+// graph path is NPU-only at runtime, but the symbol must exist on all backends.
+template <typename T, typename = void>
+struct has_init_encoder_graph_manager : std::false_type {};
+
+template <typename T>
+struct has_init_encoder_graph_manager<
+    T,
+    std::void_t<decltype(std::declval<T>()->init_encoder_graph_manager(
+        std::declval<const ModelArgs&>(),
+        std::declval<const torch::Device&>()))>> : std::true_type {};
 
 #if defined(USE_NPU)
 template <typename T, typename = void>
