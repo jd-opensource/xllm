@@ -1,4 +1,4 @@
-name: xLLM Build x86_64 ILU
+name: xLLM Build arm_64 NPU
 
 on: 
   workflow_dispatch:
@@ -34,7 +34,7 @@ on:
       - 'examples/generate.py'
 
 env:
-  JOBNAME: xllm-x86_64-ilu-cibuild-${{ github.run_id }}
+  JOBNAME: xllm-arm64-npu-cibuild-${{ github.run_id }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -43,11 +43,14 @@ concurrency:
 jobs:
   # need to review code first when sensitive files are modified.
   check-sensitive:
-    runs-on: [xllm-cpu-only-cicd]
+    runs-on: [self-hosted, ARM64]
     outputs:
       requires_approval: ${{ steps.check_sensitive.outputs.requires_approval }}
       do_build: ${{ steps.decide.outputs.do_build }}
     steps:
+      - name: Github Proxy
+        run: git config --global url."https://gh-proxy.com/github.com".insteadOf "https://github.com"
+
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
@@ -63,6 +66,7 @@ jobs:
             ".github/**.yaml"
             "cibuild/**.sh"
             "setup.py"
+            "examples/generate.py"
           )
           changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
           requires_approval="false"
@@ -106,17 +110,35 @@ jobs:
     if: >
       (github.event_name == 'workflow_dispatch' || github.event_name == 'push') ||
       needs.check-sensitive.outputs.do_build == 'true'
-    runs-on: [xllm-cpu-only-cicd]
+    runs-on: [self-hosted, ARM64]
     steps:
+    - name: Github Proxy
+      run: git config --global url."https://gh-proxy.com/github.com".insteadOf "https://github.com"
+
+    - name: Prepare submodule checkout
+      run: |
+        if [ -d .git/modules ]; then
+          find .git/modules -type f -name '*.lock' -print -delete || true
+          sudo rm -rf third_party || true
+        fi
+
     - name: Checkout Code
       timeout-minutes: 5
       uses: actions/checkout@v4
       with:
-        submodules: true
+        clean: true
+        submodules: recursive
 
     - name: Build
       if: ${{ success() }}
       timeout-minutes: 60
       run: |
-        chmod +x ./cibuild/build_ilu.sh
-        bash cibuild/build_ilu.sh 'pip3 install pre-commit -i https://pypi.tuna.tsinghua.edu.cn/simple && python setup.py build --device ilu'
+        chmod +x /export/home/tools/build_npu.sh
+        sudo bash /export/home/tools/build_npu.sh 'git config --global --add safe.directory /workspace; pip install pre-commit -i http://mirrors.aliyun.com/pypi/simple; python setup.py bdist_wheel;'
+        sudo chown -R admin:admin /home/admin/actions-runner/_work/xllm/xllm/
+
+    - name: SmokeTest
+      if: ${{ success() }}
+      timeout-minutes: 60
+      run: |
+        cd /export/home/xTask; sudo python3 main.py --case_group smoke_case_group --host_addr 0.0.0.0

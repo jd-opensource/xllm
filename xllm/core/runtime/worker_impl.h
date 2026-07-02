@@ -219,6 +219,8 @@ class WorkerImpl {
 
   bool can_prepare_npu_graph_decode_input(
       const ModelInputParams& input_params) const;
+  bool can_prepare_without_compute_stream_wait(
+      const ModelInputParams& input_params) const;
   bool can_skip_npu_graph_decode_sync(
       const ModelInputParams& input_params) const;
 
