@@ -16,7 +16,10 @@ limitations under the License.
 #include "scheduler/disagg_pd_chunked_prefill_scheduler.h"
 
 #include <algorithm>
+#include <atomic>
+#include <limits>
 
+#include "common/metrics.h"
 #include "core/framework/config/scheduler_config.h"
 #include "framework/batch/batch_factory.h"
 #include "util/utils.h"
@@ -40,6 +43,98 @@ bool exceeds_block_capacity(Sequence* sequence, KVCacheManager* manager) {
     max_blocks = std::max(max_blocks, free_blocks[i] + used_blocks[i]);
   }
   return needed_blocks > max_blocks;
+}
+
+void update_block_metrics(KVCacheManager* manager) {
+  CHECK(manager != nullptr);
+  GAUGE_SET(kv_cache_utilization_perc, manager->kv_cache_utilization());
+  const std::vector<size_t> prefix_cache_blocks =
+      manager->num_blocks_in_prefix_cache();
+  if (!prefix_cache_blocks.empty()) {
+    GAUGE_SET(num_blocks_in_prefix_cache, util::min(prefix_cache_blocks));
+  }
+  const std::vector<size_t> free_blocks = manager->num_free_blocks();
+  if (!free_blocks.empty()) {
+    GAUGE_SET(num_free_blocks, util::max(free_blocks));
+  }
+  const std::vector<size_t> used_blocks = manager->num_used_blocks();
+  if (!used_blocks.empty()) {
+    GAUGE_SET(num_used_blocks, util::min(used_blocks));
+  }
+}
+
+size_t num_free_blocks_for_sequence(const Sequence* sequence,
+                                    const std::vector<size_t>& free_blocks) {
+  CHECK(sequence != nullptr);
+  if (free_blocks.empty()) {
+    return 0;
+  }
+
+  const int32_t dp_rank = sequence->dp_rank();
+  if (dp_rank >= 0 && static_cast<size_t>(dp_rank) < free_blocks.size()) {
+    return free_blocks[static_cast<size_t>(dp_rank)];
+  }
+  return util::max(free_blocks);
+}
+
+size_t prefix_blocks_for_seq(const Sequence* sequence,
+                             const std::vector<size_t>& prefix_blocks) {
+  CHECK(sequence != nullptr);
+  if (prefix_blocks.empty()) {
+    return 0;
+  }
+
+  const int32_t dp_rank = sequence->dp_rank();
+  if (dp_rank >= 0 && static_cast<size_t>(dp_rank) < prefix_blocks.size()) {
+    return prefix_blocks[static_cast<size_t>(dp_rank)];
+  }
+  return util::max(prefix_blocks);
+}
+
+bool has_evictable_prefix_blocks(Sequence* sequence, KVCacheManager* manager) {
+  CHECK(sequence != nullptr);
+  CHECK(manager != nullptr);
+  const std::vector<size_t> prefix_blocks =
+      manager->num_blocks_in_prefix_cache();
+  const size_t cache_blocks = prefix_blocks_for_seq(sequence, prefix_blocks);
+  const size_t shared_blocks =
+      sequence->kv_state().shared_blocks_num(BlockType::KV);
+  return cache_blocks > shared_blocks;
+}
+
+size_t allocatable_chunk_tokens(Sequence* sequence, KVCacheManager* manager) {
+  CHECK(sequence != nullptr);
+  CHECK(manager != nullptr);
+  const int32_t block_size = manager->block_size();
+  if (block_size <= 0) {
+    return 0;
+  }
+
+  const std::vector<size_t> free_blocks = manager->num_free_blocks();
+  if (free_blocks.empty()) {
+    return std::numeric_limits<size_t>::max();
+  }
+  const size_t current_capacity_tokens =
+      sequence->kv_state().current_max_tokens_capacity();
+  const size_t free_block_count =
+      num_free_blocks_for_sequence(sequence, free_blocks);
+  const size_t block_size_tokens = static_cast<size_t>(block_size);
+  const size_t max_size = std::numeric_limits<size_t>::max();
+  if (free_block_count >
+      (max_size - current_capacity_tokens) / block_size_tokens) {
+    return max_size;
+  }
+
+  const size_t max_capacity_tokens =
+      current_capacity_tokens + free_block_count * block_size_tokens;
+  const size_t kv_tokens = sequence->kv_cache_tokens_num();
+  if (max_capacity_tokens <= kv_tokens) {
+    if (has_evictable_prefix_blocks(sequence, manager)) {
+      return block_size_tokens;
+    }
+    return 0;
+  }
+  return max_capacity_tokens - kv_tokens;
 }
 
 }  // namespace
@@ -108,11 +203,14 @@ bool DisaggPDChunkedPrefillScheduler::alloc_chunk(Sequence* sequence,
   match_prefix_blocks(sequence);
 
   const size_t kv_tokens = sequence->kv_cache_tokens_num();
+  const size_t allocatable_tokens =
+      allocatable_chunk_tokens(sequence, kv_cache_manager_);
+  const size_t chunk_token_budget = std::min(token_budget, allocatable_tokens);
   const PDChunkBudget budget = pick_pd_chunk_budget(
       kv_tokens,
       sequence->num_tokens(),
       static_cast<size_t>(options_.max_tokens_per_chunk_for_prefill()),
-      token_budget);
+      chunk_token_budget);
   *actual_tokens = budget.next_tokens;
   if (budget.next_tokens == 0) {
     return false;
@@ -178,10 +276,22 @@ void DisaggPDChunkedPrefillScheduler::schedule_waiting_prefill(
   }
 }
 
+void DisaggPDChunkedPrefillScheduler::update_metrics() {
+  GAUGE_SET(num_pending_requests,
+            pending_requests_.load(std::memory_order_relaxed));
+  GAUGE_SET(num_running_requests, running_requests_.size());
+  GAUGE_SET(num_waiting_requests,
+            waiting_priority_queue_->size() +
+                waiting_priority_queue_offline_->size());
+  GAUGE_SET(num_running_sequences, running_sequences_.size());
+  update_block_metrics(kv_cache_manager_);
+}
+
 std::vector<Batch> DisaggPDChunkedPrefillScheduler::prepare_batch() {
   if (options_.instance_role() == InstanceRole::DECODE) {
     return ContinuousScheduler::prepare_batch();
   }
+  Timer timer;
 
   std::shared_ptr<Request> request;
   while (request_queue_.read(request)) {
@@ -250,12 +360,17 @@ std::vector<Batch> DisaggPDChunkedPrefillScheduler::prepare_batch() {
   }
 
   if (running_sequences_.empty()) {
+    update_metrics();
     return {};
   }
 
-  return BatchFactory::get_instance(options_.dp_size())
-      ->create_batches(
-          running_requests_, running_sequences_, running_sequences_budgets_);
+  std::vector<Batch> batches = BatchFactory::get_instance(options_.dp_size())
+                                   ->create_batches(running_requests_,
+                                                    running_sequences_,
+                                                    running_sequences_budgets_);
+  COUNTER_ADD(scheduling_latency_seconds, timer.elapsed_seconds());
+  update_metrics();
+  return batches;
 }
 
 }  // namespace xllm
