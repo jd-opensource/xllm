@@ -45,6 +45,7 @@ class KernelConfig final {
          "enable_intralayer_addnorm",
          "enable_fused_mc2",
          "enable_interlayer_addnorm",
+         "enable_qwen3_flash_comm",
          "enable_split_rmsnorm_rope",
          "enable_aclnn_matmul",
          "enable_aclnn_swiglu"}};
@@ -61,6 +62,8 @@ class KernelConfig final {
   PROPERTY(int32_t, enable_fused_mc2) = 0;
 
   PROPERTY(bool, enable_interlayer_addnorm) = false;
+
+  PROPERTY(bool, enable_qwen3_flash_comm) = false;
 
   PROPERTY(bool, enable_split_rmsnorm_rope) = false;
 

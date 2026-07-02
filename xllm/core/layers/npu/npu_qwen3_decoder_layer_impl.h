@@ -65,6 +65,9 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
     prefill_param_.layerId = layer_id;
     decode_graph_param_.layerId = layer_id;
     decode_eager_param_.layerId = layer_id;
+    prefill_flash_comm_param_.layerId = layer_id;
+    decode_graph_flash_comm_param_.layerId = layer_id;
+    decode_eager_flash_comm_param_.layerId = layer_id;
   }
 
  private:
@@ -82,7 +85,16 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
                                ModelInputParams& input_params,
                                bool is_prefill,
                                int node_id,
-                               bool use_graph_decode_input);
+                               bool use_graph_decode_input,
+                               bool enable_flash_comm);
+
+  bool should_enable_flash_comm(torch::Tensor& x, bool is_prefill) const;
+
+  void append_flash_comm_tensors(atb_speed::Model::Node& node,
+                                 int& input_idx,
+                                 int64_t token_num,
+                                 int64_t hidden_size,
+                                 bool is_prefill);
 
   void initialize_parallel_parameters(atb_speed::qwen::QwenLayerParam& param,
                                       const ParallelArgs& parallel_args);
@@ -98,10 +110,16 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
   atb_speed::Model::Node prefill_node_;
   atb_speed::Model::Node decode_graph_node_;
   atb_speed::Model::Node decode_eager_node_;
+  atb_speed::Model::Node prefill_flash_comm_node_;
+  atb_speed::Model::Node decode_graph_flash_comm_node_;
+  atb_speed::Model::Node decode_eager_flash_comm_node_;
   std::string model_name_;
   atb_speed::qwen::QwenLayerParam prefill_param_;
   atb_speed::qwen::QwenLayerParam decode_graph_param_;
   atb_speed::qwen::QwenLayerParam decode_eager_param_;
+  atb_speed::qwen::QwenLayerParam prefill_flash_comm_param_;
+  atb_speed::qwen::QwenLayerParam decode_graph_flash_comm_param_;
+  atb_speed::qwen::QwenLayerParam decode_eager_flash_comm_param_;
   atb::Tensor internal_tensors_;
   atb::Tensor residual_tensors_;
   atb::Tensor placeholder_;
@@ -116,6 +134,12 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
   int32_t num_hidden_layers_;
   std::vector<std::shared_ptr<at::Tensor>> prefill_tensor_storage_;
   std::vector<std::shared_ptr<at::Tensor>> decode_tensor_storage_;
+  std::vector<at::Tensor> prefill_flash_comm_tensors_;
+  std::vector<at::Tensor> decode_flash_comm_tensors_;
+  std::vector<std::vector<int64_t>> prefill_flash_comm_host_;
+  std::vector<std::vector<int64_t>> decode_flash_comm_host_;
+  bool prefill_flash_comm_initialized_ = false;
+  bool decode_flash_comm_initialized_ = false;
   std::vector<std::shared_ptr<std::vector<int>>> prefill_vector_storage_;
   std::vector<std::shared_ptr<std::vector<int>>> decode_vector_storage_;
 };

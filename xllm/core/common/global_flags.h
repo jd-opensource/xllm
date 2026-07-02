@@ -344,6 +344,8 @@ DECLARE_int32(total_conversion_threshold);
 
 DECLARE_bool(enable_return_mm_full_embeddings);
 
+DECLARE_bool(has_restored_npu_word_embedding);
+
 DECLARE_int64(dit_cache_start_steps);
 
 DECLARE_int64(dit_cache_end_steps);
@@ -375,6 +377,8 @@ DECLARE_bool(enable_intralayer_addnorm);
 DECLARE_int32(enable_fused_mc2);
 
 DECLARE_bool(enable_interlayer_addnorm);
+
+DECLARE_bool(enable_qwen3_flash_comm);
 
 DECLARE_bool(enable_split_rmsnorm_rope);
 

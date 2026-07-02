@@ -97,4 +97,27 @@ ModelOutput VlmExecutorImpl::run(const torch::Tensor& tokens,
   return model_->forward(tokens, positions, kv_caches, params);
 }
 
+void VlmExecutorImpl::prepare_graph_input(const torch::Tensor& tokens,
+                                          const torch::Tensor& positions,
+                                          std::vector<KVCache>& kv_caches,
+                                          const ModelInputParams& params) {
+  if (llm_executor_) {
+    const bool in_decoding_phase = params.meta.batch_forward_type.is_decode();
+    const bool in_spec_verify_phase =
+        params.is_spec_verify &&
+        params.meta.batch_forward_type.is_chunked_prefill();
+    if (!in_decoding_phase && !in_spec_verify_phase) {
+      return;
+    }
+    if (!params.graph.input_tokens_override.defined()) {
+      return;
+    }
+    torch::NoGradGuard no_grad;
+    params.embedding.input_embedding =
+        model_->get_input_embeddings(params.graph.input_tokens_override,
+                                     params);
+    llm_executor_->prepare_graph_input(tokens, positions, kv_caches, params);
+  }
+}
+
 }  // namespace xllm
